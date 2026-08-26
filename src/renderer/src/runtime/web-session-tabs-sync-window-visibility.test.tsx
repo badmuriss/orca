@@ -50,6 +50,10 @@ import {
   WEB_SESSION_TABS_VISIBILITY_RESUME_STAGGER_MS
 } from './web-session-tabs-sync'
 import {
+  clearRuntimeEnvironmentConnectionGenerationsForTests,
+  setRuntimeEnvironmentConnectionGenerationForTests
+} from '@/store/slices/runtime-status'
+import {
   WINDOW_VISIBILITY_SUBSCRIPTION_PARK_DELAY_BACKOFF_LIMIT,
   WINDOW_VISIBILITY_SUBSCRIPTION_PARK_DELAY_MS
 } from './window-visibility-subscription-parking'
@@ -198,6 +202,8 @@ function seedRemoteMirrorState(): void {
     { id: ENV_B, createdAt: 200, pairingRevision: REVISION_B }
   ] as PublicKnownRuntimeEnvironment[]
   replaceRuntimeEnvironmentRevisions(runtimeEnvironments)
+  setRuntimeEnvironmentConnectionGenerationForTests(ENV_A, 1)
+  setRuntimeEnvironmentConnectionGenerationForTests(ENV_B, 2)
   useAppStore.setState(
     {
       ...initialState,
@@ -238,6 +244,7 @@ describe('useWebSessionTabsSync window visibility', () => {
     useAppStore.setState(initialState, true)
     replaceRuntimeEnvironmentRevisions([])
     resetWebSessionTabsSnapshotFreshnessForTests()
+    clearRuntimeEnvironmentConnectionGenerationsForTests()
     resetStaleDocumentVisibilityForTesting()
     setDocumentVisibility('visible')
     vi.useRealTimers()
