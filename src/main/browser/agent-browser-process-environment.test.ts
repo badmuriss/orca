@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createAgentBrowserProcessEnvironment } from './agent-browser-process-environment'
+import {
+  AGENT_BROWSER_IDLE_TIMEOUT_MS,
+  createAgentBrowserProcessEnvironment
+} from './agent-browser-process-environment'
 
 vi.mock('node:fs', () => ({ mkdirSync: vi.fn(), chmodSync: vi.fn() }))
 
@@ -18,23 +21,60 @@ describe('agent-browser process environment', () => {
     ).toBeLessThan(104)
   })
 
-  it('preserves explicit overrides and leaves Windows unchanged', () => {
-    const configured = { AGENT_BROWSER_SOCKET_DIR: '/custom/socket-dir' }
-    expect(
-      createAgentBrowserProcessEnvironment({
-        inheritedEnv: configured,
-        platform: 'linux',
+  it('preserves explicit overrides and leaves Windows socket routing unchanged', () => {
+    const configured = createAgentBrowserProcessEnvironment({
+      inheritedEnv: { AGENT_BROWSER_SOCKET_DIR: '/custom/socket-dir' },
+      platform: 'linux',
+      userDataPath: '/profile'
+    })
+    expect(configured.AGENT_BROWSER_SOCKET_DIR).toBe('/custom/socket-dir')
+
+    const windows = createAgentBrowserProcessEnvironment({
+      inheritedEnv: { PATH: 'C:\\Windows' },
+      platform: 'win32',
+      userDataPath: 'C:\\Users\\Orca'
+    })
+    expect(windows.AGENT_BROWSER_SOCKET_DIR).toBeUndefined()
+    expect(windows.PATH).toBe('C:\\Windows')
+  })
+
+  // Why: the only daemon bound that survives a SIGKILL'd Orca, so it must be set on every platform.
+  it.each<NodeJS.Platform>(['darwin', 'linux', 'win32'])(
+    'bounds daemon idle lifetime on %s',
+    (platform) => {
+      const env = createAgentBrowserProcessEnvironment({
+        inheritedEnv: { PATH: '/bin' },
+        platform,
         userDataPath: '/profile'
       })
-    ).toBe(configured)
+      expect(env.AGENT_BROWSER_IDLE_TIMEOUT_MS).toBe(String(AGENT_BROWSER_IDLE_TIMEOUT_MS))
+    }
+  )
 
-    const windows = { PATH: 'C:\\Windows' }
-    expect(
-      createAgentBrowserProcessEnvironment({
-        inheritedEnv: windows,
-        platform: 'win32',
-        userDataPath: 'C:\\Users\\Orca'
-      })
-    ).toBe(windows)
+  it('never cuts a command short: idle timeout exceeds the bridge exec timeout', () => {
+    expect(AGENT_BROWSER_IDLE_TIMEOUT_MS).toBeGreaterThan(90_000)
+  })
+
+  it('honors an explicit idle timeout from the environment', () => {
+    const env = createAgentBrowserProcessEnvironment({
+      inheritedEnv: { AGENT_BROWSER_IDLE_TIMEOUT_MS: '5000' },
+      platform: 'darwin',
+      userDataPath: '/profile'
+    })
+    expect(env.AGENT_BROWSER_IDLE_TIMEOUT_MS).toBe('5000')
+  })
+
+  it('still bounds the daemon when the socket directory cannot be created', async () => {
+    const fs = await import('node:fs')
+    vi.mocked(fs.mkdirSync).mockImplementationOnce(() => {
+      throw new Error('EACCES')
+    })
+    const env = createAgentBrowserProcessEnvironment({
+      inheritedEnv: { PATH: '/bin' },
+      platform: 'linux',
+      userDataPath: '/profile'
+    })
+    expect(env.AGENT_BROWSER_SOCKET_DIR).toBeUndefined()
+    expect(env.AGENT_BROWSER_IDLE_TIMEOUT_MS).toBe(String(AGENT_BROWSER_IDLE_TIMEOUT_MS))
   })
 })

@@ -3023,6 +3023,8 @@ void app.whenReady().then(async () => {
     onTabsChanged: (worktreeId) => runtimeService.notifyMobileSessionTabsChanged(worktreeId)
   })
   runtimeService.setAgentBrowserBridge(agentBrowserBridge)
+  // Why: daemons a crashed or SIGKILL'd previous run left behind answer to nobody; nothing else reclaims them.
+  void agentBrowserBridge.sweepOrphanedSessions().catch(() => {})
   const browserClientAutomationDispatcher = new RpcDispatcher({ runtime: runtimeService })
   configureBrowserClientPageAutomationRuntime({
     browserManager,
@@ -3480,7 +3482,10 @@ app.on('will-quit', (e) => {
   wslHookRelayManager.disposeAll()
   const statsFlush = stats?.flushAsync() ?? Promise.resolve()
   // Why: agent-browser daemon processes would otherwise linger after quit, holding ports and stale session state on disk.
-  runtime?.getAgentBrowserBridge()?.destroyAllSessions()
+  // Why the barrier below: each session's close is its own agent-browser child taking hundreds of ms,
+  // so an unawaited call reaches app.quit() first and every open tab's daemon survives the quit (#16367).
+  const agentBrowserShutdown =
+    runtime?.getAgentBrowserBridge()?.destroyAllSessions() ?? Promise.resolve()
   // Why: headless offscreen browser windows are main-process owned; tear them down explicitly on quit.
   runtime?.getOffscreenBrowserBackend()?.destroyAll?.()
   // Why (review P2-4): local SSH browser routes own loopback listeners and, on the
@@ -3534,6 +3539,7 @@ app.on('will-quit', (e) => {
   // temp+rename swap means a write cut short by the deadline leaves the old file intact.
   settleTeardownWithinDeadline([
     { name: 'daemon', promise: daemonTeardown },
+    { name: 'agent-browser', promise: agentBrowserShutdown },
     { name: 'runtime-rpc', promise: rpcStopAndClear },
     { name: 'watchers', promise: watcherShutdown },
     { name: 'emulator', promise: emulatorShutdown },

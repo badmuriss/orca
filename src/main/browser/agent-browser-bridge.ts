@@ -51,6 +51,10 @@ import { assertClipboardTextWriteWithinLimitWithYield } from '../../shared/clipb
 import { normalizeBrowserNavigationUrl } from '../../shared/browser-url'
 import { iterateBrowserTextInsertionChunks } from './browser-text-insertion'
 import { createAgentBrowserProcessEnvironment } from './agent-browser-process-environment'
+import {
+  ORCA_TAB_SESSION_PREFIX,
+  sweepOrphanedAgentBrowserSessions
+} from './agent-browser-orphan-sweep'
 
 // Why: must exceed agent-browser's internal timeouts (goto 30s, wait 60s) so the bridge never kills a command before its own timeout fires.
 const EXEC_TIMEOUT_MS = 90_000
@@ -341,7 +345,7 @@ function isTabClosedTransportError(message: string): boolean {
 }
 
 function pageUnavailableMessageForSession(sessionName: string): string {
-  const prefix = 'orca-tab-'
+  const prefix = ORCA_TAB_SESSION_PREFIX
   const browserPageId = sessionName.startsWith(prefix) ? sessionName.slice(prefix.length) : null
   return browserPageId
     ? `Browser page ${browserPageId} is no longer available`
@@ -678,7 +682,7 @@ export class AgentBrowserBridge {
       this.activeWebContentsId = nextWorktreeActiveWebContentsId
     }
     if (browserPageId) {
-      const sessionName = `orca-tab-${browserPageId}`
+      const sessionName = `${ORCA_TAB_SESSION_PREFIX}${browserPageId}`
       await this.destroySession(sessionName)
       this.pendingInterceptRestore.delete(sessionName)
     }
@@ -691,7 +695,7 @@ export class AgentBrowserBridge {
     previousWebContentsId?: number
   ): Promise<void> {
     // Why: an Electron process swap keeps browserPageId but gives a new webContentsId — destroy the session so the next command recreates it.
-    const sessionName = `orca-tab-${browserPageId}`
+    const sessionName = `${ORCA_TAB_SESSION_PREFIX}${browserPageId}`
     const session = this.sessions.get(sessionName)
     const oldWebContentsId = previousWebContentsId ?? session?.webContentsId
     const owningWorktreeId = this.browserManager.getWorktreeIdForTab(browserPageId)
@@ -885,7 +889,9 @@ export class AgentBrowserBridge {
             navigationTimeout = null
           }
           if (!this.getWebContents(target.webContentsId)) {
-            throw this.createPageUnavailableError(`orca-tab-${target.browserPageId}`)
+            throw this.createPageUnavailableError(
+              `${ORCA_TAB_SESSION_PREFIX}${target.browserPageId}`
+            )
           }
           // Why: ERR_ABORTED also covers a page vetoing unload; that navigation did not succeed.
           if (
@@ -1606,7 +1612,9 @@ export class AgentBrowserBridge {
             throw error
           }
           if (!this.getWebContents(target.webContentsId)) {
-            throw this.createPageUnavailableError(`orca-tab-${target.browserPageId}`)
+            throw this.createPageUnavailableError(
+              `${ORCA_TAB_SESSION_PREFIX}${target.browserPageId}`
+            )
           }
           throw new BrowserError(
             'browser_error',
@@ -2044,6 +2052,17 @@ export class AgentBrowserBridge {
 
   // ── Session lifecycle ──
 
+  // Why: a previous run that crashed or was SIGKILL'd left one daemon per open tab with
+  // nobody holding its name — closeStaleAgentBrowserSession only resets a name being reused.
+  async sweepOrphanedSessions(): Promise<string[]> {
+    return sweepOrphanedAgentBrowserSessions({
+      binaryPath: this.agentBrowserBin,
+      env: this.agentBrowserEnv,
+      isSessionLive: (sessionName) =>
+        this.sessions.has(sessionName) || this.pendingSessionCreation.has(sessionName)
+    })
+  }
+
   async destroyAllSessions(): Promise<void> {
     const promises: Promise<void>[] = []
     for (const sessionName of this.sessions.keys()) {
@@ -2074,7 +2093,7 @@ export class AgentBrowserBridge {
     options: EnqueueTargetedCommandOptions = {}
   ): Promise<T> {
     const target = this.resolveCommandTarget(worktreeId, browserPageId, options.requireScopedTarget)
-    const sessionName = `orca-tab-${target.browserPageId}`
+    const sessionName = `${ORCA_TAB_SESSION_PREFIX}${target.browserPageId}`
 
     if (options.ensureSession !== false) {
       await this.ensureSession(sessionName, target.browserPageId, target.webContentsId)
@@ -2772,7 +2791,7 @@ export class AgentBrowserBridge {
   private requireTargetWebContents(target: ResolvedBrowserCommandTarget): WebContents {
     const wc = this.getWebContents(target.webContentsId)
     if (!wc || wc.isDestroyed()) {
-      throw this.createPageUnavailableError(`orca-tab-${target.browserPageId}`)
+      throw this.createPageUnavailableError(`${ORCA_TAB_SESSION_PREFIX}${target.browserPageId}`)
     }
     return wc
   }
