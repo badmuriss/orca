@@ -94,8 +94,11 @@ export class OpenCodeSqliteWorkerClient {
       return value.candidates
     } catch (err) {
       if (err instanceof OpenCodeSqliteWorkerUnavailableError) {
+        // Kinded: a whole source failed, not a transcript — see
+        // openCodeDatabaseScanIssue for why 'scope' and not a new kind.
         args.issues.push({
           agent: 'opencode',
+          kind: 'scope',
           path: args.dbPaths[0] ?? 'opencode.db',
           message:
             'OpenCode history was skipped because its background scanner could not start; the app remains responsive.'
@@ -106,6 +109,7 @@ export class OpenCodeSqliteWorkerClient {
       // scan, surfaced as one scan issue rather than an unbounded stall.
       args.issues.push({
         agent: 'opencode',
+        kind: 'scope',
         path: args.dbPaths[0] ?? 'opencode.db',
         message: `OpenCode history scan did not complete: ${errorMessage(err)}`
       })
