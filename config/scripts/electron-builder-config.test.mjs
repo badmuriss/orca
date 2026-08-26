@@ -44,12 +44,30 @@ describe('electron-builder config', () => {
         '!tests{,/**/*}',
         '!examples{,/**/*}',
         '!pr-evidence{,/**/*}',
+        '!{.claude,.grok,.agents,.codex}{,/**/*}',
         '!Casks{,/**/*}',
         '!{AGENTS.md,CLAUDE.md,DEVELOPING.md,bundle-size-progress.md,ORCHESTRATION_IMPLEMENTATION_CHECKLIST.md,ORCHESTRATION_STRUCTURED_OUTPUT_DESIGN.md}',
         '!out/**/*.test.js',
         '!resources/plugins/launch/**'
       ])
     )
+  })
+
+  it('keeps local agent tooling out of app.asar', () => {
+    const matcher = new FileMatcher('/app', '/dest', (value) => value, electronBuilderConfig.files)
+    matcher.prependPattern('**/*')
+    const isPacked = matcher.createFilter()
+    const packs = (repoPath) => isPacked(join('/app', repoPath), { isDirectory: () => false })
+
+    for (const toolingPath of [
+      '.grok/skills/review-and-submit/review-and-submit/SKILL.md',
+      '.claude/skills/review-and-submit/review-and-submit/SKILL.md',
+      '.agents/skills/electron/SKILL.md',
+      '.codex/sessions/session.json'
+    ]) {
+      expect(packs(toolingPath)).toBe(false)
+    }
+    expect(packs('out/main/index.js')).toBe(true)
   })
 
   // Why: `files` is an all-negation list, so electron-builder's default `**/*` packs

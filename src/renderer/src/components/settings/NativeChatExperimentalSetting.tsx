@@ -1,12 +1,9 @@
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import { translate } from '@/i18n/i18n'
 import { Label } from '../ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { SearchableSetting } from './SearchableSetting'
 import { SettingsSwitch } from './SettingsFormControls'
 import { getExperimentalSearchEntry } from './experimental-search'
-
-type NativeChatDefaultView = 'terminal-chat' | 'native-chat'
 
 type NativeChatExperimentalSettingProps = {
   settings: GlobalSettings
@@ -19,8 +16,6 @@ export function NativeChatExperimentalSetting({
 }: NativeChatExperimentalSettingProps): React.JSX.Element {
   const nativeChatEnabled = settings.experimentalNativeChat === true
   const structuredNativeChatEnabled = settings.experimentalStructuredNativeChat === true
-  const openByDefault = settings.openAgentTabsInChatByDefault === true
-  const defaultView: NativeChatDefaultView = openByDefault ? 'native-chat' : 'terminal-chat'
 
   return (
     <SearchableSetting
@@ -93,55 +88,6 @@ export function NativeChatExperimentalSetting({
                 })
               }
             />
-          </div>
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 shrink space-y-0.5">
-              <Label>
-                {translate(
-                  'auto.components.settings.ExperimentalPane.nativeChat.defaultTitle',
-                  'Default view'
-                )}
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                {translate(
-                  'auto.components.settings.ExperimentalPane.nativeChat.defaultCopy',
-                  'Choose how new supported agent terminal tabs open.'
-                )}
-              </p>
-            </div>
-            <Select
-              value={defaultView}
-              onValueChange={(value: NativeChatDefaultView) => {
-                updateSettings({
-                  openAgentTabsInChatByDefault: value === 'native-chat'
-                })
-              }}
-            >
-              <SelectTrigger
-                aria-label={translate(
-                  'auto.components.settings.ExperimentalPane.nativeChat.defaultViewLabel',
-                  'Default Chat UI view'
-                )}
-                className="w-36"
-                size="sm"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent position="popper" side="bottom" sideOffset={4} avoidCollisions={false}>
-                <SelectItem value="terminal-chat">
-                  {translate(
-                    'auto.components.settings.ExperimentalPane.nativeChat.defaultViewTerminal',
-                    'Terminal chat'
-                  )}
-                </SelectItem>
-                <SelectItem value="native-chat">
-                  {translate(
-                    'auto.components.settings.ExperimentalPane.nativeChat.defaultViewNative',
-                    'Chat UI'
-                  )}
-                </SelectItem>
-              </SelectContent>
-            </Select>
           </div>
         </div>
       ) : null}
