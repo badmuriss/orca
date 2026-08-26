@@ -487,6 +487,8 @@ describe('startCodexSessionBackfillInBackground', () => {
   it('scans only the current date once a baseline exists', async () => {
     writeManagedSession(join('2026', '05', '26', 'rollout-a.jsonl'), '{"id":"a"}\n')
     await startCodexSessionBackfillInBackground()
+    // A second date directory: a full walk would report two scanned files.
+    writeManagedSession(join('2026', '06', '02', 'rollout-other.jsonl'), '{"id":"other"}\n')
     markLaunchPending()
 
     const scanned = await startCodexSessionBackfillInBackground({

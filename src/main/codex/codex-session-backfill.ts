@@ -134,8 +134,11 @@ function resolveCodexSessionBackfillScanPlan(
   options: CodexSessionBackfillOptions
 ): { scanDates?: readonly CodexSessionBackfillDate[] } | null {
   const requestedScanDates = options.scanDates?.length ? options.scanDates : undefined
-  if (options.fullScanRequired || !baseline) {
-    return { scanDates: options.fullScanRequired ? undefined : requestedScanDates }
+  if (options.fullScanRequired) {
+    return {}
+  }
+  if (!baseline) {
+    return { scanDates: requestedScanDates }
   }
   const scanDates = mergeCodexSessionBackfillDates(baseline.pendingScanDates, requestedScanDates)
   if (scanDates.length > 0) {

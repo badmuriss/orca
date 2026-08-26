@@ -9,7 +9,10 @@ import {
   readCodexSessionBackfillBaseline,
   writeCodexSessionBackfillMarker
 } from './codex-session-backfill-marker'
-import { getCodexSessionBackfillDate } from './codex-session-backfill-scan-dates'
+import {
+  getCodexSessionBackfillDate,
+  getCodexSessionBackfillDatesBetween
+} from './codex-session-backfill-scan-dates'
 import type {
   CodexSessionBackfillDate,
   CodexSessionBackfillSummary
@@ -52,6 +55,14 @@ function writeFullBaseline(
       coveredScanDates: options.coveredScanDates ?? [],
       retainPendingScanDates: options.retain
     }
+  )
+}
+
+/** More dates than MAX_PENDING_SCAN_DATES, so the marker gives up on bounding. */
+function overflowingDates(): CodexSessionBackfillDate[] {
+  return getCodexSessionBackfillDatesBetween(
+    new Date(Date.UTC(2026, 6, 1)),
+    new Date(Date.UTC(2026, 7, 9))
   )
 }
 
@@ -175,17 +186,59 @@ describe('codex session backfill marker', () => {
     expect(readMarker()).toMatchObject({ launchActive: true, pendingScanDates: [LAUNCH_DATE] })
   })
 
+  it('settles every pending date once a full walk covers them', () => {
+    writeFullBaseline(WINDOWS_ROOT)
+    markCodexSessionBackfillMarkerPending(markerPath, WINDOWS_ROOT, [LAUNCH_DATE])
+
+    writeFullBaseline(WINDOWS_ROOT)
+
+    // The walk looked at every date, so nothing is left to revisit.
+    expect(readMarker()).toMatchObject({ pendingScanDates: [] })
+  })
+
   it('demands a full walk once the pending window outgrows its bound', () => {
     writeFullBaseline(WINDOWS_ROOT)
-    const manyDates = Array.from(
-      { length: 40 },
-      (_unused, index): CodexSessionBackfillDate => ['2026', '08', String(index).padStart(2, '0')]
-    )
 
-    markCodexSessionBackfillMarkerPending(markerPath, WINDOWS_ROOT, manyDates)
+    expect(
+      markCodexSessionBackfillMarkerPending(markerPath, WINDOWS_ROOT, overflowingDates())
+    ).toBe(true)
 
     expect(readMarker()).toMatchObject({ needsFullScan: true, pendingScanDates: [] })
     expect(hasCompletedCodexSessionBackfillMarker(markerPath, WINDOWS_ROOT)).toBe(false)
+  })
+
+  it('keeps owing that full walk when the next launch records its own date', () => {
+    writeFullBaseline(WINDOWS_ROOT)
+    markCodexSessionBackfillMarkerPending(markerPath, WINDOWS_ROOT, overflowingDates())
+
+    expect(markCodexSessionBackfillMarkerPending(markerPath, WINDOWS_ROOT, [TODAY])).toBe(true)
+
+    expect(readMarker()).toMatchObject({ needsFullScan: true, pendingScanDates: [] })
+    expect(hasCompletedCodexSessionBackfillMarker(markerPath, WINDOWS_ROOT)).toBe(false)
+  })
+
+  it('keeps the full-walk demand when a later launch overtook the walk', () => {
+    writeFullBaseline(WINDOWS_ROOT)
+    const staleGeneration = captureCodexSessionBackfillMarkerGeneration()
+    markCodexSessionBackfillMarkerPending(markerPath, WINDOWS_ROOT, overflowingDates())
+
+    writeCodexSessionBackfillMarker(markerPath, WINDOWS_ROOT, createSummary(), staleGeneration, {
+      coverage: 'full',
+      coveredScanDates: []
+    })
+
+    // The walk may have passed those dates before their rollouts existed.
+    expect(readMarker()).toMatchObject({ needsFullScan: true })
+  })
+
+  it('clears the full-walk demand only once a full walk certifies the tree', () => {
+    writeFullBaseline(WINDOWS_ROOT)
+    markCodexSessionBackfillMarkerPending(markerPath, WINDOWS_ROOT, overflowingDates())
+
+    writeFullBaseline(WINDOWS_ROOT)
+
+    expect(readMarker()).toMatchObject({ needsFullScan: false, pendingScanDates: [] })
+    expect(hasCompletedCodexSessionBackfillMarker(markerPath, WINDOWS_ROOT)).toBe(true)
   })
 
   it('persists a launch date even before any baseline exists', () => {

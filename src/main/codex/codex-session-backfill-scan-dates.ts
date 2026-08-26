@@ -13,12 +13,17 @@ export function getCodexSessionBackfillDate(date = new Date()): CodexSessionBack
 }
 
 export function isCodexSessionBackfillDate(value: unknown): value is CodexSessionBackfillDate {
+  if (!Array.isArray(value) || value.length !== 3) {
+    return false
+  }
+  const key = value.join('-')
+  // Why: shape alone accepts directories the calendar never produces (2026/99/99
+  // from a corrupted marker, 2025/02/29); a UTC round-trip rejects them for free.
+  // Deliberately no age or future bound — this also gates which managed rollouts
+  // get published, and a clock-skewed future directory holds real sessions.
   return (
-    Array.isArray(value) &&
-    value.length === 3 &&
-    /^\d{4}$/.test(String(value[0])) &&
-    /^\d{2}$/.test(String(value[1])) &&
-    /^\d{2}$/.test(String(value[2]))
+    /^\d{4}-\d{2}-\d{2}$/.test(key) &&
+    toCodexSessionBackfillDateKey(getCodexSessionBackfillDate(toUtcDate(value))) === key
   )
 }
 
@@ -98,7 +103,7 @@ export function expandCodexSessionBackfillDatesThroughToday(
   return range.length > maxDates ? null : range
 }
 
-function toUtcDate([year, month, day]: CodexSessionBackfillDate): Date {
+function toUtcDate([year, month, day]: readonly string[]): Date {
   return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)))
 }
 

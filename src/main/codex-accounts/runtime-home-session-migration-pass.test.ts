@@ -33,7 +33,7 @@ function getMarkerPath(): string {
   return join(testState.userDataDir, 'codex-session-backfill', 'backfill-complete.json')
 }
 
-function writeBaselineMarker(systemCodexHomePath: string): void {
+function writeBaselineMarker(systemCodexHomePath: string, needsFullScan = false): void {
   mkdirSync(join(testState.userDataDir, 'codex-session-backfill'), { recursive: true })
   writeFileSync(
     getMarkerPath(),
@@ -43,7 +43,7 @@ function writeBaselineMarker(systemCodexHomePath: string): void {
       coverage: 'full',
       baselineScannedFiles: 5,
       pendingScanDates: [],
-      needsFullScan: false,
+      needsFullScan,
       summary: { scannedFiles: 5 }
     })}\n`,
     'utf-8'
@@ -111,6 +111,22 @@ describe('host system default session migration pass preparation', () => {
     })
 
     expect(service.prepareHostSystemDefaultSessionMigrationPass()).toBe(false)
+  })
+
+  it('carries a full-scan demand persisted by an earlier launch into this pass', async () => {
+    writeBaselineMarker(CUSTOM_HISTORY_HOME, true)
+    const store = createStore(
+      createSettings({ codexSessionSourceHome: { host: CUSTOM_HISTORY_HOME, wsl: {} } })
+    )
+    const { CodexRuntimeHomeService } = await import('./runtime-home-service')
+    const service = new CodexRuntimeHomeService(store as never)
+
+    expect(service.prepareHostSystemDefaultSessionMigrationPass()).toBe(true)
+
+    // Recording this launch must not erase the demand the marker still carries.
+    expect(JSON.parse(readFileSync(getMarkerPath(), 'utf-8'))).toMatchObject({
+      needsFullScan: true
+    })
   })
 
   it('still demands a full scan when the history home really moves', async () => {

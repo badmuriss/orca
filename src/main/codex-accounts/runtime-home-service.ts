@@ -323,11 +323,14 @@ export class CodexRuntimeHomeService {
     }
     // Why: the launch creates rollouts for these dates; record them durably so a
     // force-quit recovers a bounded window instead of re-walking all history.
-    markCodexSessionBackfillMarkerPending(
+    const markerOwesFullScan = markCodexSessionBackfillMarkerPending(
       paths.markerPath,
       paths.systemSessionsRoot,
       scanDates.length > 0 ? scanDates : [getCodexSessionBackfillDate()]
     )
+    // Why: the marker is the only place an overflowed pending window survives a
+    // restart, so its demand has to reach this pass rather than die in the file.
+    this.pendingHostSystemDefaultSessionMigrationNeedsFullScan ||= markerOwesFullScan
     return this.pendingHostSystemDefaultSessionMigrationNeedsFullScan
   }
 

@@ -31,6 +31,15 @@ describe('codex session backfill scan dates', () => {
     expect(isCodexSessionBackfillDate('2026-08-05')).toBe(false)
   })
 
+  it('rejects dates the calendar never produced', () => {
+    expect(isCodexSessionBackfillDate(['2026', '99', '99'])).toBe(false)
+    expect(isCodexSessionBackfillDate(['2026', '02', '30'])).toBe(false)
+    expect(isCodexSessionBackfillDate(['2025', '02', '29'])).toBe(false)
+    expect(isCodexSessionBackfillDate(['2026', '00', '10'])).toBe(false)
+    expect(isCodexSessionBackfillDate(['2024', '02', '29'])).toBe(true)
+    expect(isCodexSessionBackfillDate(['2026', '12', '31'])).toBe(true)
+  })
+
   it('merges and subtracts date sets by identity, not by reference', () => {
     const merged = mergeCodexSessionBackfillDates(
       [
