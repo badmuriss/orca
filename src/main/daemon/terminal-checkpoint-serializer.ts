@@ -27,6 +27,7 @@ function checkpointFile(
     modes: snapshot.modes,
     scrollbackLines: snapshot.scrollbackLines,
     ...(snapshot.lastTitle ? { lastTitle: snapshot.lastTitle } : {}),
+    ...(snapshot.terminalOwner ? { terminalOwner: snapshot.terminalOwner } : {}),
     generation: metadata.generation,
     ...(metadata.pendingOutputSeq !== undefined
       ? { pendingOutputSeq: metadata.pendingOutputSeq }
@@ -241,6 +242,7 @@ async function replaySnapshot(snapshot: TerminalSnapshot): Promise<HeadlessEmula
       emulator.setLastTitle(snapshot.lastTitle)
     }
     emulator.setRestoredOscLinks(snapshot.oscLinks)
+    emulator.setTerminalOwner(snapshot.terminalOwner)
     return emulator
   } catch (error) {
     emulator.dispose()

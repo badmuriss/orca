@@ -21,8 +21,13 @@ import {
   type TerminalViewAttributeResponder
 } from './terminal-view-attribute-responder'
 import { installDeviceAttributesResponder } from './startup-device-attributes-responder'
-import type { TerminalSnapshot, TerminalModes } from './types'
+import type { TerminalSnapshot } from './types'
 import type { TerminalOscLinkRange } from '../../shared/terminal-osc-link-ranges'
+import type { TerminalOwner } from '../../shared/terminal-owner'
+import {
+  installTerminalShellOwnership,
+  type TerminalShellOwnership
+} from './terminal-shell-ownership'
 
 export type HeadlessEmulatorOptions = {
   cols: number
@@ -55,10 +60,12 @@ const DEFAULT_SCROLLBACK = 5000
 const CONPTY_DA1_RESPONSE = '\x1b[?61;4c'
 
 export class HeadlessEmulator {
+  readonly getTerminalOwner: () => TerminalOwner | undefined
   private terminal: Terminal
   private serializer: SerializeAddon
   private oscText: TerminalOscCwdTitleScanner
   private mouseModes = new TerminalMouseModeMirror()
+  private shellOwnership: TerminalShellOwnership
   private readonly pathFlavor?: 'posix' | 'win32'
   private readonly remotePosixFileUriAuthority: boolean
   private restoredOscLinks: TerminalOscLinkRange[] = []
@@ -91,6 +98,8 @@ export class HeadlessEmulator {
 
     this.serializer = new SerializeAddon()
     this.terminal.loadAddon(this.serializer)
+    this.shellOwnership = installTerminalShellOwnership(this.terminal)
+    this.getTerminalOwner = this.shellOwnership.getOwner
 
     // Why Unicode 11: must match the renderer's char-width measurement, else emoji rows mismeasure and the mirror accumulates cell-shifted tears.
     this.terminal.loadAddon(new Unicode11Addon())
@@ -239,7 +248,8 @@ export class HeadlessEmulator {
   }
 
   getSnapshot(opts: { scrollbackRows?: number } = {}): TerminalSnapshot {
-    const modes = this.getModes()
+    const terminalOwner = this.shellOwnership.normalizeSnapshotModes((data) => this.writeSync(data))
+    const modes = readTerminalModes(this.terminal, this.mouseModes)
     // Why absolute: relative cursor restore is off by a column after a wrap-pending final row; saved-cursor rides along for DECRC.
     const serializedAnsi = serializeWithAbsoluteCursor(
       this.serializer,
@@ -267,7 +277,8 @@ export class HeadlessEmulator {
       // Why written LAST by the restorer: the next live chunk must complete this dangling sequence, not render it literally (Bug E / #7329).
       ...(this.partialEscapeTail.length > 0
         ? { pendingEscapeTailAnsi: this.partialEscapeTail }
-        : {})
+        : {}),
+      ...(terminalOwner ? { terminalOwner } : {})
     }
     return snapshot
   }
@@ -328,6 +339,18 @@ export class HeadlessEmulator {
     this.restoredOscLinks = links?.slice() ?? []
   }
 
+  setTerminalOwner(owner: TerminalOwner | undefined): void {
+    this.shellOwnership.seedOwner(owner)
+  }
+
+  setShellOwnershipConfirmation(confirm: (() => Promise<boolean>) | undefined): void {
+    this.shellOwnership.setConfirmation(confirm)
+  }
+
+  settleShellOwnershipConfirmation(): Promise<void> {
+    return this.shellOwnership.settleConfirmation()
+  }
+
   clearScrollback(): void {
     this.restoredOscLinks = []
     this.terminal.clear()
@@ -335,10 +358,7 @@ export class HeadlessEmulator {
 
   dispose(): void {
     this.disposed = true
+    this.shellOwnership.dispose()
     this.terminal.dispose()
-  }
-
-  private getModes(): TerminalModes {
-    return readTerminalModes(this.terminal, this.mouseModes)
   }
 }

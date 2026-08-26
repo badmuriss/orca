@@ -1879,6 +1879,7 @@ type RuntimeTerminalBufferSnapshot = {
   /** Effective kitty flags proven at this snapshot's own `seq`. Absent means
    *  the winning source could not prove them. */
   kittyKeyboardFlags?: number
+  terminalOwner?: 'shell'
 }
 
 type HeadlessSeedMetadata = {
@@ -1890,6 +1891,7 @@ type HeadlessSeedMetadata = {
    *  emulator so hidden `CSI ? u` answers the real flags instead of ?0u
    *  (terminal-query-authority.md §kitty). */
   kittyKeyboardFlags?: number
+  terminalOwner?: 'shell'
 }
 
 type RuntimePtyController = {
@@ -1985,6 +1987,7 @@ type RuntimePtyController = {
     ptyId: string
   ): Promise<{ foregroundProcess: string | null; hasChildProcesses: boolean; unavailable?: true }>
   confirmForegroundProcess?(ptyId: string): Promise<string | null>
+  confirmShellForeground?(ptyId: string): Promise<boolean>
   hasChildProcesses?(ptyId: string): Promise<boolean>
   clearBuffer?(ptyId: string): Promise<void>
   resize?(ptyId: string, cols: number, rows: number): boolean
@@ -12954,6 +12957,7 @@ export class OrcaRuntimeService {
     oscLinks?: TerminalOscLinkRange[]
     alternateScreen?: boolean
     scrollbackAnsi?: string
+    terminalOwner?: 'shell'
   } | null> {
     return this.serializeHeadlessTerminalBuffer(ptyId, { ...opts, includeEmpty: true })
   }
@@ -12974,6 +12978,7 @@ export class OrcaRuntimeService {
     alternateScreen?: boolean
     scrollbackAnsi?: string
     pendingEscapeTailAnsi?: string
+    terminalOwner?: 'shell'
   } | null> {
     const headlessSnapshot = await this.serializeHeadlessTerminalBuffer(ptyId, {
       ...opts,
@@ -13074,12 +13079,14 @@ export class OrcaRuntimeService {
         if (metadata.oscLinks !== undefined) {
           state.emulator.setRestoredOscLinks(metadata.oscLinks)
         }
+        state.emulator.setTerminalOwner(metadata.terminalOwner)
         this.providerSnapshotPreferredPtys.delete(ptyId)
       })
       .catch(() => {
         // Seeding is best-effort; live data will continue to populate the
         // emulator even if the snapshot replay fails.
       })
+      .finally(() => this.installShellOwnershipConfirmation(ptyId, state))
   }
 
   // Why: reattach/cold-restore/replay payloads arrive as spawn RPC results and
@@ -13192,6 +13199,7 @@ export class OrcaRuntimeService {
         // writeChain that this catch-arm leaves intact.
       } finally {
         this.headlessHydrationState.set(ptyId, 'done')
+        this.installShellOwnershipConfirmation(ptyId, state)
       }
     })
   }
@@ -13319,6 +13327,22 @@ export class OrcaRuntimeService {
     return state
   }
 
+  private installShellOwnershipConfirmation(ptyId: string, state: RuntimeHeadlessTerminal): void {
+    state.emulator.setShellOwnershipConfirmation(async () => {
+      const controller = this.ptyController
+      const lifecycleGeneration = this.getPtyLifecycleGeneration(ptyId)
+      if (!controller?.confirmShellForeground || this.headlessTerminals.get(ptyId) !== state) {
+        return false
+      }
+      const confirmed = await controller.confirmShellForeground(ptyId)
+      return (
+        confirmed &&
+        this.headlessTerminals.get(ptyId) === state &&
+        this.getPtyLifecycleGeneration(ptyId) === lifecycleGeneration
+      )
+    })
+  }
+
   /** Phase-5 ConPTY DA1 retrofit (terminal-query-authority.md): invoked via
    *  markNativeWindowsConptyPty when the spawn mark lands after daemon stream
    *  data already created this PTY's emulator. Idempotent emulator-side. */
@@ -13336,6 +13360,7 @@ export class OrcaRuntimeService {
     const size = this.getTerminalSize(ptyId) ?? { cols: 80, rows: 24 }
     const state = this.createPtyHeadlessTerminalState(ptyId, size)
     this.headlessTerminals.set(ptyId, state)
+    this.installShellOwnershipConfirmation(ptyId, state)
     return state
   }
 
@@ -13367,6 +13392,7 @@ export class OrcaRuntimeService {
         if (snapshot.oscLinks !== undefined) {
           state.emulator.setRestoredOscLinks(snapshot.oscLinks)
         }
+        state.emulator.setTerminalOwner(snapshot.terminalOwner)
         state.outputSequence = snapshot.seq
       })
       .catch(() => {
@@ -13374,6 +13400,7 @@ export class OrcaRuntimeService {
       })
       .finally(() => {
         this.providerSnapshotPreferredPtys.delete(ptyId)
+        this.installShellOwnershipConfirmation(ptyId, state)
       })
   }
 
@@ -13425,6 +13452,7 @@ export class OrcaRuntimeService {
     alternateScreen?: boolean
     pendingEscapeTailAnsi?: string
     kittyKeyboardFlags?: number
+    terminalOwner?: 'shell'
   } | null> {
     if (this.providerSnapshotPreferredPtys.has(ptyId)) {
       // Why: pre-attach stream bytes only form a suffix of restored state. A
@@ -13905,6 +13933,7 @@ export class OrcaRuntimeService {
     alternateScreen?: boolean
     scrollbackAnsi?: string
     kittyKeyboardFlags?: number
+    terminalOwner?: 'shell'
     // Why: dangling mid-escape tail the restorer must write LAST, after any
     // reset, so the next live chunk completes it instead of rendering it
     // literally (Bug E / #7329).
@@ -13915,9 +13944,9 @@ export class OrcaRuntimeService {
       return null
     }
     await state.writeChain
+    await state.emulator.settleShellOwnershipConfirmation()
     // Why: normal history is separated from an active alternate frame, so the
     // caller's scrollback policy can be honored without painting it into alt.
-    const isAlternateScreen = state.emulator.isAlternateScreen
     const scrollbackRows = opts.scrollbackRows ?? 0
     const snapshot = state.emulator.getSnapshot({ scrollbackRows })
     const data = snapshot.rehydrateSequences + snapshot.snapshotAnsi
@@ -13942,10 +13971,11 @@ export class OrcaRuntimeService {
           ...(snapshot.pendingEscapeTailAnsi
             ? { pendingEscapeTailAnsi: snapshot.pendingEscapeTailAnsi }
             : {}),
+          ...(snapshot.terminalOwner ? { terminalOwner: snapshot.terminalOwner } : {}),
           // Why: lets the renderer skip the destructive scrollback clear when
           // restoring an alt-screen snapshot — clearing wipes xterm's own
           // history that the TUI relies on for scroll-up after a tab return.
-          alternateScreen: isAlternateScreen,
+          alternateScreen: snapshot.modes?.alternateScreen ?? state.emulator.isAlternateScreen,
           // Why NOT folded into data: the renderer writes its post-replay
           // reset after data, and any ESC after a dangling partial aborts it.
           // The restorer writes this last (Bug E fix).

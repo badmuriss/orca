@@ -233,6 +233,11 @@ export class TerminalHost {
     return session.confirmForegroundProcess()
   }
 
+  async confirmShellForeground(sessionId: string): Promise<boolean> {
+    const session = this.sessions.get(sessionId)
+    return session?.isAlive === true && (await session.confirmShellForeground())
+  }
+
   clearScrollback(sessionId: string): void {
     this.getAliveSession(sessionId).clearScrollback()
   }
@@ -244,6 +249,20 @@ export class TerminalHost {
       return null
     }
     return session.getSnapshot(opts)
+  }
+
+  async getSettledSnapshot(
+    sessionId: string,
+    opts: { scrollbackRows?: number } = {}
+  ): Promise<TerminalSnapshot | null> {
+    const session = this.sessions.get(sessionId)
+    if (!session || !session.isAlive) {
+      return null
+    }
+    await session.settleShellOwnershipConfirmation()
+    return this.sessions.get(sessionId) === session && session.isAlive
+      ? session.getSnapshot(opts)
+      : null
   }
 
   // Why: scan-authority handoff seed (null-not-throw like getSnapshot) — emulator's dangling incomplete escape at the stream position.

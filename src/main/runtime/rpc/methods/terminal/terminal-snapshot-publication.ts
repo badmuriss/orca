@@ -79,6 +79,14 @@ export function sendSnapshotFrames(
         ...(typeof options.seq === 'number' && options.kittyKeyboardFlags !== undefined
           ? { kittyKeyboardFlags: options.kittyKeyboardFlags }
           : {}),
+        ...(typeof options.seq === 'number' && options.terminalOwner
+          ? { terminalOwner: options.terminalOwner }
+          : {}),
+        ...(typeof options.seq === 'number' &&
+        options.terminalOwner &&
+        options.alternateScreen !== undefined
+          ? { alternateScreen: options.alternateScreen }
+          : {}),
         truncated: options.truncated === true,
         truncatedByByteBudget: options.truncatedByByteBudget === true
       })

@@ -4,6 +4,10 @@ import { StartupDeviceAttributesQueryFilter } from './startup-device-attributes-
 import { normalizePtySize } from './daemon-pty-size'
 import type { PtyIngressEmission } from '../../shared/pty-startup-ingress'
 import type { PendingOutputRecord, TakePendingOutputResult, TerminalSnapshot } from './types'
+import type { TerminalOwner } from '../../shared/terminal-owner'
+import { SessionShellForegroundConfirmation } from './session-shell-foreground-confirmation'
+import type { SubprocessHandle } from './session-subprocess-handle'
+import { nudgePowerShellPromptRepaint } from './session-powershell-prompt-repaint'
 
 // Why: bounds in-memory pending output when no client drains it; past the cap we drop records and flag
 // overflow so the next take falls back to one full snapshot. UTF-16 units; worst-case wire is ~6x, under NDJSON_MAX_LINE_BYTES (16MB).
@@ -21,6 +25,8 @@ export type SessionOutputPlaneOptions = {
   scrollback?: number | undefined
   wslDistro?: string | undefined
   historySeedChunks?: readonly string[] | undefined
+  confirmShellForeground?: (() => Promise<boolean>) | undefined
+  isSessionAlive?: (() => boolean) | undefined
 }
 
 /** Everything downstream of the PTY: the scrollback emulator, the pending-output record buffer that
@@ -28,6 +34,7 @@ export type SessionOutputPlaneOptions = {
 export class SessionOutputPlane {
   readonly historySeeded: boolean | undefined
   private readonly emulator: HeadlessEmulator
+  private readonly shellForeground: SessionShellForegroundConfirmation
   private attachedClients: AttachedClient[] = []
   private pendingOutputRecords: PendingOutputRecord[] = []
   private pendingOutputBytes = 0
@@ -56,6 +63,12 @@ export class SessionOutputPlane {
       opts.historySeedChunks === undefined
         ? undefined
         : opts.historySeedChunks.every((chunk) => this.emulator.writeSync(chunk))
+    this.shellForeground = new SessionShellForegroundConfirmation(
+      opts.confirmShellForeground,
+      opts.isSessionAlive ?? (() => !this.disposed),
+      () => this.emulator.getTerminalOwner() === 'shell'
+    )
+    this.emulator.setShellOwnershipConfirmation(() => this.shellForeground.confirm())
   }
 
   get responderParser(): HeadlessEmulator['responderParser'] {
@@ -103,9 +116,15 @@ export class SessionOutputPlane {
     this.record({ kind: 'resize', cols, rows })
   }
 
-  clearScrollback(): void {
+  clearScrollback(subprocess: SubprocessHandle, isGatingWrites: boolean): void {
     this.emulator.clearScrollback()
     this.record({ kind: 'clear' })
+    subprocess.clear?.()
+    nudgePowerShellPromptRepaint({
+      subprocess,
+      isGatingWrites,
+      isCursorOnEmptyPromptLine: () => this.isCursorOnEmptyPromptLine()
+    })
   }
 
   isCursorOnEmptyPromptLine(): boolean {
@@ -114,6 +133,18 @@ export class SessionOutputPlane {
 
   getCwd(): string | null {
     return this.emulator.getCwd()
+  }
+
+  getTerminalOwner(): TerminalOwner | undefined {
+    return this.emulator.getTerminalOwner()
+  }
+
+  confirmShellForeground(): Promise<boolean> {
+    return this.shellForeground.confirm()
+  }
+
+  settleShellOwnershipConfirmation(): Promise<void> {
+    return this.emulator.settleShellOwnershipConfirmation()
   }
 
   getSnapshot(opts: { scrollbackRows?: number } = {}): TerminalSnapshot | null {

@@ -202,6 +202,7 @@ describe('mobile subscribe integration', () => {
     type HeadlessStateForTest = {
       emulator: {
         isAlternateScreen: boolean
+        settleShellOwnershipConfirmation: () => Promise<void>
         getSnapshot: (opts: { scrollbackRows?: number }) => {
           rehydrateSequences: string
           snapshotAnsi: string
@@ -218,6 +219,7 @@ describe('mobile subscribe integration', () => {
     runtimePrivate.headlessTerminals.set('pty-empty', {
       emulator: {
         isAlternateScreen: false,
+        settleShellOwnershipConfirmation: async () => {},
         getSnapshot: () => ({ rehydrateSequences: '', snapshotAnsi: '', cols: 90, rows: 30 })
       },
       outputSequence: 17,

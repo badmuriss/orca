@@ -6,7 +6,6 @@ import {
   SessionTerminationController,
   IMMEDIATE_KILL_PHYSICAL_EXIT_TIMEOUT_MS
 } from './session-termination-controller'
-import { nudgePowerShellPromptRepaint } from './session-powershell-prompt-repaint'
 import type { SubprocessHandle } from './session-subprocess-handle'
 import type { JobTerminationOutcome } from '../windows/windows-pty-job'
 import type { SessionOptions } from './session-options'
@@ -51,7 +50,9 @@ export class Session {
       rows: opts.rows,
       scrollback: opts.scrollback,
       wslDistro: opts.wslDistro,
-      historySeedChunks: opts.historySeedChunks
+      historySeedChunks: opts.historySeedChunks,
+      confirmShellForeground: this.subprocess.confirmShellForeground,
+      isSessionAlive: () => !this._disposed && this._state !== 'exited'
     })
     this.producerPause = new SessionProducerPause(this.subprocess)
     this.termination = new SessionTerminationController({
@@ -253,17 +254,19 @@ export class Session {
     return this.subprocess.confirmForegroundProcess?.() ?? this.subprocess.getForegroundProcess()
   }
 
+  async confirmShellForeground(): Promise<boolean> {
+    return this.output.confirmShellForeground()
+  }
+
+  settleShellOwnershipConfirmation(): Promise<void> {
+    return this.output.settleShellOwnershipConfirmation()
+  }
+
   clearScrollback(): void {
     if (this._disposed) {
       return
     }
-    this.output.clearScrollback()
-    this.subprocess.clear?.()
-    nudgePowerShellPromptRepaint({
-      subprocess: this.subprocess,
-      isGatingWrites: this.shellReady.isGatingWrites,
-      isCursorOnEmptyPromptLine: () => this.output.isCursorOnEmptyPromptLine()
-    })
+    this.output.clearScrollback(this.subprocess, this.shellReady.isGatingWrites)
   }
 
   prepareForFinalSnapshot(): string {

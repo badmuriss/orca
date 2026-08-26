@@ -39,6 +39,15 @@ export async function createOrAttachTerminalSession(
   }
 
   if (existing && existing.isAlive && !existing.isTerminating) {
+    await existing.settleShellOwnershipConfirmation()
+    if (
+      deps.sessions.get(opts.sessionId) !== existing ||
+      !existing.isAlive ||
+      existing.isTerminating ||
+      deps.sessionTeardown.get(opts.sessionId)
+    ) {
+      throw new SessionNotFoundError(opts.sessionId)
+    }
     const snapshot = existing.getSnapshot()
     existing.detachAllClients()
     const token = existing.attachClient(opts.streamClient)

@@ -12,6 +12,7 @@ type RestoreBase = {
   pendingEscapeTailAnsi?: string
   oscLinks?: TerminalSnapshot['oscLinks']
   lastTitle?: string
+  terminalOwner?: TerminalSnapshot['terminalOwner']
   cwd: string | null
   cols: number
   rows: number
@@ -35,6 +36,7 @@ export function terminalSnapshotFromColdRestore(
     scrollbackLines:
       info.scrollbackLines ?? Math.max(0, countAnsiRows(info.scrollbackAnsi) - info.rows),
     ...(info.lastTitle ? { lastTitle: info.lastTitle } : {}),
+    ...(info.terminalOwner ? { terminalOwner: info.terminalOwner } : {}),
     ...(opts?.outputSequence !== undefined ? { outputSequence: opts.outputSequence } : {})
   }
 }
@@ -90,6 +92,7 @@ export async function buildDurableCheckpointSnapshot(opts: {
         emulator.setLastTitle(base.lastTitle)
       }
       emulator.setCwd(base.cwd)
+      emulator.setTerminalOwner(base.terminalOwner)
     }
     if (!(await replayPendingRecords(replay, pendingRecords))) {
       return opts.liveSnapshot
@@ -122,6 +125,7 @@ function restoreBaseFrom(restoreInfo: ColdRestoreInfo): RestoreBase {
       : {}),
     oscLinks: restoreInfo.oscLinks,
     lastTitle: restoreInfo.lastTitle,
+    terminalOwner: restoreInfo.terminalOwner,
     cwd: restoreInfo.cwd,
     cols: restoreInfo.cols,
     rows: restoreInfo.rows
