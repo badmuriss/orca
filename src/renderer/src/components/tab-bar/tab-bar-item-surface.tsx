@@ -4,11 +4,9 @@ import type { TerminalTab } from '../../../../shared/terminal-tab-types'
 import type { TuiAgent } from '../../../../shared/tui-agent'
 import { isAgentSessionHandleProvider } from '../../../../shared/agent-session-provider-handle'
 import type { OpenFile } from '../../store/slices/editor'
-import { canToggleNativeChat } from '../native-chat/native-chat-availability'
 import SortableTab from './SortableTab'
 import EditorFileTab from './EditorFileTab'
 import BrowserTab from './BrowserTab'
-import { resolveNativeChatTabAgentEvidence } from './native-chat-tab-agent-evidence'
 import type { DropIndicator } from './drop-indicator'
 import type { TabDragItemData } from '../tab-group/useTabDragSplit'
 import { getTabDragLabel, type TabBarItem } from './tab-bar-item-model'
@@ -55,17 +53,7 @@ export function renderTabBarItems({
     onCloseAllFiles,
     onMakePreviewFilePermanent
   } = props
-  const {
-    resolvedGroupId,
-    generatedTabTitlesEnabled,
-    unifiedTabByVisibleId,
-    nativeChatEnabled,
-    tabAgentTypesByTabId,
-    nativeChatTabWideFallbackUnsafeTabsById,
-    nativeChatTranscriptIsLocalReadable,
-    toggleTabViewMode,
-    statusByRelativePath
-  } = runtime
+  const { resolvedGroupId, generatedTabTitlesEnabled, statusByRelativePath } = runtime
 
   return items.map((item, index) => {
     const dragData: TabDragItemData = {
@@ -84,23 +72,6 @@ export function renderTabBarItems({
         ...item.data,
         title: resolveTerminalTabTitle(item.data, generatedTabTitlesEnabled, item.data.title)
       }
-      const unifiedTabForItem = unifiedTabByVisibleId.get(item.id)
-      // Carry the agent *identity* (not just "an agent exists") so the native-chat gate can reject agents like Grok.
-      const resolvedAgent = resolveNativeChatTabAgentEvidence(terminalTab, unifiedTabForItem)
-      // Key the live-agent lookup by the backing terminal tab id: agent-status pane keys use it, not the unified tab id.
-      const detectedAgent = tabAgentTypesByTabId[terminalTab.id] ?? null
-      const tabWideFallbackSafe = nativeChatTabWideFallbackUnsafeTabsById[terminalTab.id] !== true
-      const canToggleViewMode =
-        unifiedTabForItem !== undefined &&
-        canToggleNativeChat({
-          experimentalNativeChatEnabled: nativeChatEnabled,
-          contentType: 'terminal',
-          launchAgent: tabWideFallbackSafe ? terminalTab.launchAgent : null,
-          detectedAgent,
-          resolvedAgent: tabWideFallbackSafe ? resolvedAgent : null,
-          nativeChatTranscriptIsLocalReadable,
-          isChatViewMode: unifiedTabForItem.viewMode === 'chat'
-        })
       return (
         <SortableTab
           key={item.id}
@@ -108,11 +79,6 @@ export function renderTabBarItems({
           unifiedTabId={item.unifiedTabId}
           groupId={resolvedGroupId}
           tabCount={items.length}
-          canToggleViewMode={canToggleViewMode}
-          isChatView={nativeChatEnabled && unifiedTabForItem?.viewMode === 'chat'}
-          onToggleViewMode={
-            unifiedTabForItem ? () => toggleTabViewMode(unifiedTabForItem.id) : undefined
-          }
           hasTabsToRight={index < items.length - 1}
           hasTabsToLeft={index > 0}
           isActive={

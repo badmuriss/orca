@@ -117,7 +117,6 @@ import { canToggleNativeChat } from '../native-chat/native-chat-availability'
 import {
   nativeChatLaunchAgentForLeaf,
   resolveNativeChatLeafRoute,
-  resolveNativeChatToggleLeafId,
   type NativeChatLeafRoute
 } from '../native-chat/native-chat-leaf-routing'
 import { resolvePaneKeyForManager } from '@/lib/pane-manager/pane-key-resolution'
@@ -561,7 +560,6 @@ function TerminalPane(
       store.paneForegroundAgentByPaneKey
     )
   )
-  const toggleTabViewMode = useAppStore((store) => store.toggleTabViewMode)
   const setTabViewMode = useAppStore((store) => store.setTabViewMode)
   const savedLayout = useAppStore((store) => store.terminalLayoutsByTabId[tabId] ?? EMPTY_LAYOUT)
   const terminalTab = useAppStore((store) =>
@@ -699,50 +697,14 @@ function TerminalPane(
     // Why: transport callbacks must observe only committed chat ownership; render work can be replayed/discarded under concurrent React.
     onAgentExitedRef.current = handleConfirmedAgentExit
   }, [handleConfirmedAgentExit])
-  const canToggleChatForLeaf = useCallback(
-    (leafId: string | null): boolean => {
-      // Scope the "always allow toggling back" rule to the leaf showing chat; must not make an unsupported sibling look eligible.
-      const isChatViewForLeaf = effectiveChatViewMode && leafId !== null && chatLeafId === leafId
-      return (nativeChatEnabled && isChatViewForLeaf) || isChatEligibleForLeaf(leafId)
-    },
-    [chatLeafId, effectiveChatViewMode, isChatEligibleForLeaf, nativeChatEnabled]
-  )
-  const toggleNativeChatForLeaf = useCallback(
-    (leafId: string) => {
-      if (!unifiedTabId) {
-        return
-      }
-      if (effectiveChatViewMode && chatLeafId === leafId) {
-        setChatLeafId(null)
-        toggleTabViewMode(unifiedTabId)
-        return
-      }
-      setChatLeafId(leafId)
-      if (!effectiveChatViewMode) {
-        toggleTabViewMode(unifiedTabId)
-      }
-    },
-    [unifiedTabId, effectiveChatViewMode, chatLeafId, toggleTabViewMode]
-  )
-  const handleToggleNativeChat = useCallback(() => {
-    // Layout evidence bridges the manager's one-render hydration gap.
-    const activeLeafId = resolveNativeChatToggleLeafId({
-      managerActiveLeafId: managerRef.current?.getActivePane()?.leafId ?? null,
-      layout: restoredLayout,
-      mountedLeafIds: managerRef.current?.getPanes().map((pane) => pane.leafId) ?? []
-    })
-    if (!activeLeafId) {
-      return
-    }
-    toggleNativeChatForLeaf(activeLeafId)
-  }, [restoredLayout, toggleNativeChatForLeaf])
   // Stable identity: this reaches the session-option surface's useMemo deps, so an
   // inline arrow would rebuild the surface on every TerminalPane render.
   const switchNativeChatToTerminal = useCallback(() => {
-    if (chatLeafId) {
-      toggleNativeChatForLeaf(chatLeafId)
+    if (chatLeafId && unifiedTabId) {
+      setChatLeafId(null)
+      setTabViewMode(unifiedTabId, 'terminal')
     }
-  }, [chatLeafId, toggleNativeChatForLeaf])
+  }, [chatLeafId, setChatLeafId, setTabViewMode, unifiedTabId])
   const readNativeChatTerminalScreen = useCallback((): string | null => {
     if (!chatLeafId) {
       return null
@@ -2695,14 +2657,6 @@ function TerminalPane(
     return manager.getActivePane()?.leafId ?? null
   }, [contextMenu.menuPaneId])
   const contextMenuLeafId = getContextMenuLeafId()
-  const contextMenuIsChatView = effectiveChatViewMode && contextMenuLeafId === chatLeafId
-  const handleContextMenuToggleNativeChat = useCallback(() => {
-    const leafId = getContextMenuLeafId()
-    if (!leafId) {
-      return
-    }
-    toggleNativeChatForLeaf(leafId)
-  }, [getContextMenuLeafId, toggleNativeChatForLeaf])
 
   const getMobileOwnedTerminalPtyIds = useCallback((): string[] => {
     const ptyIds = new Set(getMobileFitOverridePtyIds())
@@ -3029,9 +2983,6 @@ function TerminalPane(
   })
   const structuredChatAgent = structuredSessionAgent ?? chatPaneResolvedAgent ?? chatPaneLaunchAgent
   const structuredChatTarget = useMemo(() => ({ kind: 'local' as const }), [])
-  const activePaneIsChatLeaf = Boolean(
-    isChatViewMode && activePane?.leafId && activePane.leafId === chatLeafId
-  )
   // A split can host different agents, so continuation resolves the specific leaf before using tab-wide hints.
   const resolveAgentForLeaf = (leafId: string | null): string | null => {
     const detectedAgent = leafId ? (tabAgentTypeByLeaf[leafId] ?? null) : null
@@ -3053,9 +3004,6 @@ function TerminalPane(
   const contextMenuCanContinueInNewSession = canContinueAgentSessionInNewSession(
     resolveAgentForLeaf(contextMenuLeafId)
   )
-  // Each toggle gates on its own leaf (header=active, menu=opened-over), so mixed splits show it only where chat can render.
-  const activePaneCanToggleChat = canToggleChatForLeaf(activePane?.leafId ?? null)
-  const contextMenuCanToggleChat = canToggleChatForLeaf(contextMenuLeafId)
   return (
     <>
       <div
@@ -3269,9 +3217,6 @@ function TerminalPane(
         canContinueAgentSessionInNewSession={contextMenuCanContinueInNewSession}
         onContinueAgentSessionInNewSession={contextMenu.onContinueAgentSessionInNewSession}
         onForkAgentSession={() => void contextMenu.onForkAgentSession()}
-        canToggleNativeChat={contextMenuCanToggleChat}
-        isNativeChatView={contextMenuIsChatView}
-        onToggleNativeChat={handleContextMenuToggleNativeChat}
         onCopyAgentSessionContext={() => void contextMenu.onCopyAgentSessionContext()}
         quickCommandHosts={visibleQuickCommandHosts}
         quickCommandHostLoadFailed={quickCommandHostLoadFailed}
@@ -3343,9 +3288,6 @@ function TerminalPane(
         hiddenStartupStyle={hiddenStartupStyle}
         managerRef={managerRef}
         paneTransportsRef={paneTransportsRef}
-        canToggleNativeChat={activePaneCanToggleChat}
-        isChatViewMode={activePaneIsChatLeaf}
-        onToggleNativeChat={handleToggleNativeChat}
         canContinueAgentSessionInNewSession={activePaneCanContinueInNewSession}
         onContinueAgentSessionInNewSession={(pane) =>
           contextMenu.runForPane(pane.id, contextMenu.onContinueAgentSessionInNewSession)
