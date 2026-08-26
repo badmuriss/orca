@@ -5,6 +5,13 @@ import { setStructuredAgentSessionHost } from '../native-chat/agent-session-wire
 import { createEphemeralAgentSessionClaimSigner } from './agent-session-claim-identity'
 import { agentSessionPtyWriteGate } from './agent-session-pty-write-gate'
 import { OrcaRuntimeService } from './orca-runtime'
+import {
+  WORKTREE_ID,
+  notifier,
+  structuredHostDouble,
+  structuredTabNotifier,
+  terminalAdoptionHarness
+} from './orca-runtime-structured-tui-tab-binding.test-support'
 
 const {
   probeAgentSessionProcessIdentity,
@@ -33,94 +40,6 @@ vi.mock('./agent-session-process-identity-probe', async (importOriginal) => ({
   ...(await importOriginal()),
   probeAgentSessionProcessIdentity
 }))
-
-const WORKTREE_ID = 'repo-1::/tmp/structured-handoff'
-
-function terminalAdoptionHarness() {
-  const runtime = new OrcaRuntimeService({ getSettings: () => ({ agentDefaultEnv: {} }) } as never)
-  runtime.setPtyController({
-    listProcesses: async () => [
-      { id: 'pty-adopt', incarnationId: 'inc-adopt', rootProcessId: 31337 }
-    ]
-  } as never)
-  const internal = runtime as unknown as {
-    ptysById: Map<string, unknown>
-    resolveRuntimeFileTarget(): Promise<unknown>
-    resolveStructuredAgentSessionAdoptionIntent(input: { envelope: unknown }): Promise<unknown>
-    issueStructuredTuiPtyHandle(): string
-  }
-  internal.ptysById.set('pty-adopt', {
-    ptyId: 'pty-adopt',
-    connected: true,
-    connectionId: null,
-    wslDistro: null,
-    tabId: 'tab-adopt',
-    paneKey: 'tab-adopt:leaf-adopt',
-    worktreeId: WORKTREE_ID,
-    incarnationId: 'inc-adopt'
-  })
-  internal.resolveRuntimeFileTarget = vi.fn(async () => ({
-    connectionId: null,
-    worktree: { id: WORKTREE_ID }
-  }))
-  // Why the adoption intent and not the create one: adoption resolves the pane's OWN account
-  // home, which this rig has no pane-account record for. The pane-home resolution itself is
-  // covered by orca-runtime-structured-tui-adoption-account-home.test.ts.
-  internal.resolveStructuredAgentSessionAdoptionIntent = vi.fn(async ({ envelope }) => ({
-    envelope,
-    location: {
-      executionHostId: 'local',
-      wslDistro: null,
-      workspaceId: WORKTREE_ID,
-      workspaceKind: 'git-worktree'
-    },
-    provider: 'codex',
-    agent: 'codex',
-    accountHome: { variable: 'CODEX_HOME', path: '/tmp/codex-home' },
-    runtimeKind: 'native'
-  }))
-  internal.issueStructuredTuiPtyHandle = vi.fn(() => 'term-adopt')
-  return runtime
-}
-
-/** The host half adoption now needs: the lease is reserved before the provider probe runs. */
-function structuredHostDouble(overrides: Record<string, unknown> = {}) {
-  return {
-    supportsCreate: vi.fn(() => true),
-    reserveAdoptedTuiOwner: vi.fn(async (input: { spawnToken: string }) => ({
-      ok: true,
-      fence: 1,
-      spawnToken: input.spawnToken
-    })),
-    releaseAdoptedTuiReservation: vi.fn(async () => undefined),
-    adoptTuiOwner: vi.fn(async () => ({ ok: true, replayed: false, fence: 1 })),
-    ...overrides
-  }
-}
-
-function notifier(revealTerminalSession: ReturnType<typeof vi.fn>) {
-  return {
-    worktreesChanged: vi.fn(),
-    reposChanged: vi.fn(),
-    activateWorktree: vi.fn(),
-    createTerminal: vi.fn(),
-    revealTerminalSession,
-    splitTerminal: vi.fn(),
-    renameTerminal: vi.fn(),
-    focusTerminal: vi.fn(),
-    closeTerminal: vi.fn(),
-    sleepWorktree: vi.fn(),
-    terminalFitOverrideChanged: vi.fn(),
-    terminalDriverChanged: vi.fn()
-  }
-}
-
-function structuredTabNotifier() {
-  return {
-    ...notifier(vi.fn()),
-    focusEditorTab: vi.fn()
-  }
-}
 
 describe('structured TUI launch tab binding', () => {
   it('adopts the proven local Codex pane as a durable TUI owner', async () => {
@@ -215,7 +134,6 @@ describe('structured TUI launch tab binding', () => {
         )
       ).rejects.toThrow('did not prove the expected Codex rollout')
       expect(agentSessionPtyWriteGate.boundSessionId('pty-adopt')).toBeNull()
-      // A proof that never lands hands the reservation back; nothing latches the next attempt.
       expect(host.releaseAdoptedTuiReservation).toHaveBeenCalledTimes(1)
     } finally {
       setStructuredAgentSessionHost(null)
@@ -265,7 +183,6 @@ describe('structured TUI launch tab binding', () => {
       const logged = warn.mock.calls.find(
         ([message]) => message === '[native-chat] adopted TUI reservation release failed'
       )?.[1] as { error: Error } | undefined
-      // A latched lease refuses every later attempt, so the cause cannot vanish with the throw.
       expect(logged).toMatchObject({
         sessionId: 'session-release-failure',
         fence: 1,

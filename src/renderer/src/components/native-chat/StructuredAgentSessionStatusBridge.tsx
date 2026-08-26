@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 import type { AgentSessionHistoryResult } from '../../../../shared/agent-session-wire'
 import type { AgentProviderSessionMetadata } from '../../../../shared/agent-session-resume'
 import {
+  hasPersistedStructuredAgentSessionTurn,
   projectStructuredAgentSessionStatus,
   structuredAgentSessionPaneKey
 } from '../../../../shared/structured-agent-session-projection'
@@ -39,6 +40,12 @@ function projectStatus(
   state: StructuredAgentSessionState,
   providerSession: AgentProviderSessionMetadata | undefined
 ): void {
+  // A newly-created session has no turn to report; publishing `done` here
+  // makes an untouched chat look completed in the sidebar.
+  if (!hasPersistedStructuredAgentSessionTurn(state.items)) {
+    useAppStore.getState().removeAgentStatus(structuredAgentSessionPaneKey(tab.id, tab.entityId))
+    return
+  }
   const projection = projectStructuredAgentSessionStatus(state.items)
   const store = useAppStore.getState()
   store.setAgentStatus(

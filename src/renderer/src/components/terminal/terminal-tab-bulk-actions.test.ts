@@ -38,7 +38,7 @@ vi.mock('./structured-terminal-session-disposal', () => ({
   closeStructuredTerminalSessionWithRetry: mocks.closeStructuredTerminalSessionWithRetry,
   disposeStructuredTerminalSession: mocks.disposeStructuredTerminalSession,
   structuredTerminalSessionId: (
-    tabs: Array<{ entityId: string; structuredSessionId?: string }>,
+    tabs: { entityId: string; structuredSessionId?: string }[],
     id: string
   ) => tabs.find((tab) => tab.entityId === id)?.structuredSessionId ?? null
 }))

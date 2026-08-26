@@ -28,7 +28,13 @@ export function NativeChatOrchestrationPausedNotice({
             'components.native-chat.orchestrationPaused.message',
             'Structured Chat blocks terminal prompts and sends. Orchestration messages remain queued; switch to Terminal, then check the Orca inbox with'
           )}{' '}
-          <code className="font-mono text-foreground">orca orchestration check</code>.
+          <code className="font-mono text-foreground">
+            {translate(
+              'components.native-chat.orchestrationPaused.command',
+              'orca orchestration check'
+            )}
+          </code>
+          .
         </p>
       </div>
     </div>

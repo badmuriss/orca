@@ -9,15 +9,16 @@ import {
   resolveHostSessionTabIdForWebSessionTab
 } from '@/runtime/web-session-tabs-sync'
 import { resolveTerminalWorktreeRoute } from '@/lib/terminal-worktree-route'
+import { translate } from '@/i18n/i18n'
 import {
   guardPinnedTabClose,
   isUnifiedTabPinned,
   resolvePinnedTabLabel,
   shouldConfirmPinnedTabClose
 } from '@/store/pinned-tab-close-guard'
-import { disposeStructuredTerminalSession } from './structured-terminal-session-disposal'
 import {
   closeStructuredTerminalSessionWithRetry,
+  disposeStructuredTerminalSession,
   structuredTerminalSessionId
 } from './structured-terminal-session-disposal'
 import { toast } from 'sonner'
@@ -153,9 +154,18 @@ export function closeTerminalTab(
       : ({ kind: 'local' } as const)
     void closeStructuredTerminalSessionWithRetry(target, structuredSessionId).then((closed) => {
       if (!closed) {
-        toast.error('Could not close the native agent session', {
-          description: 'The terminal stayed open so the provider remains recoverable.'
-        })
+        toast.error(
+          translate(
+            'components.native-chat.structuredSessionCloseFailed',
+            'Could not close this Codex chat'
+          ),
+          {
+            description: translate(
+              'components.native-chat.structuredSessionCloseFailedDescription',
+              'The terminal stayed open so the provider remains recoverable.'
+            )
+          }
+        )
         options?.onCancel?.()
         return
       }

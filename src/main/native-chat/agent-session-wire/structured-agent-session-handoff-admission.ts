@@ -105,12 +105,14 @@ export async function refuseAdmittedStructuredHandoff(input: {
   callerKey: string
   params: AgentSessionHandoffRequest
   refusal: AgentSessionWireRefusal
+  onSettled?: () => void
 }): Promise<AgentSessionMutationResult<AgentSessionHandoffResult>> {
   await input.deps.store.recordOperationOutcome({
     callerKey: input.callerKey,
     operationId: input.params.envelope.clientOperationId,
     outcome: { status: 'failed', code: input.refusal.code }
   })
+  input.onSettled?.()
   return { ok: false, refusal: input.refusal }
 }
 

@@ -1,4 +1,3 @@
-import { toast } from 'sonner'
 import { useAppStore } from '@/store'
 import type { AgentStartupPlan } from '@/lib/tui-agent-startup'
 import { planLaunchAgentStartupPrompt } from '@/lib/launch-agent-startup-prompt-plan'
@@ -31,8 +30,7 @@ import { getConnectionIdFromState } from '@/lib/connection-context'
 import { resolveInitialNativeChatSessionOptions } from '@/components/native-chat/native-chat-launch-session-options'
 import { seedNativeChatAppliedSessionOptions } from '@/components/native-chat/native-chat-session-option-cache'
 import { canUseStructuredNativeChat } from '@/lib/structured-native-chat-availability'
-import { launchStructuredCodexSession } from '@/lib/launch-structured-codex-session'
-import { translate } from '@/i18n/i18n'
+import { startStructuredCodexLaunch } from '@/lib/structured-agent-session-launch'
 
 export type LaunchAgentInNewTabArgs = {
   agent: TuiAgent
@@ -191,17 +189,7 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
     store.settings?.experimentalNativeChat === true &&
     canUseStructuredNativeChat(store, worktreeId)
   if (launchDirectStructuredChat) {
-    void launchStructuredCodexSession(worktreeId).catch((error) => {
-      toast.error(
-        translate(
-          'components.native-chat.structuredSessionLaunchFailed',
-          'Could not open Codex chat'
-        ),
-        {
-          description: error instanceof Error ? error.message : String(error)
-        }
-      )
-    })
+    startStructuredCodexLaunch(worktreeId)
     return {
       tabId: null,
       startupPlan,

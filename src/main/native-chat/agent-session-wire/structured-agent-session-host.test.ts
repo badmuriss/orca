@@ -464,7 +464,11 @@ describe('cancel', () => {
     })
     expect(result).toMatchObject({ ok: true, value: { cancelled: true } })
     const page = host.history({ sessionId: SESSION, direction: 'tail' })
-    expect(page.ok && page.page.items[0]?.body).toMatchObject({ kind: 'status' })
+    expect(page.ok && page.page.items[0]?.body).toMatchObject({
+      kind: 'status',
+      text: 'Turn cancelled.'
+    })
+    expect(JSON.stringify(page.ok && page.page.items[0]?.body)).not.toContain('turn-1')
   })
 
   it('reports an unconfirmed cancellation rather than failing the call', async () => {

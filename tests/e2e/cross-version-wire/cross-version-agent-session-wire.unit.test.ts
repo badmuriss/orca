@@ -39,6 +39,7 @@ const NOW = 1_800_000_000_000
 /** Every method the structured surface publishes, paired with the host method it
  *  must reach — a gate that hides one method and leaks another is the bug. */
 const STRUCTURED_CALLS: { method: string; hostMethod: string | null }[] = [
+  { method: 'agentSession.createSupport', hostMethod: null },
   { method: 'agentSession.create', hostMethod: 'attach' },
   { method: 'agentSession.ensure', hostMethod: 'attach' },
   { method: 'agentSession.send', hostMethod: 'send' },
@@ -48,7 +49,6 @@ const STRUCTURED_CALLS: { method: string; hostMethod: string | null }[] = [
   { method: 'agentSession.respondToQuestion', hostMethod: 'respondToPrompt' },
   { method: 'agentSession.setOption', hostMethod: 'setOption' },
   { method: 'agentSession.handoffStatus', hostMethod: 'handoffStatus' },
-  { method: 'agentSession.handoff', hostMethod: 'requestHandoff' },
   { method: 'agentSession.options', hostMethod: 'readOptions' },
   { method: 'agentSession.hold', hostMethod: 'hold' },
   { method: 'agentSession.release', hostMethod: 'release' },
@@ -136,6 +136,8 @@ function sendParams(text: string, fence: number): Record<string, unknown> {
 function paramsFor(method: string): unknown {
   const fence = 1
   switch (method) {
+    case 'agentSession.createSupport':
+      return { worktree: `id:${WORKSPACE}`, agent: 'codex' }
     case 'agentSession.create':
       return createIntentParams()
     case 'agentSession.ensure':
@@ -155,13 +157,6 @@ function paramsFor(method: string): unknown {
     case 'agentSession.setOption': {
       const fields = { key: 'model', value: 'gpt-5' }
       return { envelope: envelope({ method, fields, fence }), ...fields }
-    }
-    case 'agentSession.handoff': {
-      const fields = { direction: 'to-native', mode: 'after-turn', action: 'start' }
-      return {
-        envelope: envelope({ method: 'agentSession.requestHandoff', fields, fence }),
-        ...fields
-      }
     }
     case 'agentSession.history':
       return { sessionId: SESSION, direction: 'tail' }
@@ -315,7 +310,7 @@ describe('cross-version structured agent sessions', () => {
     it('finds no structured method registered on the old build', () => {
       expect(baseline.methodNames.filter((name) => name.startsWith('agentSession.'))).toEqual([])
       expect(current.methodNames.filter((name) => name.startsWith('agentSession.'))).toHaveLength(
-        STRUCTURED_CALLS.length + 2
+        STRUCTURED_CALLS.length
       )
     })
 

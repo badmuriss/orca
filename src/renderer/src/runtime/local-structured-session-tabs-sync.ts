@@ -72,20 +72,28 @@ export function applyStructuredSessionTabSnapshots(
 }
 
 export function restoreLocalStructuredSessionTabsOnce(): Promise<void> {
-  localStructuredSessionTabsRestorePromise ??= window.api.runtime
+  localStructuredSessionTabsRestorePromise ??= refreshLocalStructuredSessionTabs()
+    .then(() => undefined)
+    .catch((error) => {
+      localStructuredSessionTabsRestorePromise = null
+      throw error
+    })
+  return localStructuredSessionTabsRestorePromise
+}
+
+/** Fetch the current host inventory even after the startup restore has settled. */
+export function refreshLocalStructuredSessionTabs(): Promise<RuntimeMobileSessionTabsResult[]> {
+  return window.api.runtime
     .call({ method: 'session.tabs.listAll', params: {} })
     .then((response) => {
       if (!response.ok) {
         throw new Error('structured session inventory unavailable')
       }
       const result = response.result as { snapshots?: RuntimeMobileSessionTabsResult[] }
-      applyStructuredSessionTabSnapshots(result.snapshots ?? [])
+      const snapshots = result.snapshots ?? []
+      applyStructuredSessionTabSnapshots(snapshots)
+      return snapshots
     })
-    .catch((error) => {
-      localStructuredSessionTabsRestorePromise = null
-      throw error
-    })
-  return localStructuredSessionTabsRestorePromise
 }
 
 async function startLocalStructuredSessionTabsSync(args: {

@@ -7,7 +7,10 @@ import {
 } from '../../runtime/agent-session-handoff-record-transitions'
 import { handoffStructuredSessionToTui } from './structured-agent-session-handoff-forward'
 import { handoffStructuredSessionToNative } from './structured-agent-session-handoff-reverse'
-import { idleStructuredHandoffStatus } from './structured-agent-session-handoff-status'
+import {
+  idleStructuredHandoffStatus,
+  structuredTuiRecoveryProofIsAdmissible
+} from './structured-agent-session-handoff-status'
 import type { StructuredTuiOwner } from './structured-agent-session-handoff-types'
 import {
   persistReprovedTuiOwner,
@@ -15,7 +18,6 @@ import {
   recoverUnavailableTuiAsNative,
   type StructuredAgentSessionRestartAccess
 } from './structured-agent-session-handoff-restart-tui'
-import { structuredTuiRecoveryProofIsAdmissible } from './structured-agent-session-handoff-status'
 
 type RestartAccess = StructuredAgentSessionRestartAccess
 

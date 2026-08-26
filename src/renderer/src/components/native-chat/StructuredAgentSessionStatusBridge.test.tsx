@@ -115,6 +115,26 @@ describe('StructuredAgentSessionStatusBridge', () => {
   })
 
   it('publishes only provider identity and makes structured status non-terminal', async () => {
+    mocks.call.mockResolvedValueOnce({
+      ...historyResult,
+      page: {
+        ...historyResult.page,
+        items: [
+          {
+            itemId: 'item-1',
+            revision: 1,
+            sequence: 1,
+            observedAt: 1,
+            body: { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'hello' }] }
+          }
+        ],
+        window: {
+          ...historyResult.page.window,
+          newest: { epoch: 'epoch-1', sequence: 1 }
+        },
+        liveCursor: { epoch: 'epoch-1', sequence: 1 }
+      }
+    })
     render(<StructuredAgentSessionStatusBridge />)
 
     await waitFor(() => expect(mocks.setAgentStatus).toHaveBeenCalled())
@@ -125,8 +145,36 @@ describe('StructuredAgentSessionStatusBridge', () => {
     expect(mocks.setAgentStatus.mock.calls.at(-1)?.[5]?.providerSession?.id).not.toBe('session-1')
   })
 
+  it('does not publish a completed status for an untouched session', async () => {
+    render(<StructuredAgentSessionStatusBridge />)
+
+    await waitFor(() => expect(mocks.call).toHaveBeenCalled())
+    expect(mocks.setAgentStatus).not.toHaveBeenCalled()
+    expect(mocks.store).toBeTruthy()
+  })
+
   it('omits resume identity instead of substituting the desktop id on an older host', async () => {
-    mocks.call.mockResolvedValueOnce({ ...historyResult, providerSession: undefined })
+    mocks.call.mockResolvedValueOnce({
+      ...historyResult,
+      providerSession: undefined,
+      page: {
+        ...historyResult.page,
+        items: [
+          {
+            itemId: 'item-1',
+            revision: 1,
+            sequence: 1,
+            observedAt: 1,
+            body: { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'hello' }] }
+          }
+        ],
+        window: {
+          ...historyResult.page.window,
+          newest: { epoch: 'epoch-1', sequence: 1 }
+        },
+        liveCursor: { epoch: 'epoch-1', sequence: 1 }
+      }
+    })
     render(<StructuredAgentSessionStatusBridge />)
 
     await waitFor(() => expect(mocks.setAgentStatus).toHaveBeenCalled())

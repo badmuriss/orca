@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react'
 import { RotateCcw } from 'lucide-react'
-import type { AgentType } from '../../../../shared/agent-status-types'
+import type {
+  AgentStatusOrchestrationContext,
+  AgentType
+} from '../../../../shared/agent-status-types'
 import { dispatchStructuredAgentSessionComposerCommand } from '../../../../shared/structured-agent-session-composer'
 import { structuredAgentSessionPaneKey } from '../../../../shared/structured-agent-session-projection'
 import type { NativeChatLiveSession } from './use-native-chat-live-session'
@@ -18,7 +21,6 @@ import { useNativeChatFileLinkContext } from './use-native-chat-file-link-contex
 import { useStructuredAgentSession } from './use-structured-agent-session'
 import { translate } from '@/i18n/i18n'
 import { NativeChatOrchestrationPausedNotice } from './NativeChatOrchestrationPausedNotice'
-import type { AgentStatusOrchestrationContext } from '../../../../shared/agent-status-types'
 
 function encodeQuestionAnswer(questionId: string, answer: string): string {
   return `${encodeURIComponent(questionId)}:${encodeURIComponent(answer)}`

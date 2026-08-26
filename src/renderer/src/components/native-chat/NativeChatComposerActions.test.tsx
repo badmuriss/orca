@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -85,5 +85,33 @@ describe('NativeChatComposerActions', () => {
         .getByRole('button', { name: 'Stop the agent' })
         .getAttribute('data-native-chat-critical-action')
     ).toBe('stop')
+  })
+
+  it('ignores the second click of a double-click after send becomes Stop', () => {
+    const onSend = vi.fn()
+    const onStop = vi.fn()
+    render(
+      <NativeChatComposerActions
+        attachDisabled={false}
+        dictationDisabled={false}
+        sendDisabled={false}
+        isWorking
+        isDictating={false}
+        isDictationHoldMode={false}
+        onAttach={vi.fn()}
+        onDictationToggle={vi.fn()}
+        onDictationHoldStart={vi.fn()}
+        onDictationHoldEnd={vi.fn()}
+        onSend={onSend}
+        onStop={onStop}
+        sessionOptionsSurface={null}
+        sessionOptionsSnapshot={[]}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop the agent' }), { detail: 2 })
+
+    expect(onSend).not.toHaveBeenCalled()
+    expect(onStop).not.toHaveBeenCalled()
   })
 })

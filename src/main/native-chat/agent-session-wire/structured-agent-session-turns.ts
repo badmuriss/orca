@@ -138,7 +138,7 @@ export async function performCancel(
   input: { clientOperationId: string; turnId: string }
 ): Promise<TurnOutcome<AgentSessionCancelResult>> {
   let cancelled = false
-  let note = `Cancelled turn ${input.turnId}.`
+  let note = 'Turn cancelled.'
   try {
     cancelled = (
       await ctx.adapter.cancelTurn({
@@ -148,10 +148,10 @@ export async function performCancel(
       })
     ).cancelled
     if (!cancelled) {
-      note = `The provider had already finished turn ${input.turnId}.`
+      note = 'The provider had already finished this turn.'
     }
   } catch (error) {
-    note = `Cancellation of turn ${input.turnId} was not confirmed: ${
+    note = `Cancellation was not confirmed: ${
       error instanceof Error ? error.message : String(error)
     }`
   }

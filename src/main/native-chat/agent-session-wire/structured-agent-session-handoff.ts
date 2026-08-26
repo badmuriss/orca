@@ -14,7 +14,6 @@ import {
   structuredHandoffRetryIsAdmissible,
   structuredHandoffRetryResumesStoppedOwner
 } from './structured-agent-session-handoff-admission'
-import { evictAgentSessionOwner } from '../../runtime/agent-session-lease-transitions'
 import {
   createStructuredHandoffFlowContext,
   requireStructuredHandoffRecord
@@ -28,6 +27,7 @@ import {
   enqueueStructuredHandoffAfterTurn,
   StructuredAgentSessionHandoffQueue
 } from './structured-agent-session-handoff-queue'
+import { settleQueuedHandoffRefusal } from './structured-agent-session-handoff-queue-settlement'
 import { StructuredAgentSessionHandoffOperationGuard } from './structured-agent-session-handoff-operation-guard'
 import { restoreStructuredAgentSessionHandoff } from './structured-agent-session-handoff-restart'
 import {
@@ -40,6 +40,7 @@ import {
   structuredSessionHasPendingPrompt,
   structuredTuiStatus
 } from './structured-agent-session-handoff-status'
+import { closeRetainedTuiOwner } from './structured-agent-session-handoff-owner-close'
 import type {
   StructuredAgentSessionHandoffDeps,
   StructuredAgentSessionHandoffFlowContext,
@@ -67,33 +68,14 @@ export class StructuredAgentSessionHandoffCoordinator {
 
   status = (sessionId: string) => this.state.status(sessionId)
 
-  /**
-   * Closes a retained TUI owner without starting a native replacement. Surface
-   * teardown can race a failed renderer reveal, so the host must stop the
-   * provider terminal before forgetting the readable session.
-   */
-  async closeRetainedTuiOwner(sessionId: string): Promise<boolean> {
-    const owner = this.state.owner(sessionId)
-    if (!owner) {
-      return false
-    }
-    const close = this.deps.transport?.closeTuiOwner ?? this.deps.transport?.waitForTuiExit
-    if (!close) {
-      throw new Error('The owning agent terminal could not be stopped.')
-    }
-    await close(owner)
-    const record = this.requireRecord(sessionId)
-    await this.deps.store.transitionHandoff(sessionId, (current) =>
-      evictAgentSessionOwner({
-        record: current,
-        expectedFence: record.lease.runtimeFence,
-        probe: { outcome: 'exit-observed' },
-        now: this.deps.now()
-      })
-    )
-    this.state.releaseOwner(sessionId)
-    return true
-  }
+  closeRetainedTuiOwner = (sessionId: string): Promise<boolean> =>
+    closeRetainedTuiOwner({
+      sessionId,
+      deps: this.deps,
+      owner: this.state.owner,
+      requireRecord: this.requireRecord,
+      releaseOwner: this.state.releaseOwner
+    })
 
   adoptTuiOwner = (sessionId: string, owner: StructuredTuiOwner): void =>
     this.state.adoptTuiOwner(sessionId, owner)
@@ -274,51 +256,42 @@ export class StructuredAgentSessionHandoffCoordinator {
     return this.success(record.sessionId, false)
   }
 
-  private async refuseAdmitted(
+  private refuseAdmitted = (
     callerKey: string,
     params: AgentSessionHandoffRequest,
     code: AgentSessionWireRefusal['code'],
     message: string
-  ): Promise<AgentSessionMutationResult<AgentSessionHandoffResult>> {
-    const result = await refuseAdmittedStructuredHandoff({
+  ): Promise<AgentSessionMutationResult<AgentSessionHandoffResult>> =>
+    refuseAdmittedStructuredHandoff({
       deps: this.deps,
       callerKey,
       params,
-      refusal: refusal(code, message)
+      refusal: refusal(code, message),
+      onSettled: () =>
+        this.operationGuard.finish(params.envelope.sessionId, params.envelope.clientOperationId)
     })
-    this.operationGuard.finish(params.envelope.sessionId, params.envelope.clientOperationId)
-    return result
-  }
 
   private success = (sessionId: string, replayed: boolean) =>
     structuredHandoffSuccess(this.deps, sessionId, replayed, this.status(sessionId))
 
-  private refuseQueued(params: AgentSessionHandoffRequest, record: AgentSessionRecord): void {
-    const settlement = this.operationGuard
-      .settle(record.sessionId, params.envelope.clientOperationId, {
-        status: 'failed',
-        code: 'agent_session_checkpoint_stale'
-      })
-      .then(() => this.state.setStatus(record.sessionId, idleStructuredHandoffStatus(record)))
-      .catch((error) => this.fail(params, error))
-    this.flowRunner.track(settlement)
-  }
+  private refuseQueued = (params: AgentSessionHandoffRequest, record: AgentSessionRecord): void =>
+    settleQueuedHandoffRefusal({
+      operationGuard: this.operationGuard,
+      track: (task) => this.flowRunner.track(task),
+      setIdle: (current) =>
+        this.state.setStatus(current.sessionId, idleStructuredHandoffStatus(current)),
+      fail: (request, error) => this.fail(request, error),
+      params,
+      record
+    })
 
-  private begin(
+  private begin = (
     callerKey: string,
     params: AgentSessionHandoffRequest,
     turnId: string | null,
     fingerprint: string,
     tuiAlreadyExited = false
-  ): void {
-    this.flowRunner.begin({
-      callerKey,
-      params,
-      turnId,
-      fingerprint,
-      tuiAlreadyExited
-    })
-  }
+  ): void => this.flowRunner.begin({ callerKey, params, turnId, fingerprint, tuiAlreadyExited })
 
   private flowContext(): StructuredAgentSessionHandoffFlowContext {
     return createStructuredHandoffFlowContext({

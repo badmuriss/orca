@@ -44,6 +44,18 @@ export function NativeChatComposerActions({
   sessionOptionsSnapshot,
   sessionOptionsPickerRequest
 }: NativeChatComposerActionsProps): React.JSX.Element {
+  const handleCriticalAction = (event: React.MouseEvent<HTMLButtonElement>): void => {
+    // A double-click commonly lands after the first send has started and the button has
+    // changed to Stop; ignore the second click instead of cancelling the new turn.
+    if (event.detail > 1) {
+      return
+    }
+    if (isWorking) {
+      onStop?.()
+    } else {
+      onSend()
+    }
+  }
   const dictationLabel = isDictating
     ? translate('components.native-chat.composer.stopDictation', 'Stop dictation')
     : translate('components.native-chat.composer.startDictation', 'Start dictation')
@@ -131,7 +143,7 @@ export function NativeChatComposerActions({
               : translate('components.native-chat.composer.send', 'Send')
           }
           disabled={sendDisabled}
-          onClick={isWorking ? onStop : onSend}
+          onClick={handleCriticalAction}
           variant={isWorking ? 'secondary' : 'default'}
           size="icon"
           className="size-8 rounded-full pointer-coarse:size-10"

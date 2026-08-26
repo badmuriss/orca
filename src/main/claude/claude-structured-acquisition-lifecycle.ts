@@ -3,7 +3,12 @@ import {
   AgentSessionAcquisitionExitUnprovenError,
   AgentSessionPreSpawnError
 } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
-import type { ClaudeStructuredSessionAdapterDeps } from './claude-structured-session-state'
+import {
+  cancelClaudeAcquisitionAttempt,
+  type ClaudeAcquisitionAttempt,
+  type ClaudeAcquisitionRegistry,
+  type ClaudeStructuredSessionAdapterDeps
+} from './claude-structured-session-state'
 
 export async function resolveClaudeLaunchBeforeSpawn(
   deps: Pick<ClaudeStructuredSessionAdapterDeps, 'resolveLaunch'>,
@@ -15,11 +20,6 @@ export async function resolveClaudeLaunchBeforeSpawn(
     throw new AgentSessionPreSpawnError(error)
   }
 }
-import {
-  cancelClaudeAcquisitionAttempt,
-  type ClaudeAcquisitionAttempt,
-  type ClaudeAcquisitionRegistry
-} from './claude-structured-session-state'
 
 export async function stopSupersededClaudeAcquisition(input: {
   sessionId: string
