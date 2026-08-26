@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   buildAgentPromptPasteBytes,
-  getAgentPromptSubmitDelayMs
+  getAgentPromptSubmitDelayMs,
+  getTerminalPasteIngestMs
 } from '../../shared/agent-prompt-injection'
 import { setSshTargetRegistryHandlers } from '../ssh/ssh-target-registry'
 import { OrcaRuntimeService } from './orca-runtime'
@@ -297,12 +298,17 @@ describe('agent prompt render gate on a ConPTY host', () => {
 
   /** Claude/Codex take the closed-loop gate; the paste-end write emits the show-cursor
    *  marker and then goes silent, which is what an agent that repaints mid-ingest looks like. */
-  async function createSettlementRuntime(): Promise<{
+  async function createSettlementRuntime(
+    // `noiseUntilMs` keeps the pane emitting inside every quiet window, so the gate can only
+    // end on its hard cap -- which is what the cap's arithmetic has to be measured against.
+    agentOutput: { markerDelayMs?: number; noiseUntilMs?: number } = {}
+  ): Promise<{
     runtime: OrcaRuntimeService
     handle: string
     writes: string[]
     submitTimes: number[]
   }> {
+    const markerDelayMs = agentOutput.markerDelayMs ?? 100
     const runtime = new OrcaRuntimeService(makeStore() as never)
     const writes: string[] = []
     const submitTimes: number[] = []
@@ -315,7 +321,10 @@ describe('agent prompt render gate on a ConPTY host', () => {
           submitTimes.push(Date.now() - startedAt)
         }
         if (data.includes('\x1b[201~')) {
-          setTimeout(() => runtime.onPtyData(PTY_ID, '\x1b[?25h', Date.now()), 100)
+          setTimeout(() => runtime.onPtyData(PTY_ID, '\x1b[?25h', Date.now()), markerDelayMs)
+          for (let at = markerDelayMs + 500; at <= (agentOutput.noiseUntilMs ?? 0); at += 500) {
+            setTimeout(() => runtime.onPtyData(PTY_ID, '.', Date.now()), at)
+          }
         }
         return true
       },
@@ -344,6 +353,33 @@ describe('agent prompt render gate on a ConPTY host', () => {
     await vi.runAllTimersAsync()
     expect(submitTimes).toHaveLength(1)
     expect(submitTimes[0]).toBeGreaterThan(3_342)
+    await stalled
+  })
+
+  it('caps a never-quiet pane at one ingest window past the render timeout', async () => {
+    useHostPlatform('win32')
+    vi.useFakeTimers()
+    const prompt = 'y'.repeat(320_000)
+    const ingestMs = getTerminalPasteIngestMs(
+      'win32',
+      Buffer.byteLength(buildAgentPromptPasteBytes(prompt), 'utf8')
+    )
+    // The marker lands mid-ingest, which re-arms the cap; the ingest term must not be charged
+    // a second time from that later moment.
+    const { runtime, handle, writes, submitTimes } = await createSettlementRuntime({
+      markerDelayMs: ingestMs - 1_000,
+      noiseUntilMs: ingestMs + 20_000
+    })
+    const submission = runtime.sendTerminalAgentPrompt(handle, prompt)
+    const stalled = expect(submission).rejects.toThrow('agent_prompt_stalled')
+
+    await vi.advanceTimersByTimeAsync(ingestMs + 8_000 - 1)
+    expect(countSubmits(writes)).toBe(0)
+
+    await vi.runAllTimersAsync()
+    expect(submitTimes).toHaveLength(1)
+    expect(submitTimes[0]).toBeGreaterThanOrEqual(ingestMs + 8_000)
+    expect(submitTimes[0]).toBeLessThan(ingestMs + 8_500)
     await stalled
   })
 
@@ -383,5 +419,25 @@ describe('plain terminal send suffix delay', () => {
     await send
     expect(submitTimes).toHaveLength(1)
     expect(submitTimes[0]).toBeGreaterThan(3_342)
+  })
+
+  it('abandons the scaled suffix wait when the request is aborted', async () => {
+    useHostPlatform('win32')
+    vi.useFakeTimers()
+    const controller = new AbortController()
+    const { runtime, handle, writes } = await createPromptRuntime()
+    const send = runtime.sendTerminal(
+      handle,
+      { text: 'z'.repeat(320_000), enter: true },
+      { signal: controller.signal }
+    )
+    const rejected = expect(send).rejects.toThrow('request_aborted')
+
+    await vi.advanceTimersByTimeAsync(100)
+    controller.abort()
+    await vi.runAllTimersAsync()
+
+    await rejected
+    expect(countSubmits(writes)).toBe(0)
   })
 })

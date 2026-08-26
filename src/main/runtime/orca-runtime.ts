@@ -2151,6 +2151,8 @@ async function waitForAgentPromptPromise<T>(promise: Promise<T>, signal?: AbortS
 // ~96 KB/s drain, so the in-flight buffer grew regardless. setImmediate keeps the only thing
 // the yield actually did (let abort/permission/data callbacks run between chunks) at ~0.01 ms,
 // and TERMINAL_INPUT_MAX_BYTES still bounds what can be in flight either way.
+// Why the global and not node:timers/promises: only the global is intercepted by fake timers,
+// so a chunked paste stays observable on the test clock.
 function yieldBetweenTerminalInputChunks(): Promise<void> {
   return new Promise<void>((resolve) => {
     setImmediate(resolve)
@@ -18999,6 +19001,9 @@ export class OrcaRuntimeService {
       reserveWrite?: (ptyId: string) => void
       afterWrite?: (ptyId: string) => void | Promise<void>
       suffixFailureError?: string
+      // Why: the pre-Enter wait now scales with the payload, so an abandoned request must be
+      // able to stop it instead of writing Enter minutes after the caller gave up.
+      signal?: AbortSignal
     } = {}
   ): Promise<RuntimeTerminalSend> {
     const pty = this.getLivePtyForHandle(handle)
@@ -19695,25 +19700,27 @@ export class OrcaRuntimeService {
       reserveWrite?: (ptyId: string) => void
       afterWrite?: (ptyId: string) => void | Promise<void>
       suffixFailureError?: string
+      signal?: AbortSignal
     } = {}
   ): Promise<void> {
     // Why: direct terminal.send can carry paste-sized text from RPC/mobile
     // clients; chunk text before PTY/ConPTY while preserving suffix separation.
-    const hasText = typeof action.text === 'string' && action.text.length > 0
+    const text = typeof action.text === 'string' ? action.text : ''
     const hasSuffix = action.enter || action.interrupt
-    if (hasText) {
-      await this.writeTerminalInputChunks(ptyId, action.text!, options)
+    if (text) {
+      await this.writeTerminalInputChunks(ptyId, text, options)
     }
     if (hasSuffix) {
       const suffix = (action.enter ? '\r' : '') + (action.interrupt ? '\x03' : '')
-      if (hasText) {
+      if (text) {
         // Why: same hazard as the agent-prompt path -- Enter must not overtake text the
         // execution host is still ingesting, and a flat 500 ms cannot cover 16 MB.
         await waitForAgentPromptDelay(
           getAgentPromptSubmitDelayMs(
             this.getPtyWriteHostPlatform(ptyId),
-            Buffer.byteLength(action.text!, 'utf8')
-          )
+            Buffer.byteLength(text, 'utf8')
+          ),
+          options.signal
         )
       }
       try {
@@ -19732,7 +19739,7 @@ export class OrcaRuntimeService {
       await options.afterWrite?.(ptyId)
       return
     }
-    if (hasText) {
+    if (text) {
       return
     }
 
@@ -19779,7 +19786,7 @@ export class OrcaRuntimeService {
   private getPtyWriteHostPlatform(ptyId: string): NodeJS.Platform {
     const pty = this.ptysById.get(ptyId)
     const connectionId = pty?.connectionId
-    if (!connectionId || isWslHookRelayConnectionId(connectionId)) {
+    if (!connectionId) {
       return process.platform
     }
     const remotePlatform = getRegisteredSshState(connectionId)?.remotePlatform
@@ -19986,6 +19993,9 @@ export class OrcaRuntimeService {
     let canSettle = false
     let settled = false
     let ingested = pasteIngestMs <= 0
+    // Why absolute: the ingest clock starts once, here, but the cap is armed twice (at arm()
+    // and again on the marker). Re-adding the whole window would charge ingest twice.
+    const ingestDeadlineAt = Date.now() + pasteIngestMs
     let markerCarry = ''
     let quietTimer: NodeJS.Timeout | null = null
     let hardTimer: NodeJS.Timeout | null = null
@@ -20034,7 +20044,10 @@ export class OrcaRuntimeService {
       }
       // Why: the cap bounds the wait *after* the bytes land; a flat 8000 ms would expire
       // mid-paste past ~770 KB on Windows and write Enter into it.
-      hardTimer = setTimeout(finish, AGENT_PROMPT_RENDER_TIMEOUT_MS + pasteIngestMs)
+      hardTimer = setTimeout(
+        finish,
+        AGENT_PROMPT_RENDER_TIMEOUT_MS + Math.max(0, ingestDeadlineAt - Date.now())
+      )
     }
     if (!ingested) {
       ingestTimer = setTimeout(() => {
