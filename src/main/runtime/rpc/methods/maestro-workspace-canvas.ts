@@ -81,6 +81,15 @@ const mutationSchema = z.union([
   z
     .object({
       ...documentMutationBase,
+      action: z.literal('update-annotation'),
+      surface_id: WorkspaceSurfaceIdSchema,
+      content: z.string().min(1).max(65_536),
+      tone: z.enum(['decision', 'warning', 'blocked', 'observation'])
+    })
+    .strict(),
+  z
+    .object({
+      ...documentMutationBase,
       action: z.literal('set-placement'),
       surface_id: WorkspaceSurfaceIdSchema,
       placement: z

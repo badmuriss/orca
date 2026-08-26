@@ -50,6 +50,8 @@ export type MaestroWorkspaceCanvasRuntime = Pick<
   | 'getOrchestrationDb'
   | 'listMobileSessionTabs'
   | 'readMobileFile'
+  | 'readMobileMarkdownTab'
+  | 'saveMobileMarkdownTab'
 >
 
 export class MaestroWorkspaceCanvasAuthority {

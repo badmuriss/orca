@@ -33,6 +33,7 @@ type AvailableWorkspaceCanvas = Extract<
 const CANVAS_REVISION_ACTIONS = new Set<RuntimeMaestroWorkspaceCanvasMutation['action']>([
   'focus',
   'close',
+  'update-annotation',
   'set-placement',
   'set-viewport',
   'create-manual-link',

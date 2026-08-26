@@ -55,6 +55,12 @@ export type RuntimeMaestroWorkspaceCanvasMutation =
       title: string
     })
   | (RuntimeMaestroWorkspaceCanvasDocumentMutationBase & {
+      action: 'update-annotation'
+      surface_id: WorkspaceSurfaceId
+      content: string
+      tone: 'decision' | 'warning' | 'blocked' | 'observation'
+    })
+  | (RuntimeMaestroWorkspaceCanvasDocumentMutationBase & {
       action: 'set-placement'
       surface_id: WorkspaceSurfaceId
       placement: WorkspaceCanvasDocument['placements'][string]

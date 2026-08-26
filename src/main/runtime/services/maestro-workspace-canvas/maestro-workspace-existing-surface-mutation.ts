@@ -11,7 +11,7 @@ import type { MaestroWorkspaceCanvasRuntime } from './maestro-workspace-canvas-a
 type Available = Extract<RuntimeMaestroWorkspaceCanvasQueryResult, { status: 'available' }>
 type ExistingSurfaceRequest = Extract<
   RuntimeMaestroWorkspaceCanvasMutation,
-  { action: 'rename' | 'focus' | 'close' }
+  { action: 'rename' | 'focus' | 'close' | 'update-annotation' }
 >
 
 export async function mutateExistingMaestroWorkspaceSurface(params: {
@@ -35,6 +35,53 @@ export async function mutateExistingMaestroWorkspaceSurface(params: {
       canvasRevision: before.canvas.revision,
       result: { status: 'stale', authority_revision: before.snapshot.authority_revision }
     }
+  }
+  if (request.action === 'update-annotation') {
+    if (surface.binding.kind !== 'content' || !surface.binding.annotation) {
+      return {
+        surfaceId,
+        canvasRevision: before.canvas.revision,
+        result: {
+          status: 'stale',
+          authority_revision: before.snapshot.authority_revision,
+          reason: 'annotation_surface_required'
+        }
+      }
+    }
+    const current = await runtime.readMobileMarkdownTab(selector, surface.id.unified_tab_id)
+    if (!current.editable) {
+      throw new Error(current.readOnlyReason ?? 'annotation_read_only')
+    }
+    const saved = await runtime.saveMobileMarkdownTab(
+      selector,
+      surface.id.unified_tab_id,
+      current.version,
+      request.content
+    )
+    if (saved.tabId !== surface.id.unified_tab_id || saved.content !== request.content) {
+      throw new Error('annotation_save_identity_mismatch')
+    }
+    const document = structuredClone(before.canvas.document)
+    const annotation = document.annotations[key]
+    if (!annotation) {
+      return {
+        surfaceId,
+        canvasRevision: before.canvas.revision,
+        result: {
+          status: 'stale',
+          authority_revision: before.snapshot.authority_revision,
+          reason: 'annotation_metadata_missing'
+        }
+      }
+    }
+    document.annotations[key] = { ...annotation, tone: request.tone }
+    const receipt = writeWorkspaceCanvasDocument(database, {
+      scope: request.scope,
+      expected_revision: request.expected_canvas_revision,
+      idempotency_key: `document:${request.idempotency_key}`,
+      document
+    })
+    return { surfaceId, canvasRevision: receipt.revision }
   }
   if (request.action === 'rename') {
     const acknowledged = await runtime.commandMaestroWorkspaceTab({
