@@ -22,9 +22,15 @@ export function MaestroWorkspaceBrowserPreview({
   latestTarget.current = target
   const targetKey = target.kind === 'environment' ? `environment:${target.environmentId}` : 'local'
 
+  // Revision recaptures swap in place: keep the resolved frame until the new one lands.
+  const resolvedCaptureKey = useRef<string | null>(null)
+
   useEffect(() => {
     let active = true
-    setState('loading')
+    const captureKey = `${targetKey}:${pageId}`
+    if (resolvedCaptureKey.current !== captureKey) {
+      setState('loading')
+    }
     void callRuntimeRpc<BrowserScreenshotResult>(latestTarget.current, 'browser.screenshot', {
       page: pageId,
       format: 'png'
@@ -33,10 +39,12 @@ export function MaestroWorkspaceBrowserPreview({
         if (active) {
           setPreview(`data:image/${screenshot.format};base64,${screenshot.data}`)
           setState('ready')
+          resolvedCaptureKey.current = captureKey
         }
       })
       .catch(() => {
-        if (active) {
+        // A failed recapture keeps the last valid frame; unavailable only without one.
+        if (active && resolvedCaptureKey.current !== captureKey) {
           setPreview(null)
           setState('unavailable')
         }

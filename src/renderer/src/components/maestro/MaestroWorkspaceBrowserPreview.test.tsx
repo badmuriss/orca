@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { cleanup, render } from '@testing-library/react'
+import { act, cleanup, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { callRuntimeRpc } = vi.hoisted(() => ({ callRuntimeRpc: vi.fn() }))
@@ -73,5 +73,41 @@ describe('MaestroWorkspaceBrowserPreview', () => {
     )
     await vi.waitFor(() => expect(callRuntimeRpc).toHaveBeenCalledTimes(2))
     await vi.waitFor(() => expect(previewImage()).not.toBeNull())
+  })
+
+  it('keeps the previous image in place while a revision recapture is pending', async () => {
+    let resolveSecondCapture!: (value: typeof SCREENSHOT) => void
+    callRuntimeRpc
+      .mockResolvedValueOnce(SCREENSHOT)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecondCapture = resolve
+          })
+      )
+    const view = render(
+      <MaestroWorkspaceBrowserPreview
+        target={{ kind: 'local' }}
+        pageId="page-1"
+        receiptRevision={1}
+      />
+    )
+    await vi.waitFor(() => expect(previewImage()).not.toBeNull())
+    expect(previewImage()?.getAttribute('src')).toBe('data:image/png;base64,abc123')
+    view.rerender(
+      <MaestroWorkspaceBrowserPreview
+        target={{ kind: 'local' }}
+        pageId="page-1"
+        receiptRevision={2}
+      />
+    )
+    expect(callRuntimeRpc).toHaveBeenCalledTimes(2)
+    // The stale-but-valid frame stays mounted until the newer capture resolves.
+    expect(previewImage()).not.toBeNull()
+    expect(previewImage()?.getAttribute('src')).toBe('data:image/png;base64,abc123')
+    act(() => resolveSecondCapture({ format: 'png', data: 'def456' }))
+    await vi.waitFor(() =>
+      expect(previewImage()?.getAttribute('src')).toBe('data:image/png;base64,def456')
+    )
   })
 })
