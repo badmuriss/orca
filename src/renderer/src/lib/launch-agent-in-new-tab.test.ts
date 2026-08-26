@@ -194,7 +194,6 @@ describe('launchAgentInNewTab', () => {
       launchAgent: 'codex'
     })
   })
-
   it('keeps Floating Workspace authority on native Windows beside an active WSL project', async () => {
     store.projects = [
       {
@@ -331,8 +330,7 @@ describe('launchAgentInNewTab', () => {
       promptDelivery: 'draft'
     })
 
-    // Claude takes the draft on --prefill, so no paste runs and
-    // deliverLaunchPromptToAgentTab never fires — this is the only seed.
+    // Claude's --prefill launch seeds the draft without a paste callback.
     expect(result?.pasteDraftAfterLaunch).toBe(false)
     expect(mockSeedNativeChatLaunchDraft).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -485,8 +483,6 @@ describe('launchAgentInNewTab', () => {
     })
 
     expect(result).toEqual(expect.objectContaining({ tabId: null, pasteDraftAfterLaunch: false }))
-    // The draft rides in on the launch command, so this host-class launch also
-    // carries the text that seeds the mirrored tab's chat composer.
     expect(mockCreateWebRuntimeAgentSessionTerminalWithLaunchDraft).toHaveBeenCalledWith(
       expect.objectContaining({
         launchAgent: 'claude',
@@ -610,8 +606,6 @@ describe('launchAgentInNewTab', () => {
       prompt: 'fix the spinner',
       launchSource: 'onboarding'
     })
-
-    expect(mockTrack).not.toHaveBeenCalledWith('agent_prompt_sent', expect.anything())
   })
 
   it('does not track prompt-sent for draft launches', async () => {

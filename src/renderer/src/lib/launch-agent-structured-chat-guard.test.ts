@@ -81,9 +81,11 @@ describe('structured chat adoption guard on the launch path', () => {
     mockPasteDraftWhenAgentReady.mockResolvedValue(true)
     mockLaunchStructuredCodexSession.mockResolvedValue('codex-session-1')
     mockToastError.mockReset()
+    store.settings.openAgentTabsInChatByDefault = true
   })
 
-  it('honors the persisted chat default by launching Codex directly as a structured session', async () => {
+  it('uses the updated structured-chat toggle without the legacy chat-default setting', async () => {
+    store.settings.openAgentTabsInChatByDefault = false
     const { launchAgentInNewTab, shouldQueueTerminalFocusAfterMenuClose } =
       await import('./launch-agent-in-new-tab')
 
@@ -116,19 +118,24 @@ describe('structured chat adoption guard on the launch path', () => {
     expect(mockCreateTab).not.toHaveBeenCalled()
   })
 
-  it('stays in terminal view when Codex never became ready', async () => {
-    mockWaitForAgentReady.mockResolvedValue({ ready: false, reason: 'timeout' })
+  it('keeps prompted Codex on the ordinary terminal launch path', async () => {
     const { launchAgentInNewTab } = await import('./launch-agent-in-new-tab')
 
-    launchAgentInNewTab({ agent: 'codex', worktreeId: 'wt-1', prompt: 'start this task' })
+    const result = launchAgentInNewTab({
+      agent: 'codex',
+      worktreeId: 'wt-1',
+      prompt: 'start this task'
+    })
 
-    await vi.waitFor(() => expect(mockWaitForAgentReady).toHaveBeenCalled())
-    // Let every continuation the ready wait could have queued run before asserting it did not flip.
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    // Chat adoption probes the pane's foreground process: flipping now hands the user an adoption
-    // error in place of the terminal Codex is still starting in.
-    expect(mockSetTabViewMode).not.toHaveBeenCalledWith('tab-1', 'chat')
+    expect(result?.tabId).toBe('tab-1')
+    expect(mockCreateTab).toHaveBeenCalledWith(
+      'wt-1',
+      undefined,
+      undefined,
+      expect.objectContaining({ launchAgent: 'codex' })
+    )
+    expect(mockWaitForAgentReady).not.toHaveBeenCalled()
+    expect(mockSetTabViewMode).not.toHaveBeenCalled()
   })
 
   it('shows rejected prompt delivery in chat after Codex becomes ready', async () => {
@@ -145,10 +152,7 @@ describe('structured chat adoption guard on the launch path', () => {
 
     await expect(result?.promptDeliveryResult).rejects.toBe(error)
     expect(mockMarkNativeChatLaunchPromptFailed).toHaveBeenCalledWith('tab-1')
-    await vi.waitFor(() => expect(mockSetTabViewMode).toHaveBeenCalledWith('tab-1', 'chat'))
-    expect(mockMarkNativeChatLaunchPromptFailed.mock.invocationCallOrder[0]).toBeLessThan(
-      mockSetTabViewMode.mock.invocationCallOrder[0]!
-    )
+    expect(mockSetTabViewMode).not.toHaveBeenCalled()
   })
 
   it('keeps an SSH Codex tab on the bridge', async () => {

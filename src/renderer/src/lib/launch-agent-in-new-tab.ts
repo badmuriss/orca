@@ -188,7 +188,7 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
   const launchDirectStructuredChat =
     agent === 'codex' &&
     !hasPrompt &&
-    initialViewModeProps.viewMode === 'chat' &&
+    store.settings?.experimentalNativeChat === true &&
     canUseStructuredNativeChat(store, worktreeId)
   if (launchDirectStructuredChat) {
     void launchStructuredCodexSession(worktreeId).catch((error) => {
