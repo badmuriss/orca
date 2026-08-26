@@ -203,6 +203,30 @@ Two limits worth knowing:
   settles the task, the terminal is no longer a worker and is counted as a root again. The
   process may still be alive; that is the documented boundary, not an accident.
 
+## Maestro Progress And Decisions
+
+Maestro projects authoritative orchestration state into a workspace Canvas. The projection is a read model. Intents request work; the authenticated runtime decides whether to accept them. Neither a model nor a CLI payload can author progress by polling or assertion.
+
+Keep task identity and grade separate. A task keeps its own grade even when one owned terminal executes a cohesive ordered session for several compatible tasks. Reuse that terminal only through the owned handoff or transfer receipt.
+
+Progress is truthful by state:
+
+- `pending` means accepted work or evidence is still missing.
+- `active` means authorized work is in progress, not that it will succeed.
+- `blocked` means a named blocker prevents the next required action.
+- `partial` means some required work or evidence is accepted, while some remains unresolved.
+- `complete` means every required task and evidence item is accepted, with no carry-forward finding or unresolved cleanup. Only then is 100 percent valid.
+
+Carry-forward findings, unresolved cleanup, blocked work, and partial outcomes prevent `complete`. A finding rejects a task only when its class is blocking. Other findings remain visible evidence and do not silently change a grade.
+
+Use the one-plus-one retry rule. A third technical attempt needs an explicit coordinator decision. Raise model effort only after observed risk justifies it. Coordination timing, dispatch, retry, terminal-failure, token, and cache fields are bounded diagnostics. They are not a score.
+
+Every validation command needs an explicit deadline. Record a normalized failure signature and occurrence count. After the first occurrence, do not repeat an equivalent validation unchanged: change methodology, reduce to a focused reproduction or test, or split the journey. A focused checkpoint or journey may be invoked at most three times in total, even when its failure signatures differ. After the third invocation, accept only honest composed focal evidence or mark the checkpoint blocked; never rerun it to peel another tail. The same signature may occur at most twice across equivalent validations. Validate a localized correction with its focused checkpoint, never by rerunning the entire suite.
+
+Reduction must preserve pending tasks and accepted evidence. Do not compress a graph by deleting unresolved work or by treating a summary as the full coordination block.
+
+The global navigator receives one bounded state/count digest per workspace. It never merges workspace graphs or loads the full coordination block. Open the exact Canvas task, attempt, or finding detail when the digest needs explanation.
+
 ## Preferred Supervised Worker Loop
 
 Use `worker-start` for the normal supervised path. It composes the existing worktree, terminal, readiness, and dispatch primitives while returning exact created/reused effects. Agents still choose placement and concurrency; Orca does not schedule workers or infer conflicts.

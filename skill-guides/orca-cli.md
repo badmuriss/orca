@@ -376,6 +376,47 @@ Common recoveries:
 - `browser_tab_not_found`: run `orca tab list --json` before switching or closing.
 - `browser_host_unavailable`: the desktop hosting that page is offline. Bring it back, or create the page for server placement when the work must survive without an interactive session.
 
+## Maestro Canvas
+
+Maestro is Orca's workspace-scoped coordination Canvas. It is not a worker launcher, a terminal transcript reader, or a generic browser CLI. Use exact host and workspace identities. Never derive either identity from a path.
+
+```text
+ORCA maestro show --host <execution-host-id> --workspace <workspace-key> --json
+ORCA maestro watch --payload <request-json> --once --json
+ORCA maestro index --json
+ORCA maestro open --host <execution-host-id> --workspace <workspace-key> --json
+ORCA maestro apply --payload <revisioned-mutation-json> --json
+ORCA maestro workspace-bootstrap-receipt --run <run-id> --orchestration-home <selector> --execution-workspace <selector> --host <execution-host-id> --json
+ORCA maestro coordinator-handoff --payload <request-json> --json
+```
+
+`watch` emits bounded compact NDJSON. Start from the returned revision on the next request. Use `--once` for one bounded read. Do not poll for progress that a model wrote itself.
+
+`open` focuses the exact native Maestro Canvas. It does not create a terminal, launch a worker, or open a browser page. Use `show` or `index` for bounded data, then open the exact task, attempt, or finding in the Canvas when its detail is needed.
+
+Browser surfaces are owned orchestration resources. Submit their typed request through Maestro; do not substitute `tab create`, a guessed browser command, or an unfenced page id.
+
+```text
+ORCA maestro browser-surface open --payload <request-json> --json
+ORCA maestro browser-surface focus --payload <request-json> --json
+ORCA maestro browser-surface capture --payload <request-json> --json
+ORCA maestro browser-surface retain --payload <request-json> --json
+ORCA maestro browser-surface release --payload <request-json> --json
+```
+
+Read the returned binding, requested visibility, observed visibility, focus receipt, and evidence receipt. A requested visible session is successful only when its native page has matching visible evidence. An offscreen or headless capture cannot stand in for that result.
+
+Use `delegate`, `list`, `take`, and `settle` only for the corresponding Maestro intent flow:
+
+```text
+ORCA maestro delegate --payload <request-json> --json
+ORCA maestro list --payload <request-json> --json
+ORCA maestro take --payload <request-json> --json
+ORCA maestro settle --payload <request-json> --json
+```
+
+The runtime derives actor authority. Do not put a coordinator, browser owner, observed visibility, or progress claim in a payload and treat it as proof.
+
 ## Next Action
 
 Confirm `orca status --json` unless already checked this turn, then choose the narrowest command for the job: `worktree ps/current/create`, `terminal list/read/wait/send`, `automations list`, `artifacts list/share`, `skills installed/share`, or built-in browser `snapshot`.
