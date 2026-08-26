@@ -172,9 +172,14 @@ import {
   readActiveGpuFallbackMarker,
   writeGpuFallbackMarker,
   type GpuFallbackEnvironment,
+  type LinuxGpuFallbackEnvironment,
   type WindowsGpuFallbackEnvironment
 } from './startup/gpu-fallback-marker'
 import { applyGpuFallbackCommandLineSwitches } from './startup/gpu-fallback-switches'
+import {
+  installLinuxDevGpuFailureWatch,
+  isLinuxDevGpuFallbackSession
+} from './startup/linux-dev-gpu-fallback'
 import {
   DEFAULT_GPU_CRASH_FALLBACK_THRESHOLD,
   DEFAULT_GPU_CRASH_FALLBACK_WINDOW_MS,
@@ -985,6 +990,15 @@ if (hasSingleInstanceLock) {
   maybeApplyGpuFallbackForThisLaunch()
   if (!gpuFallbackActiveThisLaunch) {
     enableMainProcessGpuFeatures()
+  }
+  // Why: before window creation — GPU child launches can fail-fatal during startup, and the shared
+  // child-process-gone handler registers only after createMainWindow (and stays win32-gated).
+  if (isLinuxDevGpuFallbackSession({ platform: process.platform, isDev: is.dev, isServeMode })) {
+    installLinuxDevGpuFailureWatch({
+      tracker: gpuCrashFallbackTracker,
+      resolveMarkerEnvironment: getLinuxDevGpuFallbackEnvironment,
+      resolveUserDataPath: () => app.getPath('userData')
+    })
   }
   // Why: headless serve's offscreen BrowserWindows need an X display (Xvfb) on Linux; the result gates whether the offscreen backend is installed.
   headlessBrowserDisplayAvailable = ensureVirtualDisplayForHeadlessServe({ isServeMode })
@@ -1852,24 +1866,66 @@ function getWindowsGpuFallbackEnvironment(): WindowsGpuFallbackEnvironment | nul
   return { ...environment, platform: 'win32' }
 }
 
-// Why: read the GPU-fallback marker before app.whenReady() so app.disableHardwareAcceleration() takes effect. Windows desktop only.
-function maybeApplyGpuFallbackForThisLaunch(): void {
-  if (isServeMode || process.platform !== 'win32') {
-    return
+// Why: dev-only Linux recovery gate; packaged Linux keeps hardware acceleration until telemetry supports a global cut.
+function isLinuxDevGpuFallbackEnabled(): boolean {
+  return process.platform === 'linux' && is.dev && !isServeMode
+}
+
+// Why: same launch-failure burst is fatal on Linux dev hosts (error_code=1002 x N → "GPU process
+// isn't usable"), but there is no restart prompt to gate it, so recovery rides the persisted marker.
+function getLinuxDevGpuFallbackEnvironment(): LinuxGpuFallbackEnvironment | null {
+  if (!isLinuxDevGpuFallbackEnabled()) {
+    return null
   }
-  const marker = readActiveGpuFallbackMarker(app.getPath('userData'), getGpuFallbackEnvironment())
-  if (!marker) {
-    return
+  const environment = getGpuFallbackEnvironment()
+  if (environment.platform !== 'linux') {
+    return null
   }
+  return { ...environment, platform: 'linux' }
+}
+
+function applyGpuFallbackSwitchesForThisLaunch(crashesInWindow: number | undefined): void {
   app.disableHardwareAcceleration()
-  const appliedSwitches = applyGpuFallbackCommandLineSwitches(app.commandLine, process.platform)
+  const appliedSwitches = applyGpuFallbackCommandLineSwitches(app.commandLine, process.platform, {
+    linuxDevFallback: process.platform === 'linux'
+  })
   gpuFallbackActiveThisLaunch = true
   // Why: with no GPU child left, child-process-gone can't report a GPU fault, so
   // name the applied switches in the trail any later crash report carries.
   recordCrashBreadcrumb('gpu_fallback_applied', {
-    crashesInWindow: marker.crashesInWindow,
+    crashesInWindow,
     switches: appliedSwitches.join(',')
   })
+}
+
+// Why: read the GPU-fallback marker before app.whenReady() so app.disableHardwareAcceleration() takes effect. Windows desktop and Linux dev only.
+function maybeApplyGpuFallbackForThisLaunch(): void {
+  if (process.platform === 'win32') {
+    if (isServeMode) {
+      return
+    }
+    const marker = readActiveGpuFallbackMarker(app.getPath('userData'), getGpuFallbackEnvironment())
+    if (!marker) {
+      return
+    }
+    applyGpuFallbackSwitchesForThisLaunch(marker.crashesInWindow)
+    return
+  }
+  if (process.platform !== 'linux' || !is.dev || isServeMode) {
+    return
+  }
+  const environment = getLinuxDevGpuFallbackEnvironment()
+  if (!environment) {
+    return
+  }
+  const marker = readActiveGpuFallbackMarker(app.getPath('userData'), environment)
+  if (!marker) {
+    return
+  }
+  console.warn(
+    '[gpu-fallback] hardware acceleration disabled for this dev launch (a fatal GPU child-launch burst was recorded for this build); the marker clears itself on Electron/app updates.'
+  )
+  applyGpuFallbackSwitchesForThisLaunch(marker.crashesInWindow)
 }
 
 // Why: a burst of GPU child crashes means HW acceleration is unusable — persist a build-scoped marker and offer software rendering.

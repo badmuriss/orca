@@ -21,13 +21,17 @@ export type GpuFallbackEnvironment = {
 
 export type WindowsGpuFallbackEnvironment = GpuFallbackEnvironment & { platform: 'win32' }
 
+export type LinuxGpuFallbackEnvironment = GpuFallbackEnvironment & { platform: 'linux' }
+
+export type GpuFallbackMarkerPlatform = 'win32' | 'linux'
+
 export type GpuFallbackMarker = {
   schemeVersion: number
   engagedAt: number
   crashesInWindow: number
   appVersion: string
   electronVersion: string
-  platform: 'win32'
+  platform: GpuFallbackMarkerPlatform
 }
 
 function markerPath(userDataPath: string): string {
@@ -49,7 +53,7 @@ export function readGpuFallbackMarker(userDataPath: string): GpuFallbackMarker |
       !Number.isFinite(parsed.crashesInWindow) ||
       typeof parsed.appVersion !== 'string' ||
       typeof parsed.electronVersion !== 'string' ||
-      parsed.platform !== 'win32'
+      (parsed.platform !== 'win32' && parsed.platform !== 'linux')
     ) {
       return null
     }
@@ -70,7 +74,7 @@ export function readGpuFallbackMarker(userDataPath: string): GpuFallbackMarker |
 export function writeGpuFallbackMarker(
   userDataPath: string,
   info: { engagedAt: number; crashesInWindow: number },
-  environment: WindowsGpuFallbackEnvironment
+  environment: WindowsGpuFallbackEnvironment | LinuxGpuFallbackEnvironment
 ): void {
   const marker: GpuFallbackMarker = {
     schemeVersion: GPU_FALLBACK_SCHEME_VERSION,
@@ -78,7 +82,7 @@ export function writeGpuFallbackMarker(
     crashesInWindow: info.crashesInWindow,
     appVersion: environment.appVersion,
     electronVersion: environment.electronVersion,
-    platform: 'win32'
+    platform: environment.platform
   }
   writeFileSync(markerPath(userDataPath), JSON.stringify(marker))
 }
@@ -93,7 +97,7 @@ export function clearGpuFallbackMarker(userDataPath: string): void {
 
 export function readActiveGpuFallbackMarker(
   userDataPath: string,
-  environment: GpuFallbackEnvironment
+  environment: WindowsGpuFallbackEnvironment | LinuxGpuFallbackEnvironment
 ): GpuFallbackMarker | null {
   const marker = readGpuFallbackMarker(userDataPath)
   if (!marker) {
@@ -102,14 +106,14 @@ export function readActiveGpuFallbackMarker(
     }
     return null
   }
+  // Why: the marker is sticky only for the build that observed the driver crash
+  // burst; updates get one fresh hardware attempt automatically. macOS and other
+  // platforms never write markers, so any stray file is cleared on read there.
   if (
-    environment.platform !== 'win32' ||
     marker.platform !== environment.platform ||
     marker.appVersion !== environment.appVersion ||
     marker.electronVersion !== environment.electronVersion
   ) {
-    // Why: the marker is sticky only for the build that observed the driver
-    // crash burst; updates get one fresh hardware attempt automatically.
     clearGpuFallbackMarker(userDataPath)
     return null
   }
