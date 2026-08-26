@@ -14,28 +14,26 @@ export function getWindowsPowerShellExecutablePath(): string {
  * Switches for the PowerShell that relays hook output and exit status
  * (#14818 — conhost does neither).
  *
- * Only `-NoProfile` survives on the command line, because `-NoProfile
- * -EncodedCommand <b64>` is the one encoded shape the #16003 reporter actually
- * ran on the affected machine (Kaspersky Premium, Windows 11) and saw exit 0.
- * The four measured rows there were:
+ * `-WindowStyle Hidden` stays. It is the shipped fix for #14815 and its four
+ * duplicates (#14828, #15117, #15447, #15767): without it Windows allocates a
+ * console per hook event, which steals foreground from whatever the user is
+ * typing into, and strands a permanently visible window whenever a hook blocks
+ * reading stdin (see hook-stdin-contract.ts). Those are reported, reproduced
+ * user-facing failures on every hook event of every managed agent.
  *
- *   -NoProfile -WindowStyle Hidden -Command 'exit 0'                     -> 0
- *   -NoProfile -EncodedCommand <b64>                                     -> 0
- *   -NoProfile -ExecutionPolicy Bypass -Command 'exit 0'                 -> 0
- *   -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand -> 126
+ * `-ExecutionPolicy Bypass` is the flag that leaves the command line, because
+ * it is the only one of the three with an exact in-payload equivalent (below):
+ * it costs nothing to move. #16003 measured `-NoProfile -ExecutionPolicy Bypass
+ * -WindowStyle Hidden -EncodedCommand` as denied at CreateProcess (exit 126,
+ * Kaspersky Premium on Windows 11) no matter what the payload decodes to, so
+ * the triple has to stop being spelled; dropping the policy flag breaks it.
  *
- * Every passing row drops two of the three flags; none drops exactly one, so
- * "drop any one flag" is extrapolation, not measurement. `-WindowStyle Hidden
- * -EncodedCommand` is itself the "hidden encoded PowerShell" shape the denial
- * is named for, so keeping it would be a guess. Dropping it costs at most a
- * console flash where the parent has no console to inherit; keeping
- * `-Command` instead of `-EncodedCommand` would cost path and switch integrity
- * across cmd.exe and MSYS (#6078, #14815), which is a correctness loss.
- *
- * `-ExecutionPolicy Bypass` moves into the encoded payload below, where it is
- * the same process-scope setting with the same power.
+ * What is not established: that the remaining pair clears that AV signature —
+ * the reporter measured no two-flag encoded shape. If it turns out not to, the
+ * answer is another launcher shape that still suppresses the window, not
+ * trading a reproduced regression for an unmeasured hope.
  */
-export const WINDOWS_POWERSHELL_HOOK_SWITCHES = '-NoProfile'
+export const WINDOWS_POWERSHELL_HOOK_SWITCHES = '-NoProfile -WindowStyle Hidden'
 
 // Why: redirected PowerShell progress becomes CLIXML that can corrupt merged JSON output.
 const HOOK_PROGRESS_SILENCER = "$ProgressPreference='SilentlyContinue'; "

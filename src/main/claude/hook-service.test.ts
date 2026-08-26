@@ -40,7 +40,9 @@ describe('getWindowsManagedLifecycleHook', () => {
     const hook = getWindowsManagedLifecycleHook(scriptPath)
 
     expect(hook.args).toBeUndefined()
-    expect(hook.command).toMatch(/\/powershell\.exe -NoProfile -EncodedCommand /)
+    expect(hook.command).toMatch(
+      /\/powershell\.exe -NoProfile -WindowStyle Hidden -EncodedCommand /
+    )
     expect(hook.command).not.toContain(scriptPath)
     // Why: Git Bash/MSYS mangles backslash paths and slash-prefixed switches.
     expect(hook.command.replace(/-EncodedCommand \S+$/, '')).not.toMatch(/\\| \/[a-zA-Z]+( |$)/)
@@ -382,7 +384,9 @@ describe('ClaudeHookService.install', () => {
         for (const eventName of ['UserPromptSubmit', 'Stop', 'StopFailure']) {
           const hook = settings.hooks[eventName]?.[0]?.hooks?.[0]
           expect(hook?.args).toBeUndefined()
-          expect(hook?.command).toMatch(/\/powershell\.exe -NoProfile -EncodedCommand /)
+          expect(hook?.command).toMatch(
+            /\/powershell\.exe -NoProfile -WindowStyle Hidden -EncodedCommand /
+          )
           expect(hook?.command).not.toContain(scriptPath)
 
           const encoded = hook?.command.match(/-EncodedCommand (\S+)$/)?.[1]

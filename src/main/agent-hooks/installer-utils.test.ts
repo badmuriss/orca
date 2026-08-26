@@ -604,7 +604,7 @@ describe('wrapPosixHookCommand', () => {
 })
 
 const qualifiedWindowsPowerShellCommand =
-  /^[A-Za-z]:\/[^"]*\/System32\/WindowsPowerShell\/v1\.0\/powershell\.exe -NoProfile -EncodedCommand \S+$/
+  /^[A-Za-z]:\/[^"]*\/System32\/WindowsPowerShell\/v1\.0\/powershell\.exe -NoProfile -WindowStyle Hidden -EncodedCommand \S+$/
 
 function decodeWindowsHookCommand(command: string): string {
   const encodedCommand = command.match(/ -EncodedCommand (\S+)$/)?.[1]
@@ -743,6 +743,17 @@ describe('wrapRuntimeHomeHookCommand', () => {
       expect(command).not.toMatch(/\$\{[A-Za-z_][A-Za-z0-9_]*\}/)
     }
   )
+
+  it('hides the console on the Git Bash branch too, and still avoids the denied triple', () => {
+    // Why: this branch launches PowerShell from bash, where the parent has no
+    // console to inherit — Windows allocates a fresh one per hook event unless
+    // the switch says otherwise (#14815), and the AV verdict on the flag triple
+    // applies to the exact same string (#16003).
+    const command = wrapRuntimeHomeHookCommand('claude-hook')
+
+    expect(command).toContain('powershell.exe" -NoProfile -WindowStyle Hidden -EncodedCommand ')
+    expect(command).not.toMatch(/-ExecutionPolicy/i)
+  })
 
   it('rejects a script base name that could inject shell syntax', () => {
     expect(() => wrapRuntimeHomeHookCommand('claude-hook; echo injected')).toThrow(
