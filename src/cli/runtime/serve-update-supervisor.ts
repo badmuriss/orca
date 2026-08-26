@@ -6,12 +6,19 @@ import {
   parseServeUpdateHandoffState,
   type ServeUpdateHandoffState
 } from '../../shared/serve-update-handoff'
+import {
+  QUIT_RENDERER_ACK_TIMEOUT_MS,
+  WILL_QUIT_TEARDOWN_DEADLINE_MS
+} from '../../shared/quit-teardown-deadline'
 import { serveSignalExitError } from './serve-signal-exit-diagnostic'
 import { waitForMacBundleVersion } from './mac-app-update-bundle'
 
 export const SERVE_REPLACEMENT_READY_TIMEOUT_MS = 60_000
-// Electron's committed quit barrier has a 20s deadline; the supervisor must not kill it first.
-export const SERVE_CHILD_FORCE_KILL_GRACE_MS = 30_000
+export const SERVE_CHILD_FORCE_KILL_SCHEDULING_MARGIN_MS = 5_000
+export const SERVE_CHILD_FORCE_KILL_GRACE_MS =
+  QUIT_RENDERER_ACK_TIMEOUT_MS +
+  WILL_QUIT_TEARDOWN_DEADLINE_MS +
+  SERVE_CHILD_FORCE_KILL_SCHEDULING_MARGIN_MS
 
 type InstallRequestedHandoff = Extract<ServeUpdateHandoffState, { phase: 'install-requested' }>
 type ServeReadiness = 'not-expected' | 'pending' | 'verified' | 'failed'
@@ -113,7 +120,11 @@ function waitForForegroundChild(
     let readyTimer: ReturnType<typeof setTimeout> | null = null
     let readiness: ServeReadiness = expected ? 'pending' : 'not-expected'
     let stateWrite = Promise.resolve()
+    let childSettled = false
     const terminateChild = (): void => {
+      if (childSettled) {
+        return
+      }
       child.kill('SIGTERM')
       forceKillTimer ??= setTimeout(() => child.kill('SIGKILL'), SERVE_CHILD_FORCE_KILL_GRACE_MS)
     }
@@ -200,10 +211,12 @@ function waitForForegroundChild(
       }, SERVE_REPLACEMENT_READY_TIMEOUT_MS)
     }
     const handleExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+      childSettled = true
       cleanup()
       void stateWrite.then(() => resolveWait({ code, signal, readiness }))
     }
     child.once('error', (error) => {
+      childSettled = true
       recordReplacementFailure(`Could not start the replacement process: ${String(error)}`)
       cleanup()
       child.off('exit', handleExit)

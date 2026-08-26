@@ -16217,6 +16217,12 @@
           ]
         },
         {
+          "file": "src/main/browser/agent-browser-bridge-tab-routing.test.ts",
+          "assertions": [
+            "closing a tab retires the exact named agent-browser session"
+          ]
+        },
+        {
           "file": "src/main/startup/serve-signal-handlers.test.ts",
           "assertions": [
             "every repeated serve signal retries Electron quit after a possible renderer veto",
@@ -16233,7 +16239,8 @@
         {
           "file": "src/cli/runtime/serve-signal-exit-diagnostic.test.ts",
           "assertions": [
-            "serve supervisor force-kill grace exceeds the shared Electron quit deadline",
+            "serve supervisor force-kill grace covers renderer acknowledgement, committed teardown, and scheduling margin",
+            "late update handoff failure cannot rearm termination after child exit",
             "Windows shared-console Ctrl-C is not forwarded as an immediate child termination"
           ]
         }
