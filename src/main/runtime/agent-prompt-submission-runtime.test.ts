@@ -442,25 +442,26 @@ describe('agent prompt submission runtime', () => {
     expect(writes.filter((data) => data === '\r')).toHaveLength(1)
   })
 
-  it('accepts a hook working status with no window and no title coverage', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(1_000)
+  // Why: hook rows reach the runtime through this provider, which has no window and no OSC title —
+  // the same path a headless `orca serve` host and a minimized desktop window take.
+  async function createHookOnlyPromptRuntime(hook: {
+    state: 'done' | 'working'
+    stateStartedAt: number
+  }): Promise<{ runtime: OrcaRuntimeService; handle: string; writes: string[] }> {
     let handle = ''
-    let hookState: 'done' | 'working' = 'done'
     const writes: string[] = []
-    // Why: hook rows reach the runtime through this provider, which has no window and no OSC title —
-    // the same path a headless `orca serve` host and a minimized desktop window take.
     const runtime = new OrcaRuntimeService(makeStore() as never, undefined, {
       getAgentStatusSnapshot: () => [
         {
           paneKey: 'prompt-pane',
           terminalHandle: handle,
-          state: hookState,
+          state: hook.state,
           prompt: '',
           agentType: 'kimi',
           connectionId: null,
+          // Why: every hook ping refreshes receivedAt, including same-state tool pings.
           receivedAt: Date.now(),
-          stateStartedAt: Date.now()
+          stateStartedAt: hook.stateStartedAt
         }
       ]
     })
@@ -468,10 +469,6 @@ describe('agent prompt submission runtime', () => {
       spawn: vi.fn().mockResolvedValue({ id: 'pty-prompt' }),
       write: (_ptyId, data) => {
         writes.push(data)
-        if (data === '\r') {
-          vi.setSystemTime(3_000)
-          hookState = 'working'
-        }
         return true
       },
       kill: () => true,
@@ -482,11 +479,51 @@ describe('agent prompt submission runtime', () => {
         launchAgent: 'kimi'
       })
     ).handle
+    return { runtime, handle, writes }
+  }
+
+  it('accepts a hook working status with no window and no title coverage', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const hook = { state: 'done' as 'done' | 'working', stateStartedAt: 1_000 }
+    const { runtime, handle, writes } = await createHookOnlyPromptRuntime(hook)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-prompt' }),
+      write: (_ptyId, data) => {
+        writes.push(data)
+        if (data === '\r') {
+          vi.setSystemTime(3_000)
+          hook.state = 'working'
+          hook.stateStartedAt = 3_000
+        }
+        return true
+      },
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
 
     const submission = runtime.sendTerminalAgentPrompt(handle, 'review this')
     await vi.runAllTimersAsync()
 
     await expect(submission).resolves.toMatchObject({ accepted: true })
+    expect(writes.filter((data) => data === '\r')).toHaveLength(1)
+  })
+
+  // Why: same-state pings keep refreshing receivedAt on a turn that started before the prompt;
+  // only the pinned stateStartedAt separates that from a turn this prompt started.
+  it('does not accept a hook row refreshed without a new working turn', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const { runtime, handle, writes } = await createHookOnlyPromptRuntime({
+      state: 'working',
+      stateStartedAt: 1_000
+    })
+
+    const submission = runtime.sendTerminalAgentPrompt(handle, 'review this')
+    const rejected = expect(submission).rejects.toThrow('agent_prompt_stalled')
+    await vi.runAllTimersAsync()
+
+    await rejected
     expect(writes.filter((data) => data === '\r')).toHaveLength(1)
   })
 

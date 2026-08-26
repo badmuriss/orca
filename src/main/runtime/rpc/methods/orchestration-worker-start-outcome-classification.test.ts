@@ -21,10 +21,9 @@ describe('worker start outcome classification', () => {
     expect(isUnknownWorkerStartOutcome(new Error('worktree exists'), 'worktree_create')).toBe(false)
   })
 
-  // Characterization: a stalled prompt means the Enter effect was not observed, never that the
-  // preamble is missing — but worker-start still settles it as a definite failure (and revokes the
-  // dispatch capability). Pinned by orchestration-worker-start-prompt-contract.test.ts; changing it
-  // needs late-report acceptance for a revoked capability, which this classifier cannot express.
+  // Why: a stalled prompt still reports a definite failure to the caller — the correction path is
+  // the worker's own report, which keeps its capability and can re-settle the dispatch (see
+  // worker-start-unobserved-prompt-settlement.test.ts), not an outcome_unknown receipt.
   it('does not class a stalled dispatch prompt as unknown', () => {
     expect(isUnknownWorkerStartOutcome(new Error('agent_prompt_stalled'), 'dispatch_input')).toBe(
       false

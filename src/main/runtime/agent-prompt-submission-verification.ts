@@ -17,8 +17,9 @@ export type AgentPromptActivity = Readonly<{
   generation: number
   permissionSequence: number
   workingSequence: number
-  /** Hook-reported `working` timestamp; reaches the runtime with no window and no title coverage. */
-  explicitWorkingAt: number | null
+  /** When the hook's current `working` turn began; reaches the runtime with no window and no
+   *  title coverage. Pinned across same-state pings, so a refresh alone cannot move it. */
+  explicitWorkingStartedAt: number | null
   /** PTY bytes seen on this pane; delivery evidence when a turn-start edge cannot be observed. */
   outputSequence: number
   status: 'working' | 'permission' | 'idle' | null
@@ -87,14 +88,15 @@ function agentPromptEffectObserved(
 }
 
 // Why: hook status reaches the runtime directly, so it survives a hidden window and headless serve —
-// the synthetic-title route that feeds workingSequence does not (#16095).
+// the synthetic-title route that feeds workingSequence does not (#16095). Only a turn that started
+// after the baseline counts, so a same-state ping on the turn already running is not evidence.
 function observedHookWorkingAfterBaseline(
   baseline: AgentPromptActivity,
   current: AgentPromptActivity
 ): boolean {
   return (
-    current.explicitWorkingAt !== null &&
-    current.explicitWorkingAt > (baseline.explicitWorkingAt ?? 0)
+    current.explicitWorkingStartedAt !== null &&
+    current.explicitWorkingStartedAt > (baseline.explicitWorkingStartedAt ?? 0)
   )
 }
 

@@ -19630,16 +19630,20 @@ export class OrcaRuntimeService {
   private getFreshExplicitAgentStatusForHandle(handle: string): {
     status: NonNullable<RuntimeTerminalAgentStatus['status']>
     updatedAt: number
+    /** When this state was entered. Pinned across same-state pings, so it identifies the turn. */
+    stateStartedAt: number
   } | null {
     const paneKey = this.getPaneKeyForTerminalHandle(handle)
     const now = Date.now()
     let bestStatus: NonNullable<RuntimeTerminalAgentStatus['status']> | null = null
     let bestUpdatedAt = -1
+    let bestStateStartedAt = -1
 
     const consider = (
       state: AgentStatusEntry['state'] | undefined,
       updatedAt: number | null | undefined,
-      restoredUnconfirmed = false
+      restoredUnconfirmed = false,
+      stateStartedAt?: number | null
     ): void => {
       if (!state || restoredUnconfirmed) {
         return
@@ -19653,22 +19657,25 @@ export class OrcaRuntimeService {
       if (updatedAt > bestUpdatedAt || (updatedAt === bestUpdatedAt && status === 'permission')) {
         bestStatus = status
         bestUpdatedAt = updatedAt
+        bestStateStartedAt = typeof stateStartedAt === 'number' ? stateStartedAt : updatedAt
       }
     }
 
     if (paneKey) {
       const retained = this.latestAgentStatusByPaneKey.get(paneKey)
-      consider(retained?.payload.state, retained?.updatedAt)
+      consider(retained?.payload.state, retained?.updatedAt, false, retained?.stateStartedAt)
     }
 
     for (const entry of this.getAgentStatusSnapshotFn?.() ?? []) {
       if (entry.terminalHandle !== handle && (!paneKey || entry.paneKey !== paneKey)) {
         continue
       }
-      consider(entry.state, entry.receivedAt, entry.restoredUnconfirmed)
+      consider(entry.state, entry.receivedAt, entry.restoredUnconfirmed, entry.stateStartedAt)
     }
 
-    return bestStatus ? { status: bestStatus, updatedAt: bestUpdatedAt } : null
+    return bestStatus
+      ? { status: bestStatus, updatedAt: bestUpdatedAt, stateStartedAt: bestStateStartedAt }
+      : null
   }
 
   private async writeTerminalAction(
@@ -19895,8 +19902,10 @@ export class OrcaRuntimeService {
       permissionSequence: this.agentPromptPermissionSequenceByPtyId.get(ptyId) ?? 0,
       workingSequence: lifecycle?.workingSequence ?? 0,
       // Why: hook status is the only turn-start signal agents without title coverage have, and it
-      // reaches here without the window-gated synthetic title frame (#16095).
-      explicitWorkingAt: explicit?.status === 'working' ? explicit.updatedAt : null,
+      // reaches here without the window-gated synthetic title frame (#16095). Anchored on
+      // stateStartedAt, not updatedAt — same-state tool/prompt pings refresh updatedAt and would
+      // otherwise pass off an in-progress turn as a new one.
+      explicitWorkingStartedAt: explicit?.status === 'working' ? explicit.stateStartedAt : null,
       outputSequence: this.getPtyOutputSequence(ptyId),
       status
     }

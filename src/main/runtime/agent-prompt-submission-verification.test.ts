@@ -13,7 +13,7 @@ function activity(overrides: Partial<AgentPromptActivity> = {}): AgentPromptActi
     generation: 1,
     permissionSequence: 2,
     workingSequence: 4,
-    explicitWorkingAt: null,
+    explicitWorkingStartedAt: null,
     outputSequence: 7,
     status: 'idle',
     ...overrides
@@ -141,7 +141,7 @@ describe('agent prompt submission verification', () => {
     })
 
     // No workingSequence edge: the window-gated synthetic title never ran (hidden window/headless).
-    current = activity({ explicitWorkingAt: 2_000, status: 'working' })
+    current = activity({ explicitWorkingStartedAt: 2_000, status: 'working' })
     await vi.advanceTimersByTimeAsync(50)
 
     await expect(verification).resolves.toBeUndefined()
@@ -149,13 +149,30 @@ describe('agent prompt submission verification', () => {
 
   it('does not accept a hook working status that predates the baseline', async () => {
     vi.useFakeTimers()
-    const current = activity({ explicitWorkingAt: 2_000, status: 'working' })
+    const current = activity({ explicitWorkingStartedAt: 2_000, status: 'working' })
     const verification = verifyAgentPromptSubmission({
       baseline: current,
       readActivity: () => current
     })
     const rejected = expect(verification).rejects.toThrow('agent_prompt_stalled')
 
+    await vi.advanceTimersByTimeAsync(AGENT_PROMPT_EFFECT_TIMEOUT_MS)
+
+    await rejected
+  })
+
+  // Why: same-state hook pings refresh the row without starting a turn, so only the pinned
+  // stateStartedAt may satisfy the check — a refreshed row must stay unproven.
+  it('does not accept a refreshed hook row whose working turn did not restart', async () => {
+    vi.useFakeTimers()
+    let current = activity({ explicitWorkingStartedAt: 2_000 })
+    const verification = verifyAgentPromptSubmission({
+      baseline: current,
+      readActivity: () => current
+    })
+    const rejected = expect(verification).rejects.toThrow('agent_prompt_stalled')
+
+    current = activity({ explicitWorkingStartedAt: 2_000, outputSequence: 40 })
     await vi.advanceTimersByTimeAsync(AGENT_PROMPT_EFFECT_TIMEOUT_MS)
 
     await rejected
@@ -200,7 +217,7 @@ describe('agent prompt submission verification', () => {
     })
 
     await vi.advanceTimersByTimeAsync(AGENT_PROMPT_EFFECT_TIMEOUT_MS + 1_000)
-    current = activity({ explicitWorkingAt: 9_000, status: 'working' })
+    current = activity({ explicitWorkingStartedAt: 9_000, status: 'working' })
     await vi.advanceTimersByTimeAsync(50)
 
     await expect(verification).resolves.toBeUndefined()
