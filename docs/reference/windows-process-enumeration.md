@@ -15,7 +15,10 @@ since removed.
 table. It wraps a Toolhelp32 snapshot from `@vscode/windows-process-tree`.
 
 ```ts
-import { readWindowsProcessTable, readWindowsProcessTableFresh } from '../windows/windows-process-table'
+import {
+  readWindowsProcessTable,
+  readWindowsProcessTableFresh
+} from '../windows/windows-process-table'
 ```
 
 - `readWindowsProcessTable()` — shared TTL cache. Use for anything periodic.
@@ -31,11 +34,11 @@ survived its own teardown (#9045).
 
 Measured on Windows 11 with 1050 processes (p50 / p95):
 
-| | p50 | p95 |
-| --- | --- | --- |
-| pid + ppid + name | 15.9 ms | 17.5 ms |
-| + memory + command line | 30.6 ms | 33.7 ms |
-| `Get-CimInstance` via PowerShell | 706 ms | 723 ms |
+|                                  | p50     | p95     |
+| -------------------------------- | ------- | ------- |
+| pid + ppid + name                | 15.9 ms | 17.5 ms |
+| + memory + command line          | 30.6 ms | 33.7 ms |
+| `Get-CimInstance` via PowerShell | 706 ms  | 723 ms  |
 
 ## The relay has no binding, and falls back
 
@@ -104,6 +107,13 @@ time to prove a PID has not been recycled — daemon identity, managed-hook
 ownership, and CPU accounting in the memory collector — still reads it through
 its own query. Those callers are not migrated.
 
+Committed private bytes have no equivalent either, and the one memory value the
+snapshot does carry is unusable for the sizes Orca now sees: `process.cc` stores
+`pmc.WorkingSetSize` into a `DWORD`, so anything above 4 GB wraps. That is the
+second reason `windows-process-resource-collector.ts` still runs its own
+`Get-CimInstance` sweep — it needs `PageFileUsage` (commit) and the CPU-time
+counters in the same pass. Migrating it to the native table would cost both.
+
 Start time is a proxy for identity, not identity. The durable answer for the
 process trees Orca itself spawns is an inherited handle: a job object names the
 tree Orca created, so no start-time comparison is needed. Those readers should
@@ -139,7 +149,7 @@ The per-PTY job deliberately does **not** set
 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. Measured on Windows 11: with that flag,
 releasing the handle when the shell exits also kills whatever the user left
 running, so typing `exit` in a pane reaped a `start /b` server that used to
-survive. The job exists to make an *explicit* teardown exact, not to redefine
+survive. The job exists to make an _explicit_ teardown exact, not to redefine
 what a clean exit means.
 
 Reaping a dead daemon's shells (#9195, #10415) is therefore a **second, nested
@@ -164,7 +174,7 @@ kill-on-close job on the app, which is exactly what the crash-survival
 guarantee forbids.
 
 Once the shell exits, node-pty drops its handle record and closes the job, so a
-terminated tree reports `null` rather than `[]`. Null means *unverifiable* in
+terminated tree reports `null` rather than `[]`. Null means _unverifiable_ in
 the sense of [`ssh-execution-boundary.md`](./ssh-execution-boundary.md) — no job
 support, not a ConPTY, or no longer tracked. It is never evidence that
 processes died.
