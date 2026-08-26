@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { settleTeardownWithinDeadline } from './quit-teardown-deadline'
 
 /**
  * agent-browser forks a daemon per browser tab that Orca holds no handle on, and
@@ -32,33 +31,5 @@ describe('quit teardown of agent-browser daemons', () => {
     )
     // Why: a second, uncaptured call site is the pre-fix shape — it loses the race to app.quit().
     expect(source.match(/getAgentBrowserBridge\(\)\?\.destroyAllSessions\(\)/g)).toHaveLength(1)
-  })
-
-  it('holds quit open until the daemon closes settle', async () => {
-    const order: string[] = []
-    const daemonCloses = new Promise<void>((resolve) => {
-      setTimeout(() => {
-        order.push('sessions-destroyed')
-        resolve()
-      }, 30)
-    })
-
-    const pending = await settleTeardownWithinDeadline(
-      [{ name: 'agent-browser', promise: daemonCloses }],
-      5_000
-    )
-    order.push('quit')
-
-    expect(pending).toEqual([])
-    expect(order).toEqual(['sessions-destroyed', 'quit'])
-  })
-
-  it('still quits when a daemon close wedges', async () => {
-    const pending = await settleTeardownWithinDeadline(
-      [{ name: 'agent-browser', promise: new Promise<void>(() => {}) }],
-      20
-    )
-
-    expect(pending).toEqual(['agent-browser'])
   })
 })

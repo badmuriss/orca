@@ -16,22 +16,33 @@ const AGENT_BROWSER_SOCKET_DIRECTORY_PREFIX = 'orca-ab-'
  *
  * 10 minutes: >6x `EXEC_TIMEOUT_MS` (90s) so no command, retry chain, or normal
  * gap between two user commands can be cut short by it, while capping an
- * abandoned daemon (and, on the orcad path, the Chromium tree it owns) at
- * minutes instead of days.
+ * abandoned daemon at minutes instead of days. Only per-tab helper daemons get
+ * this: see `externalChromiumAgentBrowserEnvironment` for why the daemon that
+ * owns a whole Chromium tree must not be idled out.
  */
 export const AGENT_BROWSER_IDLE_TIMEOUT_MS = 10 * 60 * 1000
+
+export type AgentBrowserProcessEnvironment = {
+  env: NodeJS.ProcessEnv
+  /**
+   * True only when Orca derived the socket directory itself. An inherited
+   * `AGENT_BROWSER_SOCKET_DIR` can be shared with another Orca profile, so it is
+   * no proof that `session list` under it sees only this profile's daemons.
+   */
+  ownsSocketDirectory: boolean
+}
 
 export function createAgentBrowserProcessEnvironment(options: {
   inheritedEnv: NodeJS.ProcessEnv
   platform: NodeJS.Platform
   userDataPath: string
-}): NodeJS.ProcessEnv {
+}): AgentBrowserProcessEnvironment {
   const env = { ...options.inheritedEnv }
   if (!env.AGENT_BROWSER_IDLE_TIMEOUT_MS?.trim()) {
     env.AGENT_BROWSER_IDLE_TIMEOUT_MS = String(AGENT_BROWSER_IDLE_TIMEOUT_MS)
   }
   if (options.platform === 'win32' || env.AGENT_BROWSER_SOCKET_DIR?.trim()) {
-    return env
+    return { env, ownsSocketDirectory: false }
   }
   const profileKey = createHash('sha256').update(options.userDataPath).digest('hex').slice(0, 16)
   const socketDirectory = join('/tmp', `${AGENT_BROWSER_SOCKET_DIRECTORY_PREFIX}${profileKey}`)
@@ -39,8 +50,8 @@ export function createAgentBrowserProcessEnvironment(options: {
     mkdirSync(socketDirectory, { recursive: true, mode: 0o700 })
     chmodSync(socketDirectory, 0o700)
   } catch {
-    return env
+    return { env, ownsSocketDirectory: false }
   }
   env.AGENT_BROWSER_SOCKET_DIR = socketDirectory
-  return env
+  return { env, ownsSocketDirectory: true }
 }

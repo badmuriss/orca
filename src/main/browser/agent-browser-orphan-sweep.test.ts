@@ -10,7 +10,10 @@ import { sweepOrphanedAgentBrowserSessions } from './agent-browser-orphan-sweep'
 type Spec = { args?: readonly string[] }
 
 const BIN = '/opt/orca/agent-browser'
-const SCOPED_ENV = { AGENT_BROWSER_SOCKET_DIR: '/tmp/orca-ab-0123456789abcdef' }
+const SCOPED = {
+  env: { AGENT_BROWSER_SOCKET_DIR: '/tmp/orca-ab-0123456789abcdef' },
+  ownsSocketDirectory: true
+}
 
 function respond(sessions: string[]): void {
   runProcessMock.mockImplementation((spec: Spec) => {
@@ -41,7 +44,7 @@ describe('agent-browser orphan sweep', () => {
   it('closes tab daemons left by a previous run', async () => {
     respond(['orca-tab-aaa', 'orca-tab-bbb'])
 
-    const closed = await sweepOrphanedAgentBrowserSessions({ binaryPath: BIN, env: SCOPED_ENV })
+    const closed = await sweepOrphanedAgentBrowserSessions({ binaryPath: BIN, ...SCOPED })
 
     expect(closed).toEqual(['orca-tab-aaa', 'orca-tab-bbb'])
     expect(closedArgs()).toEqual([
@@ -53,7 +56,7 @@ describe('agent-browser orphan sweep', () => {
   it('never closes a daemon outside Orca tab naming', async () => {
     respond(['default', 'agent1', 'orca-orcad-deadbeef', 'orca-tab-aaa'])
 
-    await sweepOrphanedAgentBrowserSessions({ binaryPath: BIN, env: SCOPED_ENV })
+    await sweepOrphanedAgentBrowserSessions({ binaryPath: BIN, ...SCOPED })
 
     expect(closedArgs()).toEqual([['--session', 'orca-tab-aaa', 'close']])
   })
@@ -63,21 +66,25 @@ describe('agent-browser orphan sweep', () => {
 
     await sweepOrphanedAgentBrowserSessions({
       binaryPath: BIN,
-      env: SCOPED_ENV,
+      ...SCOPED,
       isSessionLive: (name) => name === 'orca-tab-live'
     })
 
     expect(closedArgs()).toEqual([['--session', 'orca-tab-orphan', 'close']])
   })
 
-  // Why: without a private socket dir (Windows named pipes) `session list` is machine-wide,
-  // so a sweep could close a daemon another process owns. Idle timeout bounds Windows instead.
-  it('does not enumerate when the socket directory cannot prove ownership', async () => {
+  // Why: without a socket dir Orca derived itself, `session list` can reach daemons another Orca
+  // profile owns (Windows named pipes, or an inherited AGENT_BROWSER_SOCKET_DIR). Idle timeout bounds those.
+  it.each([
+    ['no socket directory at all', { PATH: 'C:\\Windows' }],
+    ['a socket directory Orca inherited', { AGENT_BROWSER_SOCKET_DIR: '/tmp/shared-ab' }]
+  ])('does not enumerate with %s', async (_label, env) => {
     respond(['orca-tab-aaa'])
 
     const closed = await sweepOrphanedAgentBrowserSessions({
       binaryPath: BIN,
-      env: { PATH: 'C:\\Windows' }
+      env,
+      ownsSocketDirectory: false
     })
 
     expect(closed).toEqual([])
@@ -94,7 +101,7 @@ describe('agent-browser orphan sweep', () => {
     })
 
     await expect(
-      sweepOrphanedAgentBrowserSessions({ binaryPath: BIN, env: SCOPED_ENV })
+      sweepOrphanedAgentBrowserSessions({ binaryPath: BIN, ...SCOPED })
     ).resolves.toEqual([])
     expect(closedArgs()).toEqual([])
   })
@@ -103,7 +110,7 @@ describe('agent-browser orphan sweep', () => {
     runProcessMock.mockRejectedValue(new Error('ENOENT'))
 
     await expect(
-      sweepOrphanedAgentBrowserSessions({ binaryPath: BIN, env: SCOPED_ENV })
+      sweepOrphanedAgentBrowserSessions({ binaryPath: BIN, ...SCOPED })
     ).resolves.toEqual([])
   })
 
@@ -124,7 +131,7 @@ describe('agent-browser orphan sweep', () => {
       return Promise.resolve({ code: 0, signal: null, stdout: '', stderr: '', timedOut: false })
     })
 
-    const closed = await sweepOrphanedAgentBrowserSessions({ binaryPath: BIN, env: SCOPED_ENV })
+    const closed = await sweepOrphanedAgentBrowserSessions({ binaryPath: BIN, ...SCOPED })
 
     expect(closed).toEqual(['orca-tab-bbb'])
   })
@@ -132,7 +139,7 @@ describe('agent-browser orphan sweep', () => {
   it('bounds every child it starts', async () => {
     respond(['orca-tab-aaa'])
 
-    await sweepOrphanedAgentBrowserSessions({ binaryPath: BIN, env: SCOPED_ENV })
+    await sweepOrphanedAgentBrowserSessions({ binaryPath: BIN, ...SCOPED })
 
     for (const call of runProcessMock.mock.calls) {
       expect((call[0] as { timeoutMs?: number | null }).timeoutMs).toBeGreaterThan(0)

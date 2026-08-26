@@ -58,6 +58,8 @@ import {
 
 // Why: must exceed agent-browser's internal timeouts (goto 30s, wait 60s) so the bridge never kills a command before its own timeout fires.
 const EXEC_TIMEOUT_MS = 90_000
+// Why separate from EXEC_TIMEOUT_MS: a close is a member of the 20s will-quit barrier and must finish well inside it.
+const TEARDOWN_CLOSE_TIMEOUT_MS = 5_000
 const CONSECUTIVE_TIMEOUT_LIMIT = 3
 const WAIT_PROCESS_TIMEOUT_GRACE_MS = 1_000
 const STALE_SESSION_CLOSE_TIMEOUT_MS = 3_000
@@ -73,6 +75,8 @@ type SessionState = {
   // Why: track active interception patterns so they can be re-enabled after session restart
   activeInterceptPatterns: string[]
   activeCapture: boolean
+  // Why: the daemon retires itself once idle; the gap since the last command is how the bridge notices.
+  lastCommandAt: number
   // Why: verify the tab is alive at execution time, not just enqueue time — queue delay can destroy it in between.
   webContentsId: number
   activeProcess: ChildProcess | null
@@ -584,6 +588,9 @@ export class AgentBrowserBridge {
   private screenshotTurn: Promise<void> = Promise.resolve()
   private readonly agentBrowserBin: string
   private readonly agentBrowserEnv: NodeJS.ProcessEnv
+  private readonly ownsAgentBrowserSocketDirectory: boolean
+  // Why: null when nothing bounds the daemon, so the bridge never guesses that one was replaced.
+  private readonly agentBrowserIdleTimeoutMs: number | null
   // Why: stash intercept patterns from a swap-destroyed session, keyed by name, so the next session restores them.
   private readonly pendingInterceptRestore = new Map<string, string[]>()
   // Why: promise-lock so two concurrent ensureSession calls don't both create the session entry.
@@ -597,11 +604,15 @@ export class AgentBrowserBridge {
     private readonly options: AgentBrowserBridgeOptions = {}
   ) {
     this.agentBrowserBin = resolveAgentBrowserBinary()
-    this.agentBrowserEnv = createAgentBrowserProcessEnvironment({
+    const processEnvironment = createAgentBrowserProcessEnvironment({
       inheritedEnv: process.env,
       platform: process.platform,
       userDataPath: app.getPath('userData')
     })
+    this.agentBrowserEnv = processEnvironment.env
+    this.ownsAgentBrowserSocketDirectory = processEnvironment.ownsSocketDirectory
+    const idleTimeoutMs = Number(this.agentBrowserEnv.AGENT_BROWSER_IDLE_TIMEOUT_MS)
+    this.agentBrowserIdleTimeoutMs = idleTimeoutMs > 0 ? idleTimeoutMs : null
   }
 
   // ── Tab tracking ──
@@ -682,11 +693,22 @@ export class AgentBrowserBridge {
       this.activeWebContentsId = nextWorktreeActiveWebContentsId
     }
     if (browserPageId) {
-      const sessionName = `${ORCA_TAB_SESSION_PREFIX}${browserPageId}`
-      await this.destroySession(sessionName)
-      this.pendingInterceptRestore.delete(sessionName)
+      await this.onPageClosed(browserPageId)
     }
     this.options.onTabsChanged?.(owningWorktreeId)
+  }
+
+  /**
+   * Retire a page's daemon by page id.
+   *
+   * The headless offscreen backend owns pages by id and unregisters the guest
+   * itself, so `onTabClosed`'s webContentsId lookup can never resolve one — it
+   * has to say which page closed (#16367).
+   */
+  async onPageClosed(browserPageId: string): Promise<void> {
+    const sessionName = `${ORCA_TAB_SESSION_PREFIX}${browserPageId}`
+    await this.destroySession(sessionName)
+    this.pendingInterceptRestore.delete(sessionName)
   }
 
   async onProcessSwap(
@@ -2058,6 +2080,7 @@ export class AgentBrowserBridge {
     return sweepOrphanedAgentBrowserSessions({
       binaryPath: this.agentBrowserBin,
       env: this.agentBrowserEnv,
+      ownsSocketDirectory: this.ownsAgentBrowserSocketDirectory,
       isSessionLive: (sessionName) =>
         this.sessions.has(sessionName) || this.pendingSessionCreation.has(sessionName)
     })
@@ -2065,7 +2088,14 @@ export class AgentBrowserBridge {
 
   async destroyAllSessions(): Promise<void> {
     const promises: Promise<void>[] = []
-    for (const sessionName of this.sessions.keys()) {
+    // Why the union: a session still being created has already spawned its daemon but is not in
+    // `sessions` yet, so closing only `sessions` lets that daemon outlive the quit (#16367).
+    const sessionNames = new Set([
+      ...this.sessions.keys(),
+      ...this.pendingSessionCreation.keys(),
+      ...this.pendingSessionDestruction.keys()
+    ])
+    for (const sessionName of sessionNames) {
       promises.push(this.destroySession(sessionName))
     }
     await Promise.allSettled(promises)
@@ -2356,6 +2386,7 @@ export class AgentBrowserBridge {
         consecutiveTimeouts: 0,
         activeInterceptPatterns: [],
         activeCapture: false,
+        lastCommandAt: Date.now(),
         webContentsId,
         activeProcess: null
       })
@@ -2462,7 +2493,10 @@ export class AgentBrowserBridge {
     const destroy = (async (): Promise<void> => {
       try {
         // Why: each tab has its own named session — close without --session leaves this tab's daemon running.
-        await this.runAgentBrowserRaw(sessionName, ['--session', sessionName, 'close'])
+        // Why bounded: this runs inside the 20s will-quit barrier, so it cannot inherit the 90s exec timeout.
+        await this.runAgentBrowserRaw(sessionName, ['--session', sessionName, 'close'], {
+          timeoutMs: TEARDOWN_CLOSE_TIMEOUT_MS
+        })
       } catch {
         // Session may already be dead
       }
@@ -2493,6 +2527,26 @@ export class AgentBrowserBridge {
     }
   }
 
+  /**
+   * Notice that the daemon retired itself between two commands.
+   *
+   * A replacement daemon still serves the page (every call reasserts `--cdp`)
+   * but carries none of the session's network routes, so without this the
+   * interception the caller configured is silently gone (#16367).
+   */
+  private reinitializeIfDaemonIdledOut(sessionName: string, session: SessionState): void {
+    if (
+      this.agentBrowserIdleTimeoutMs === null ||
+      Date.now() - session.lastCommandAt < this.agentBrowserIdleTimeoutMs
+    ) {
+      return
+    }
+    session.initialized = false
+    if (session.activeInterceptPatterns.length > 0) {
+      this.pendingInterceptRestore.set(sessionName, [...session.activeInterceptPatterns])
+    }
+  }
+
   private async execAgentBrowser(
     sessionName: string,
     commandArgs: string[],
@@ -2509,6 +2563,9 @@ export class AgentBrowserBridge {
       await this.destroySession(sessionName)
       throw this.createPageUnavailableError(sessionName)
     }
+
+    this.reinitializeIfDaemonIdledOut(sessionName, session)
+    session.lastCommandAt = Date.now()
 
     const args = ['--session', sessionName]
     const managesInterceptRoutes =

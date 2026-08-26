@@ -3024,7 +3024,7 @@ void app.whenReady().then(async () => {
   })
   runtimeService.setAgentBrowserBridge(agentBrowserBridge)
   // Why: daemons a crashed or SIGKILL'd previous run left behind answer to nobody; nothing else reclaims them.
-  void agentBrowserBridge.sweepOrphanedSessions().catch(() => {})
+  void agentBrowserBridge.sweepOrphanedSessions()
   const browserClientAutomationDispatcher = new RpcDispatcher({ runtime: runtimeService })
   configureBrowserClientPageAutomationRuntime({
     browserManager,
@@ -3289,7 +3289,10 @@ void app.whenReady().then(async () => {
     await runtime.reconcileLegacyWorkerTerminals()
     // Why: headless servers can't mount <webview> panes; use offscreen WebContents, gated on a real display so browser.headless.v1 stays honest.
     if (headlessBrowserDisplayAvailable) {
-      runtime.setOffscreenBrowserBackend(new OffscreenBrowserBackend(browserManager))
+      const headlessRuntime = runtime
+      headlessRuntime.setOffscreenBrowserBackend(
+        new OffscreenBrowserBackend(browserManager, () => headlessRuntime.getAgentBrowserBridge())
+      )
     }
     // Why: headless servers have no renderer graph publisher; publish an explicit empty graph so status clients see a ready server.
     runtime.syncWindowGraph(HEADLESS_RUNTIME_WINDOW_ID, { tabs: [], leaves: [] })

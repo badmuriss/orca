@@ -3,7 +3,6 @@ import { mkdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { BrowserError } from '../browser/browser-error'
-import { AGENT_BROWSER_IDLE_TIMEOUT_MS } from '../browser/agent-browser-process-environment'
 import { BROWSER_UNAVAILABLE_ERROR_CODE } from '../../shared/runtime-types'
 import { runProcess } from '../../shared/child-process/run-process'
 
@@ -52,8 +51,9 @@ function classifyAgentBrowserError(message: string): string {
   return 'browser_error'
 }
 
-// Why: this daemon also owns the Chromium tree it launched, so an orcad killed without
-// teardown orphans both — the daemon's idle timer is the only bound that covers that (#16367).
+// Why no AGENT_BROWSER_IDLE_TIMEOUT_MS here: unlike a per-tab helper daemon, this one owns the
+// user's remote Chromium tree, so idling it out would close their live browser and every tab in it.
+// The stable session name plus the `close` in start() is what reclaims a killed orcad's tree (#16367).
 export function externalChromiumAgentBrowserEnvironment(options: {
   inheritedEnv: NodeJS.ProcessEnv
   executablePath: string
@@ -63,9 +63,6 @@ export function externalChromiumAgentBrowserEnvironment(options: {
 }): NodeJS.ProcessEnv {
   return {
     ...options.inheritedEnv,
-    AGENT_BROWSER_IDLE_TIMEOUT_MS:
-      options.inheritedEnv.AGENT_BROWSER_IDLE_TIMEOUT_MS?.trim() ||
-      String(AGENT_BROWSER_IDLE_TIMEOUT_MS),
     AGENT_BROWSER_EXECUTABLE_PATH: options.executablePath,
     AGENT_BROWSER_PROFILE: options.profilePath,
     AGENT_BROWSER_SESSION: options.sessionName,
