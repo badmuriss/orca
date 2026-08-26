@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useMemo } from 'react'
+import { Suspense, useMemo } from 'react'
 import { lazyWithRetry as lazy } from '@/lib/lazy-with-retry'
 import { useDroppable } from '@dnd-kit/core'
 import { Ellipsis, X } from 'lucide-react'
@@ -26,8 +26,6 @@ import {
 } from '@/lib/worktree-runtime-owner'
 import { getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import { isAgentSessionHandleProvider } from '../../../../shared/agent-session-provider-handle'
-import { showStructuredAgentSessionTerminal } from '@/runtime/structured-agent-session-tui-handoff'
-import { toast } from 'sonner'
 
 const EditorPanel = lazy(() => import('../editor/EditorPanel'))
 
@@ -76,22 +74,6 @@ export default function TabGroupPanel({
     () => getActiveRuntimeTarget({ activeRuntimeEnvironmentId: structuredRuntimeEnvironmentId }),
     [structuredRuntimeEnvironmentId]
   )
-  const showStructuredTerminal = useCallback(
-    (sessionId: string, agent: string) => {
-      void showStructuredAgentSessionTerminal({
-        worktreeId,
-        sessionId,
-        target: structuredRuntimeTarget
-      }).catch((error) => {
-        toast.error(
-          `Could not return this ${agent === 'claude' ? 'Claude' : agent === 'codex' ? 'Codex' : 'agent'} session to the terminal`,
-          { description: error instanceof Error ? error.message : String(error) }
-        )
-      })
-    },
-    [structuredRuntimeTarget, worktreeId]
-  )
-
   const model = useTabGroupWorkspaceModel({ groupId, worktreeId })
   const {
     activeTab,
@@ -402,12 +384,6 @@ export default function TabGroupPanel({
               isVisible={isVisible}
               target={structuredRuntimeTarget}
               allowFileUriLinks={structuredFileLinksEnabled}
-              onSwitchToTerminal={() => {
-                const agent = activeTab.agentSessionAgent
-                if (agent) {
-                  showStructuredTerminal(activeTab.entityId, agent)
-                }
-              }}
             />
           </div>
         ) : null}

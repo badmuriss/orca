@@ -46,7 +46,6 @@ import {
   buildValidWorktreeIdsForSessionHydration,
   collectPersistedWorktreeIdsForSessionHydration
 } from './degraded-repo-worktree-validity'
-import { setTerminalNativeChatMode } from './structured-native-chat-toggle'
 
 export type TabSplitDirection = 'left' | 'right' | 'up' | 'down'
 
@@ -1298,21 +1297,8 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
   },
 
   setTabViewMode: (tabId, mode) => {
-    const found = findTabAndWorktree(get().unifiedTabsByWorktree, tabId)
-    if (!found || found.tab.contentType !== 'terminal') {
-      set((state) => patchTab(state.unifiedTabsByWorktree, tabId, { viewMode: mode }) ?? {})
-      return
-    }
-    void setTerminalNativeChatMode({
-      getState: get,
-      tabId,
-      mode,
-      patch: (id, patch) => set((state) => patchTab(state.unifiedTabsByWorktree, id, patch) ?? {})
-    }).then((result) => {
-      if (result === 'bridge') {
-        mirrorTabViewModeToHost(get(), tabId, mode)
-      }
-    })
+    set((state) => patchTab(state.unifiedTabsByWorktree, tabId, { viewMode: mode }) ?? {})
+    mirrorTabViewModeToHost(get(), tabId, mode)
   },
 
   toggleTabViewMode: (tabId) => {
@@ -1332,19 +1318,9 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
           (terminal) => terminal.id === found.tab.entityId
         )?.launchAgent ?? null
     }
-    void setTerminalNativeChatMode({
-      getState: get,
-      tabId,
-      mode: toggled.to,
-      patch: (id, patch) => set((state) => patchTab(state.unifiedTabsByWorktree, id, patch) ?? {})
-    }).then((result) => {
-      if (result !== 'ignored') {
-        emitNativeChatToggled(toggled)
-      }
-      if (result === 'bridge') {
-        mirrorTabViewModeToHost(get(), tabId, toggled.to)
-      }
-    })
+    set((state) => patchTab(state.unifiedTabsByWorktree, tabId, { viewMode: toggled.to }) ?? {})
+    emitNativeChatToggled(toggled)
+    mirrorTabViewModeToHost(get(), tabId, toggled.to)
   },
 
   setRenamingTabId: (tabId) => {

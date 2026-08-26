@@ -4,19 +4,12 @@ import type { Tab } from '../../../shared/tab-types'
 import type { WorkspaceSessionState } from '../../../shared/workspace-session-state-types'
 import { buildPersistedUnifiedTabSessionData } from '../lib/workspace-session-unified-tabs'
 import { buildHydratedTabState } from '../store/slices/tabs-hydration'
-import {
-  LOCAL_STRUCTURED_SESSION_OWNER,
-  projectLocalStructuredSessionTabs
-} from './local-structured-session-tabs-sync'
+import { projectLocalStructuredSessionTabs } from './local-structured-session-tabs-sync'
 import { applyWebSessionTabsSnapshot, type WebSessionTabsSyncState } from './web-session-tabs-sync'
 import {
   recordWebSessionFocusIntent,
   resetWebSessionFocusIntentForTests
 } from './web-session-focus-intent'
-import {
-  recordStructuredTuiHandoffBinding,
-  resetStructuredTuiHandoffBindingsForTests
-} from './web-structured-tui-handoff'
 
 const WORKTREE_ID = 'repo-1::worktree-1'
 const TERMINAL_ID = 'terminal-1'
@@ -26,7 +19,6 @@ const SECONDARY_GROUP = 'secondary-group'
 
 afterEach(() => {
   resetWebSessionFocusIntentForTests()
-  resetStructuredTuiHandoffBindingsForTests()
 })
 
 function createSnapshot(): WebSessionTabsSyncState {
@@ -207,224 +199,6 @@ describe('local structured session tab projection', () => {
       ],
       tabGroupLayout: undefined,
       tabs: [expect.objectContaining({ type: 'agent-session', agent: 'codex' })]
-    })
-  })
-
-  it('keeps only the handoff-bound terminal surface beside the structured tab', () => {
-    const snapshot = {
-      worktree: WORKTREE_ID,
-      publicationEpoch: 'epoch-1',
-      snapshotVersion: 1,
-      activeGroupId: 'structured-group',
-      activeTabId: 'agent-session:codex-1',
-      activeTabType: 'agent-session' as const,
-      tabs: [
-        {
-          type: 'terminal' as const,
-          id: TERMINAL_ID,
-          parentTabId: TERMINAL_ID,
-          leafId: 'leaf-1',
-          title: 'Codex TUI',
-          status: 'ready' as const,
-          terminal: 'term-1',
-          isActive: false
-        },
-        {
-          type: 'agent-session' as const,
-          id: 'agent-session:codex-1',
-          title: 'Codex Chat',
-          sessionId: 'codex-1',
-          agent: 'codex' as const,
-          isActive: true
-        }
-      ]
-    } satisfies RuntimeMobileSessionTabsResult
-    recordStructuredTuiHandoffBinding({
-      environmentId: LOCAL_STRUCTURED_SESSION_OWNER,
-      worktreeId: WORKTREE_ID,
-      hostTabId: TERMINAL_ID,
-      sessionId: 'codex-1',
-      agent: 'codex'
-    })
-
-    expect(projectLocalStructuredSessionTabs(snapshot).tabs).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ type: 'terminal', parentTabId: TERMINAL_ID }),
-        expect.objectContaining({ type: 'agent-session', sessionId: 'codex-1' })
-      ])
-    )
-  })
-
-  it('re-admits a terminal published before the renderer learned its handoff binding', () => {
-    const snapshot = {
-      worktree: WORKTREE_ID,
-      publicationEpoch: 'epoch-1',
-      snapshotVersion: 1,
-      activeGroupId: 'structured-group',
-      activeTabId: `${TERMINAL_ID}::leaf-1`,
-      activeTabType: 'terminal' as const,
-      tabs: [
-        {
-          type: 'terminal' as const,
-          id: `${TERMINAL_ID}::leaf-1`,
-          parentTabId: TERMINAL_ID,
-          leafId: 'leaf-1',
-          title: 'Codex TUI',
-          status: 'ready' as const,
-          terminal: 'term-1',
-          isActive: true
-        },
-        {
-          type: 'agent-session' as const,
-          id: 'agent-session:codex-1',
-          title: 'Codex Chat',
-          sessionId: 'codex-1',
-          agent: 'codex' as const,
-          isActive: false
-        }
-      ]
-    } satisfies RuntimeMobileSessionTabsResult
-
-    expect(projectLocalStructuredSessionTabs(snapshot).tabs).toEqual([
-      expect.objectContaining({ type: 'agent-session', sessionId: 'codex-1' })
-    ])
-
-    recordStructuredTuiHandoffBinding({
-      environmentId: LOCAL_STRUCTURED_SESSION_OWNER,
-      worktreeId: WORKTREE_ID,
-      hostTabId: TERMINAL_ID,
-      sessionId: 'codex-1',
-      agent: 'codex'
-    })
-
-    expect(projectLocalStructuredSessionTabs(snapshot)).toMatchObject({
-      activeTabId: `${TERMINAL_ID}::leaf-1`,
-      activeTabType: 'terminal',
-      tabs: expect.arrayContaining([
-        expect.objectContaining({ type: 'terminal', parentTabId: TERMINAL_ID }),
-        expect.objectContaining({ type: 'agent-session', sessionId: 'codex-1' })
-      ])
-    })
-  })
-
-  it('retains host group topology for a handoff-bound terminal surface', () => {
-    const snapshot = {
-      worktree: WORKTREE_ID,
-      publicationEpoch: 'epoch-1',
-      snapshotVersion: 1,
-      activeGroupId: 'structured-group',
-      activeTabId: 'agent-session:codex-1',
-      activeTabType: 'agent-session' as const,
-      tabGroups: [
-        {
-          id: 'terminal-group',
-          activeTabId: TERMINAL_ID,
-          tabOrder: [TERMINAL_ID]
-        },
-        {
-          id: 'structured-group',
-          activeTabId: 'agent-session:codex-1',
-          tabOrder: ['agent-session:codex-1']
-        }
-      ],
-      tabs: [
-        {
-          type: 'terminal' as const,
-          id: `${TERMINAL_ID}::leaf-1`,
-          parentTabId: TERMINAL_ID,
-          leafId: 'leaf-1',
-          title: 'Codex TUI',
-          status: 'ready' as const,
-          terminal: 'term-1',
-          isActive: false
-        },
-        {
-          type: 'agent-session' as const,
-          id: 'agent-session:codex-1',
-          title: 'Codex Chat',
-          sessionId: 'codex-1',
-          agent: 'codex' as const,
-          isActive: true
-        }
-      ]
-    } satisfies RuntimeMobileSessionTabsResult
-    recordStructuredTuiHandoffBinding({
-      environmentId: LOCAL_STRUCTURED_SESSION_OWNER,
-      worktreeId: WORKTREE_ID,
-      hostTabId: TERMINAL_ID,
-      sessionId: 'codex-1',
-      agent: 'codex'
-    })
-
-    expect(projectLocalStructuredSessionTabs(snapshot).tabGroups).toEqual([
-      {
-        id: 'terminal-group',
-        activeTabId: TERMINAL_ID,
-        tabOrder: [TERMINAL_ID]
-      },
-      {
-        id: 'structured-group',
-        activeTabId: 'agent-session:codex-1',
-        tabOrder: ['agent-session:codex-1']
-      }
-    ])
-  })
-
-  it('normalizes a stale structured active marker when the bound TUI surface is active', () => {
-    const snapshot = {
-      worktree: WORKTREE_ID,
-      publicationEpoch: 'epoch-1',
-      snapshotVersion: 1,
-      activeGroupId: 'structured-group',
-      activeTabId: 'agent-session:codex-1',
-      activeTabType: 'agent-session' as const,
-      tabGroups: [
-        {
-          id: 'structured-group',
-          activeTabId: 'agent-session:codex-1',
-          tabOrder: ['agent-session:codex-1']
-        }
-      ],
-      tabs: [
-        {
-          type: 'terminal' as const,
-          id: `${TERMINAL_ID}::leaf-1`,
-          parentTabId: TERMINAL_ID,
-          leafId: 'leaf-1',
-          title: 'Codex TUI',
-          status: 'ready' as const,
-          terminal: 'term-1',
-          isActive: true
-        },
-        {
-          type: 'agent-session' as const,
-          id: 'agent-session:codex-1',
-          title: 'Codex Chat',
-          sessionId: 'codex-1',
-          agent: 'codex' as const,
-          isActive: false
-        }
-      ]
-    } satisfies RuntimeMobileSessionTabsResult
-    recordStructuredTuiHandoffBinding({
-      environmentId: LOCAL_STRUCTURED_SESSION_OWNER,
-      worktreeId: WORKTREE_ID,
-      hostTabId: TERMINAL_ID,
-      sessionId: 'codex-1',
-      agent: 'codex'
-    })
-
-    expect(projectLocalStructuredSessionTabs(snapshot)).toMatchObject({
-      activeTabId: `${TERMINAL_ID}::leaf-1`,
-      activeTabType: 'terminal',
-      activeGroupId: 'structured-group',
-      tabGroups: [
-        {
-          id: 'structured-group',
-          activeTabId: TERMINAL_ID,
-          tabOrder: ['agent-session:codex-1', TERMINAL_ID]
-        }
-      ]
     })
   })
 

@@ -3,7 +3,6 @@ import { STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY } from '../../../shared/pro
 import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
 import { useAppStore } from '../store'
 import { applyWebSessionTabsSnapshot, applyWebSessionTabsStorePatch } from './web-session-tabs-sync'
-import { resolveStructuredTuiHandoffBinding } from './web-structured-tui-handoff'
 
 export const LOCAL_STRUCTURED_SESSION_OWNER = 'local-structured-session'
 let localStructuredSessionTabsRestorePromise: Promise<void> | null = null
@@ -19,33 +18,8 @@ export function projectLocalStructuredSessionTabs(
   const structuredIds = new Set(
     snapshot.tabs.filter((tab) => tab.type === 'agent-session').map((tab) => tab.id)
   )
-  const handoffTerminalIds = new Set(
-    snapshot.tabs
-      .filter((tab) => tab.type === 'terminal')
-      .filter((tab) =>
-        resolveStructuredTuiHandoffBinding({
-          environmentId: LOCAL_STRUCTURED_SESSION_OWNER,
-          worktreeId: snapshot.worktree,
-          hostTabId: tab.parentTabId
-        })
-      )
-      .map((tab) => tab.id)
-  )
-  const handoffTerminalTabs = snapshot.tabs.filter(
-    (tab): tab is Extract<(typeof snapshot.tabs)[number], { type: 'terminal' }> =>
-      tab.type === 'terminal' && handoffTerminalIds.has(tab.id)
-  )
-  const visibleHostTabIds = new Set([
-    ...structuredIds,
-    ...handoffTerminalTabs.map((tab) => tab.parentTabId)
-  ])
-  const visibleIds = new Set([...structuredIds, ...handoffTerminalIds])
-  const activeHandoffTerminal = handoffTerminalTabs.find(
-    (tab) =>
-      tab.id === snapshot.activeTabId ||
-      tab.parentTabId === snapshot.activeTabId ||
-      tab.isActive === true
-  )
+  const visibleHostTabIds = structuredIds
+  const visibleIds = structuredIds
   let projectedTabGroups = snapshot.tabGroups
     ?.map((group) => ({
       ...group,
@@ -56,46 +30,16 @@ export function projectLocalStructuredSessionTabs(
     }))
     .filter((group) => group.tabOrder.length > 0)
 
-  let activeTabId = snapshot.activeTabId
-  let activeTabType = snapshot.activeTabType
-  let activeGroupId = snapshot.activeGroupId
-  if (activeHandoffTerminal) {
-    const hostTabId = activeHandoffTerminal.parentTabId
-    const containingGroupIndex =
-      projectedTabGroups?.findIndex(
-        (group) => group.tabOrder.includes(hostTabId) || group.activeTabId === hostTabId
-      ) ?? -1
-    const fallbackGroupIndex =
-      containingGroupIndex >= 0
-        ? containingGroupIndex
-        : (projectedTabGroups?.findIndex(
-            (group) =>
-              (snapshot.activeTabId !== null && group.tabOrder.includes(snapshot.activeTabId)) ||
-              (snapshot.activeTabId !== null && group.activeTabId === snapshot.activeTabId)
-          ) ?? -1)
-    if (fallbackGroupIndex >= 0 && projectedTabGroups) {
-      projectedTabGroups = projectedTabGroups.map((group, index) => {
-        if (index !== fallbackGroupIndex || group.tabOrder.includes(hostTabId)) {
-          return index === fallbackGroupIndex && group.activeTabId !== hostTabId
-            ? { ...group, activeTabId: hostTabId }
-            : group
-        }
-        return {
-          ...group,
-          tabOrder: [...group.tabOrder, hostTabId],
-          activeTabId: hostTabId
-        }
-      })
-      activeGroupId = projectedTabGroups[fallbackGroupIndex]?.id ?? activeGroupId
-    }
-    activeTabId = activeHandoffTerminal.id
-    activeTabType = 'terminal'
-  }
   return {
     ...snapshot,
-    activeTabId,
-    activeTabType,
-    activeGroupId,
+    activeTabId: visibleIds.has(snapshot.activeTabId ?? '') ? snapshot.activeTabId : null,
+    activeTabType:
+      snapshot.activeTabId && visibleIds.has(snapshot.activeTabId) ? snapshot.activeTabType : null,
+    activeGroupId:
+      snapshot.activeGroupId &&
+      projectedTabGroups?.some((group) => group.id === snapshot.activeGroupId)
+        ? snapshot.activeGroupId
+        : (projectedTabGroups?.[0]?.id ?? null),
     tabs: snapshot.tabs.filter((tab) => visibleIds.has(tab.id)),
     tabGroups: projectedTabGroups,
     // Why: group membership locates chats; the renderer's split tree remains locally authoritative.

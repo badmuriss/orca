@@ -40,7 +40,6 @@ export type NativeChatStructuredViewProps = NativeChatOrchestrationProps & {
   agent: AgentType
   isVisible: boolean
   allowFileUriLinks: boolean
-  onSwitchToTerminal?: () => void
 }
 
 export type NativeChatResolvedViewProps = NativeChatOrchestrationProps & {

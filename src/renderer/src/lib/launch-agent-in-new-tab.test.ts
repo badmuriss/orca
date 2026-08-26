@@ -221,7 +221,7 @@ describe('launchAgentInNewTab', () => {
     )
   })
 
-  it('adopts supported Codex launches through the structured chat toggle', async () => {
+  it('keeps prompted Codex launches on the ordinary terminal path', async () => {
     store.settings = {
       agentCmdOverrides: {},
       agentDefaultArgs: {},
@@ -241,7 +241,8 @@ describe('launchAgentInNewTab', () => {
     })
 
     expect(mockCreateTab).toHaveBeenCalledWith('wt-1', undefined, undefined, {
-      launchAgent: 'codex'
+      launchAgent: 'codex',
+      viewMode: 'chat'
     })
     expect(mockQueueTabStartupCommand).toHaveBeenCalledWith(
       'tab-1',
@@ -255,7 +256,7 @@ describe('launchAgentInNewTab', () => {
       text: 'large generated prompt',
       createdAt: expect.any(Number)
     })
-    await vi.waitFor(() => expect(mockSetTabViewMode).toHaveBeenCalledWith('tab-1', 'chat'))
+    expect(mockSetTabViewMode).not.toHaveBeenCalled()
   })
 
   it('opens local Grok submit-after-ready launches in native chat', async () => {
@@ -340,7 +341,7 @@ describe('launchAgentInNewTab', () => {
         text: 'https://github.com/o/r/issues/12'
       })
     )
-    expect(mockCreateTab.mock.calls[0]?.[3]).not.toHaveProperty('viewMode')
+    expect(mockCreateTab.mock.calls[0]?.[3]).toHaveProperty('viewMode', 'chat')
   })
 
   it('mirrors a multi-line draft into chat and opens the tab there', async () => {
@@ -366,7 +367,7 @@ describe('launchAgentInNewTab', () => {
     expect(mockSeedNativeChatLaunchDraft).toHaveBeenCalledWith(
       expect.objectContaining({ tabId: 'tab-1', agent: 'claude', text: prompt })
     )
-    expect(mockCreateTab.mock.calls[0]?.[3]).not.toHaveProperty('viewMode')
+    expect(mockCreateTab.mock.calls[0]?.[3]).toHaveProperty('viewMode', 'chat')
   })
 
   it('passes quick command labels only to locally-created agent tabs', async () => {
@@ -451,9 +452,9 @@ describe('launchAgentInNewTab', () => {
       'wt-1',
       undefined,
       undefined,
-      expect.not.objectContaining({ viewMode: 'chat' })
+      expect.objectContaining({ viewMode: 'chat' })
     )
-    await vi.waitFor(() => expect(mockSetTabViewMode).toHaveBeenCalledWith('tab-1', 'chat'))
+    expect(mockSetTabViewMode).not.toHaveBeenCalled()
   })
 
   it('preserves paired-host draft delivery and supported launch preferences', async () => {

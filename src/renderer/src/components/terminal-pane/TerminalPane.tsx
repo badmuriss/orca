@@ -3198,7 +3198,6 @@ function TerminalPane(
                   target={structuredChatTarget}
                   allowFileUriLinks
                   orchestrationDispatchStatus={chatPaneDispatchStatus}
-                  onSwitchToTerminal={switchNativeChatToTerminal}
                 />
               ) : (
                 <NativeChatView

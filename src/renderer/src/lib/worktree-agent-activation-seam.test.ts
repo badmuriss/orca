@@ -195,6 +195,7 @@ describe('worktree agent activation seam', () => {
 
     expect(useAppStore.getState().unifiedTabsByWorktree[worktree.id] ?? []).toHaveLength(0)
     expect(useAppStore.getState().tabsByWorktree[worktree.id] ?? []).toHaveLength(0)
+    expect(runtimeCall).toHaveBeenCalledWith({ method: 'session.tabs.listAll', params: {} })
     expect(runtimeCall).toHaveBeenCalledWith({
       method: 'agentSession.handoffStatus',
       params: { sessionId: 'chat-1' }

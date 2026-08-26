@@ -22,12 +22,10 @@ import {
 import { STRUCTURED_AGENT_SESSION_HOLD_METHODS } from './structured-agent-session-hold'
 import {
   AttachParams,
-  AdoptTerminalParams,
   CancelParams,
   CreateParams,
   CreateSupportParams,
   HistoryParams,
-  HandoffParams,
   HandoffStatusParams,
   OptionsParams,
   RespondParams,
@@ -65,41 +63,6 @@ function subscriptionIdFor(ctx: RpcContext, sessionId: string): string {
 }
 
 export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
-  defineMethod({
-    name: 'agentSession.adoptTerminal',
-    params: AdoptTerminalParams,
-    handler: async (params, ctx) => {
-      requireStructuredCapability(ctx)
-      if (ctx.clientKind === 'mobile' || params.envelope.expectedRuntimeFence !== null) {
-        throw new Error('agent_session_operation_invalid')
-      }
-      const fingerprint = computeAgentSessionPayloadFingerprint({
-        method: 'agentSession.adoptTerminal',
-        sessionId: params.envelope.sessionId,
-        fields: {
-          worktree: params.worktree,
-          tabId: params.tabId,
-          paneKey: params.paneKey,
-          ptyId: params.ptyId,
-          ...(params.agent ? { agent: params.agent } : {}),
-          ...(params.threadId ? { threadId: params.threadId } : {}),
-          ...(params.providerSessionId ? { providerSessionId: params.providerSessionId } : {}),
-          ...(params.providerTranscriptPath
-            ? { providerTranscriptPath: params.providerTranscriptPath }
-            : {})
-        }
-      })
-      const conflict = agentSessionFingerprintConflict(params.envelope, fingerprint)
-      if (conflict) {
-        return { ok: false, refusal: conflict }
-      }
-      await ensureHostInstalled(ctx)
-      return ctx.runtime.adoptStructuredAgentSessionTerminal(
-        { ...params, envelope: { ...params.envelope, expectedRuntimeFence: null } },
-        callerFor(ctx)
-      )
-    }
-  }),
   defineMethod({
     name: 'agentSession.createSupport',
     params: CreateSupportParams,
@@ -213,11 +176,6 @@ export const STRUCTURED_AGENT_SESSION_METHODS: RpcAnyMethod[] = [
     name: 'agentSession.setOption',
     params: SetOptionParams,
     handler: async (params, ctx) => requireHost(ctx).setOption(callerFor(ctx), params)
-  }),
-  defineMethod({
-    name: 'agentSession.handoff',
-    params: HandoffParams,
-    handler: async (params, ctx) => requireHost(ctx).requestHandoff(callerFor(ctx), params)
   }),
   defineMethod({
     name: 'agentSession.handoffStatus',

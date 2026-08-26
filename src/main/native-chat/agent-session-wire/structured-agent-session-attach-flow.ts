@@ -30,7 +30,7 @@ import {
   rethrowAfterAgentSessionAcquisitionCleanup
 } from './structured-agent-session-adapter'
 import type { StructuredAgentSessionEventSink } from './structured-agent-session-event-sink'
-import { readNativeHandoffSessionOptions } from './structured-agent-session-handoff-options'
+import { readNativeSessionOptions } from './structured-agent-session-option-restoration'
 import { resolveAgentSessionReplayOutcome } from './structured-agent-session-replay-outcome'
 
 export type AttachFlowInput = {
@@ -189,7 +189,7 @@ async function acquireOwner(
     ...(input.eventSink ? { events: input.eventSink } : {})
   })
   try {
-    const options = await readNativeHandoffSessionOptions({
+    const options = await readNativeSessionOptions({
       adapter: input.adapter,
       sessionId: record.sessionId,
       fence,

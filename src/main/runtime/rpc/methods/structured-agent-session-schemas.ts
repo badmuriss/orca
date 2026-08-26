@@ -111,26 +111,6 @@ export const CreateSupportParams = z
   })
   .strict()
 
-export const AdoptTerminalParams = z
-  .object({
-    envelope: MutationEnvelope,
-    worktree: Identifier('Invalid worktree selector'),
-    tabId: Identifier('Invalid terminal tab id'),
-    paneKey: Identifier('Invalid terminal pane key'),
-    ptyId: Identifier('Invalid PTY id'),
-    /** Provider identity observed by the host's agent-status hook. */
-    agent: z.enum(['claude', 'codex']).optional(),
-    /** Legacy name retained for older Codex clients. */
-    threadId: Identifier('Invalid provider session id').optional(),
-    providerSessionId: Identifier('Invalid provider session id').optional(),
-    providerTranscriptPath: Identifier('Invalid provider transcript path').optional()
-  })
-  .strict()
-  .refine(
-    (value) => !(value.threadId && value.providerSessionId),
-    'Provide only one provider session id'
-  )
-
 /** Clients may only author user turns. Accepting an assistant or tool role here
  *  would let one client write words into the agent's mouth in another's
  *  timeline, and the provider — not the client — owns those. */
@@ -219,13 +199,5 @@ export const UnsubscribeParams = z
   })
   .strict()
 
-export const HandoffParams = z
-  .object({
-    envelope: MutationEnvelope,
-    direction: z.enum(['to-tui', 'to-native']),
-    mode: z.enum(['now', 'after-turn', 'stop-turn']),
-    action: z.enum(['start', 'cancel-queued', 'retry', 'recover']).optional()
-  })
-  .strict()
-
+/** Read-only owner classification retained for restart safety; mutation handoff is separate. */
 export const HandoffStatusParams = z.object({ sessionId: SessionId }).strict()

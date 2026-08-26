@@ -97,7 +97,6 @@ import {
   isWebAgentSessionHandoffPostCreateSnapshotConfirmed,
   resolveWebAgentSessionHandoff
 } from './web-agent-session-handoff'
-import { resolveStructuredTuiHandoffBinding } from './web-structured-tui-handoff'
 import { getRuntimeEnvironmentRevision } from './runtime-environment-revision'
 import { useRuntimeSessionMirrorEnvironmentKey } from './use-runtime-session-mirror-environment-key'
 import {
@@ -1555,8 +1554,7 @@ function buildTerminalUnifiedTab(
   groupId: string,
   environmentId: string,
   // Why: viewMode is host-tracked but the client's optimistic toggle must win during the echo window; callers pass the reconciled value.
-  viewMode?: Tab['viewMode'],
-  structuredBinding?: { sessionId: string; agent: 'codex' | 'claude' }
+  viewMode?: Tab['viewMode']
 ): Tab {
   return {
     id: tab.id,
@@ -1575,15 +1573,7 @@ function buildTerminalUnifiedTab(
     createdAt: tab.createdAt,
     isPreview: false,
     isPinned: tab.isPinned === true,
-    ...(structuredBinding
-      ? {
-          structuredSessionId: structuredBinding.sessionId,
-          agentSessionAgent: structuredBinding.agent,
-          viewMode: 'terminal' as const
-        }
-      : viewMode
-        ? { viewMode }
-        : {})
+    ...(viewMode ? { viewMode } : {})
   }
 }
 
@@ -2880,33 +2870,12 @@ function applyWebSessionTabsSnapshotWithContext(
       .filter((tab) => tab.contentType === 'terminal' && tab.viewMode)
       .map((tab) => [tab.id, tab.viewMode] as const)
   )
-  const existingStructuredBindingByTabId = new Map(
-    currentUnifiedTabs
-      .filter(
-        (tab) =>
-          tab.contentType === 'terminal' &&
-          tab.structuredSessionId &&
-          (tab.agentSessionAgent === 'codex' || tab.agentSessionAgent === 'claude')
-      )
-      .map((tab) => [
-        tab.id,
-        {
-          sessionId: tab.structuredSessionId!,
-          agent: tab.agentSessionAgent === 'claude' ? ('claude' as const) : ('codex' as const)
-        }
-      ])
-  )
   const mirroredTerminalUnifiedTabs = mirroredTerminalTabs.map((entry) =>
     buildTerminalUnifiedTab(
       entry.tab,
       hostGroupIdByTabId.get(entry.hostTabId) ?? targetGroupId,
       environmentId,
-      entry.tab.viewMode ?? existingViewModeByTabId.get(entry.tab.id),
-      resolveStructuredTuiHandoffBinding({
-        environmentId,
-        worktreeId,
-        hostTabId: entry.hostTabId
-      }) ?? existingStructuredBindingByTabId.get(entry.tab.id)
+      entry.tab.viewMode ?? existingViewModeByTabId.get(entry.tab.id)
     )
   )
   const mirroredBrowserUnifiedTabs = mirroredBrowserTabs.map((entry) => entry.unifiedTab)

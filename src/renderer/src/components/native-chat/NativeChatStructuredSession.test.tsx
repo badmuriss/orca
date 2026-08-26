@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -142,26 +142,5 @@ describe('NativeChatStructuredSession', () => {
       id: 'model',
       sequence: 1
     })
-  })
-
-  it('exposes the structured-session terminal handoff and invokes it once', () => {
-    const onSwitchToTerminal = vi.fn()
-    render(
-      <NativeChatStructuredSession
-        isVisible
-        tabId="structured-tab-1"
-        sessionId="session-1"
-        target={{ kind: 'local' }}
-        agent="codex"
-        allowFileUriLinks
-        onSwitchToTerminal={onSwitchToTerminal}
-      />
-    )
-
-    const button = screen.getByRole('button', { name: 'Show terminal' })
-    expect(button).toBeTruthy()
-
-    fireEvent.click(button)
-    expect(onSwitchToTerminal).toHaveBeenCalledOnce()
   })
 })

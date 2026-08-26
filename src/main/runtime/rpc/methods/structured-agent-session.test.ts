@@ -94,8 +94,7 @@ function hostStub(): StructuredAgentSessionHost {
     cancel: vi.fn(async () => ({ ok: true, replayed: false })),
     respondToPrompt: vi.fn(async () => ({ ok: true, replayed: false })),
     setOption: vi.fn(async () => ({ ok: true, replayed: false })),
-    requestHandoff: vi.fn(async () => ({ ok: true, replayed: false })),
-    handoffStatus: vi.fn(async () => ({ owner: 'tui', phase: 'queued' })),
+    handoffStatus: vi.fn(async () => ({ owner: 'native' })),
     readOptions: vi.fn(async () => ({
       models: [{ id: 'gpt-live', label: 'GPT Live', isDefault: true, efforts: [] }],
       current: { model: 'gpt-live' }
@@ -123,7 +122,6 @@ function dispatcher(): RpcDispatcher {
       accountHome: { variable: 'CODEX_HOME', path: '/host/.codex' },
       runtimeKind: 'native'
     })),
-    adoptStructuredAgentSessionTerminal: vi.fn(async () => ({ ok: true, replayed: false })),
     publishStructuredAgentSessionTab: vi.fn()
   }
   const runtime = {
@@ -194,7 +192,7 @@ describe('capability gating', () => {
     }
     // Bump deliberately: the whole agentSession.* surface is behind the structured capability,
     // so an additive method is invisible to old clients and needs no protocol bump.
-    expect(STRUCTURED_AGENT_SESSION_METHODS).toHaveLength(18)
+    expect(STRUCTURED_AGENT_SESSION_METHODS).toHaveLength(16)
   })
 
   it('hides the surface from a declared client that did not advertise it', async () => {
@@ -264,110 +262,6 @@ describe('capability gating', () => {
 })
 
 describe('method routing', () => {
-  it('routes local terminal adoption with its verified request fingerprint', async () => {
-    const fields = {
-      worktree: 'id:workspace-1',
-      tabId: 'tab-1',
-      paneKey: 'tab-1:leaf-1',
-      ptyId: 'pty-1',
-      threadId: 'thread-1'
-    }
-    const params = {
-      envelope: envelope({
-        expectedRuntimeFence: null,
-        payloadFingerprint: computeAgentSessionPayloadFingerprint({
-          method: 'agentSession.adoptTerminal',
-          sessionId: SESSION,
-          fields
-        })
-      }),
-      ...fields
-    }
-
-    const adopted = await call('agentSession.adoptTerminal', params)
-
-    expect(adopted).toMatchObject({ ok: true, result: { ok: true } })
-    expect(runtimeCalls.adoptStructuredAgentSessionTerminal).toHaveBeenCalledWith(
-      params,
-      expect.anything()
-    )
-  })
-
-  it('allows the host to discover a terminal thread omitted by an older hook surface', async () => {
-    const fields = {
-      worktree: 'id:workspace-1',
-      tabId: 'tab-1',
-      paneKey: 'tab-1:leaf-1',
-      ptyId: 'pty-1'
-    }
-    const params = {
-      envelope: envelope({
-        expectedRuntimeFence: null,
-        payloadFingerprint: computeAgentSessionPayloadFingerprint({
-          method: 'agentSession.adoptTerminal',
-          sessionId: SESSION,
-          fields
-        })
-      }),
-      ...fields
-    }
-
-    await expect(call('agentSession.adoptTerminal', params)).resolves.toMatchObject({ ok: true })
-    expect(runtimeCalls.adoptStructuredAgentSessionTerminal).toHaveBeenCalledWith(
-      params,
-      expect.anything()
-    )
-  })
-
-  it('rejects conflicting legacy and provider session identities', async () => {
-    const fields = {
-      worktree: 'id:workspace-1',
-      tabId: 'tab-1',
-      paneKey: 'tab-1:leaf-1',
-      ptyId: 'pty-1',
-      agent: 'claude' as const,
-      threadId: 'legacy-thread',
-      providerSessionId: 'provider-session'
-    }
-    const params = {
-      envelope: envelope({
-        expectedRuntimeFence: null,
-        payloadFingerprint: computeAgentSessionPayloadFingerprint({
-          method: 'agentSession.adoptTerminal',
-          sessionId: SESSION,
-          fields
-        })
-      }),
-      ...fields
-    }
-
-    await expect(call('agentSession.adoptTerminal', params)).resolves.toMatchObject({ ok: false })
-    expect(runtimeCalls.adoptStructuredAgentSessionTerminal).not.toHaveBeenCalled()
-  })
-
-  it('routes ownership handoff requests to the structured host', async () => {
-    const fields = {
-      direction: 'to-native' as const,
-      mode: 'after-turn' as const,
-      action: 'start' as const
-    }
-    const params = {
-      envelope: envelope({
-        payloadFingerprint: computeAgentSessionPayloadFingerprint({
-          method: 'agentSession.requestHandoff',
-          sessionId: SESSION,
-          fields
-        })
-      }),
-      ...fields
-    }
-
-    const handedOff = await call('agentSession.handoff', params)
-
-    expect(handedOff).toMatchObject({ ok: true, result: { ok: true } })
-    expect(hostCalls.requestHandoff).toHaveBeenCalledWith(expect.anything(), params)
-  })
-
   it('creates from mobile intent while the host resolves paths and provider identity', async () => {
     const worktree = 'id:workspace-1'
     const params = {
@@ -432,7 +326,6 @@ describe('method routing', () => {
     })
 
     expect(response).toMatchObject({ ok: false, error: { code: 'method_not_found' } })
-    expect(hostCalls.requestHandoff).not.toHaveBeenCalled()
   })
 })
 

@@ -11,7 +11,7 @@ import type { StructuredAgentSessionHostDeps } from './structured-agent-session-
 import type { StructuredAgentSessionHostSession } from './structured-agent-session-host-types'
 import { StructuredAgentSessionHandoffCoordinator } from './structured-agent-session-handoff'
 import { recoverDeadTuiHandoffStatus } from './structured-agent-session-dead-tui-recovery'
-import { readNativeHandoffSessionOptions } from './structured-agent-session-handoff-options'
+import { readNativeSessionOptions } from './structured-agent-session-option-restoration'
 import type { AgentSessionSubscribers } from './structured-agent-session-subscribers'
 import { StructuredTuiTranscriptCatchup } from './structured-tui-transcript-catchup'
 
@@ -191,7 +191,7 @@ async function acquireNativeHandoffOwner(
   })
   let proved: AgentSessionRecord
   try {
-    const options = await readNativeHandoffSessionOptions({
+    const options = await readNativeSessionOptions({
       adapter: deps.adapter,
       sessionId: input.sessionId,
       fence: input.fence,

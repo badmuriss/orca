@@ -42,10 +42,7 @@ export async function readWorktreeStructuredActivationInventory(
       tab.type === 'agent-session'
         ? [
             window.api.runtime
-              .call({
-                method: 'agentSession.handoffStatus',
-                params: { sessionId: tab.sessionId }
-              })
+              .call({ method: 'agentSession.handoffStatus', params: { sessionId: tab.sessionId } })
               .then((statusResponse) => {
                 if (!statusResponse.ok) {
                   return
