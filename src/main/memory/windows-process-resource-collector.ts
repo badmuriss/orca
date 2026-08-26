@@ -4,6 +4,7 @@ import { performance } from 'node:perf_hooks'
 import {
   parseTypeperfProcessOutput,
   parseWindowsProcessSample,
+  TYPEPERF_COUNTERS,
   type ParsedWindowsProcessSample,
   type WindowsProcessResourceRow
 } from './windows-process-sample-parsing'
@@ -12,12 +13,6 @@ export type { WindowsProcessResourceRow } from './windows-process-sample-parsing
 
 const PROCESS_QUERY_TIMEOUT_MS = 5_000
 const PROCESS_QUERY_MAX_BUFFER = 10 * 1024 * 1024
-const TYPEPERF_COUNTERS = [
-  '\\Process(*)\\ID Process',
-  '\\Process(*)\\Creating Process ID',
-  '\\Process(*)\\Working Set',
-  '\\Process(*)\\Private Bytes'
-] as const
 const CPU_MIN_SAMPLE_MS = 250
 const CPU_STALE_AFTER_MS = 10_000
 const HUNDRED_NS_TICKS_PER_MS = 10_000

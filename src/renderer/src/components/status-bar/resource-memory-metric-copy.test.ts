@@ -5,7 +5,6 @@ vi.mock('@/i18n/i18n', () => ({
 }))
 
 import {
-  getCommitPressurePercent,
   getCommitPressureToneClass,
   getResourceCommitMetricCopy,
   getResourceMemoryMetricCopy
@@ -31,8 +30,7 @@ describe('resource memory metric copy', () => {
   })
 
   it('labels committed bytes as a separate quantity, not a corrected working set', () => {
-    expect(getResourceCommitMetricCopy('private-bytes')).toEqual({
-      columnLabel: 'Private',
+    expect(getResourceCommitMetricCopy()).toEqual({
       summaryLabel: 'Σ Private',
       description:
         'Summed private bytes: memory these processes have committed, counted whether it is resident or paged out. This is what the host charges against its commit limit, so it keeps rising while the working set above shrinks under paging.'
@@ -59,19 +57,17 @@ describe('commit pressure tone', () => {
 
   it('stays silent for a snapshot that carries no commit figure at all', () => {
     expect(getCommitPressureToneClass({ privateMemory: undefined, hostTotalMemory })).toBeNull()
-    expect(getCommitPressurePercent({ privateMemory: undefined, hostTotalMemory })).toBeNull()
   })
 
   it('stays silent when the host total is unknown, rather than dividing by zero', () => {
     expect(
       getCommitPressureToneClass({ privateMemory: 8 * 1024 ** 3, hostTotalMemory: 0 })
     ).toBeNull()
-    expect(
-      getCommitPressurePercent({ privateMemory: 8 * 1024 ** 3, hostTotalMemory: 0 })
-    ).toBeNull()
   })
 
-  it('reports commit above physical RAM rather than capping it', () => {
-    expect(getCommitPressurePercent({ privateMemory: 32 * 1024 ** 3, hostTotalMemory })).toBe(200)
+  it('keeps warning above 100% of RAM rather than capping the share', () => {
+    expect(getCommitPressureToneClass({ privateMemory: 32 * 1024 ** 3, hostTotalMemory })).toBe(
+      'text-red-500'
+    )
   })
 })

@@ -102,6 +102,32 @@ describe('parseTypeperfProcessOutput', () => {
     expect(parseTypeperfProcessOutput(stdout)[0].privateMemory).toBeUndefined()
   })
 
+  it('still parses a busy host once a fourth counter widens every sample line', async () => {
+    const { parseTypeperfProcessOutput } = await loadWindowsProcessSampleParsing()
+    // 2100 processes x 4 counters overruns a fixed 8192-field cap; the reported
+    // MCP fan-out host runs well past 2048 processes.
+    const instanceCount = 2100
+    const headers = ['"(PDH-CSV 4.0)"']
+    const values = ['"time"']
+    for (let index = 0; index < instanceCount; index += 1) {
+      for (const counter of ['ID Process', 'Creating Process ID', 'Working Set', 'Private Bytes']) {
+        headers.push(`"\\\\HOST\\Process(node#${index})\\${counter}"`)
+      }
+      values.push(`"${1000 + index}"`, '"1"', '"2048"', '"4096"')
+    }
+    const stdout = [headers.join(','), values.join(',')].join('\r\n')
+
+    const rows = parseTypeperfProcessOutput(stdout)
+    expect(rows).toHaveLength(instanceCount)
+    expect(rows[instanceCount - 1]).toEqual({
+      pid: 1000 + instanceCount - 1,
+      ppid: 1,
+      cpu: 0,
+      memory: 2048,
+      privateMemory: 4096
+    })
+  })
+
   it('ignores aggregate and incomplete rows and clamps invalid memory', async () => {
     const { parseTypeperfProcessOutput } = await loadWindowsProcessSampleParsing()
     const stdout = [

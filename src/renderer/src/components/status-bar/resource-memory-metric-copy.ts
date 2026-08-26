@@ -1,7 +1,4 @@
-import type {
-  ProcessCommitMetric,
-  ProcessMemoryMetric
-} from '../../../../shared/process-stats-types'
+import type { ProcessMemoryMetric } from '../../../../shared/process-stats-types'
 import { translate } from '@/i18n/i18n'
 import { usageTextColorClass } from './usage-roster-formatting'
 
@@ -32,11 +29,9 @@ export function getResourceMemoryMetricCopy(metric: ProcessMemoryMetric): Resour
   }
 }
 
-export function getResourceCommitMetricCopy(
-  _metric: ProcessCommitMetric
-): ResourceMemoryMetricCopy {
+/** No column of its own yet, so no `columnLabel`: the commit figure is a summary + tooltip. */
+export function getResourceCommitMetricCopy(): Omit<ResourceMemoryMetricCopy, 'columnLabel'> {
   return {
-    columnLabel: 'Private',
     summaryLabel: 'Σ Private',
     description: translate(
       'auto.components.status.bar.resource.memory.metric.privateBytesDescription',
@@ -46,30 +41,18 @@ export function getResourceCommitMetricCopy(
 }
 
 /**
- * Warning tint once tracked commit approaches the host's physical RAM, and null
- * while it is unremarkable — committed bytes past RAM must come from the
- * pagefile, which is the paging the working-set figure cannot foresee.
+ * Warning tint once *Orca's own* tracked commit grows large against physical
+ * RAM, on the same 60/80 bands as the host usage bars. Deliberately not a
+ * host-wide paging predictor: that needs the host's commit charge and commit
+ * limit, which this snapshot does not carry (#16211).
  *
- * Returns null for an unmeasured host too: silence is the honest answer when
- * the snapshot carries no commit figure.
+ * Null both when the share is unremarkable and when the snapshot has no commit
+ * figure at all — silence is the honest answer for an unmeasured host.
  */
 export function getCommitPressureToneClass(args: {
   privateMemory: number | undefined
   hostTotalMemory: number
 }): string | null {
-  const percent = getCommitPressurePercent(args)
-  if (percent === null) {
-    return null
-  }
-  const tone = usageTextColorClass(percent)
-  return tone === 'text-foreground' ? null : tone
-}
-
-/** Tracked commit as a percentage of physical RAM, or null when unmeasured. */
-export function getCommitPressurePercent(args: {
-  privateMemory: number | undefined
-  hostTotalMemory: number
-}): number | null {
   const { privateMemory, hostTotalMemory } = args
   if (typeof privateMemory !== 'number' || !Number.isFinite(privateMemory)) {
     return null
@@ -77,5 +60,7 @@ export function getCommitPressurePercent(args: {
   if (!Number.isFinite(hostTotalMemory) || hostTotalMemory <= 0) {
     return null
   }
-  return (privateMemory / hostTotalMemory) * 100
+  // Uncapped on purpose: commit past 100% of RAM is the loudest case, not an error.
+  const tone = usageTextColorClass((privateMemory / hostTotalMemory) * 100)
+  return tone === 'text-foreground' ? null : tone
 }

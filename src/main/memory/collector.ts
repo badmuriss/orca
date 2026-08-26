@@ -101,8 +101,16 @@ type ProcIndex = {
 
 const PROCESS_COMMIT_METRIC: ProcessCommitMetric = 'private-bytes'
 
-/** Snapshot fields describing committed bytes, omitted entirely when unmeasured. */
-function commitFields(
+/**
+ * The one rule for every committed-bytes key: present only when the sweep could
+ * measure it, because a 0 would read as "these processes commit nothing".
+ */
+function commitField(hasPrivateMemory: boolean, privateMemory: number): { privateMemory?: number } {
+  return hasPrivateMemory ? { privateMemory: clampNumber(privateMemory) } : {}
+}
+
+/** The snapshot-level pair, which names the unit alongside the total. */
+function snapshotCommitFields(
   hasPrivateMemory: boolean,
   totalPrivateMemory: number
 ): Pick<MemorySnapshot, 'processCommitMetric' | 'totalPrivateMemory'> {
@@ -273,9 +281,6 @@ export function collectSubtree(index: ProcIndex, root: number): number[] {
 
 type AppBucketsRaw = Omit<AppMemory, 'history'>
 
-/** A bucket mid-accumulation, before an unmeasurable commit total is dropped. */
-type MeasuredUsage = { cpu: number; memory: number; privateMemory: number }
-
 function electronMetricMemoryBytes(
   proc: ReturnType<AppEnvironment['getAppMetrics']>[number],
   processIndex: ProcIndex
@@ -317,10 +322,11 @@ function bucketElectronMetrics(processIndex: ProcIndex): AppBucketsRaw {
     target.privateMemory += privateBytes
   }
 
-  // Why drop the key rather than send 0: absent means "not measured here", and
-  // a 0 on a host that cannot read commit would read as "Orca commits nothing".
-  const usage = (bucket: MeasuredUsage): UsageValues =>
-    processIndex.hasPrivateMemory ? bucket : { cpu: bucket.cpu, memory: bucket.memory }
+  const usage = (bucket: typeof main): UsageValues => ({
+    cpu: bucket.cpu,
+    memory: bucket.memory,
+    ...commitField(processIndex.hasPrivateMemory, bucket.privateMemory)
+  })
 
   return {
     main: usage(main),
@@ -439,7 +445,7 @@ async function runSnapshot(store: MemorySnapshotStore): Promise<MemorySnapshot> 
       pid: pty.pid ?? 0,
       cpu: clampNumber(sessionCpu),
       memory: clampNumber(sessionMemory),
-      ...(processIndex.hasPrivateMemory ? { privateMemory: clampNumber(sessionPrivateMemory) } : {})
+      ...commitField(processIndex.hasPrivateMemory, sessionPrivateMemory)
     }
 
     let bucket: WorktreeBucket
@@ -479,7 +485,7 @@ async function runSnapshot(store: MemorySnapshotStore): Promise<MemorySnapshot> 
 
   const worktrees: WorktreeMemory[] = bucketList.map(({ privateMemory, ...b }) => ({
     ...b,
-    ...(processIndex.hasPrivateMemory ? { privateMemory } : {}),
+    ...commitField(processIndex.hasPrivateMemory, privateMemory),
     history: readHistory(b.worktreeId)
   }))
 
@@ -497,7 +503,7 @@ async function runSnapshot(store: MemorySnapshotStore): Promise<MemorySnapshot> 
     worktrees,
     host,
     processMemoryMetric: getProcessMemoryMetric(),
-    ...commitFields(
+    ...snapshotCommitFields(
       processIndex.hasPrivateMemory,
       clampNumber(appBuckets.privateMemory) + sessionPrivateTotal
     ),

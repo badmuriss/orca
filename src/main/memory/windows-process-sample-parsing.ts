@@ -10,7 +10,22 @@ import {
   PROCESS_OUTPUT_FIELD_SCAN_MAX_CHARS
 } from '../../shared/process-output-field-scanner'
 
-const TYPEPERF_MAX_FIELDS = 8_192
+/**
+ * Counter paths typeperf is asked for, kept beside the decoder that reads their
+ * names back out of the PDH header.
+ */
+export const TYPEPERF_COUNTERS = [
+  '\\Process(*)\\ID Process',
+  '\\Process(*)\\Creating Process ID',
+  '\\Process(*)\\Working Set',
+  '\\Process(*)\\Private Bytes'
+] as const
+
+const TYPEPERF_MAX_INSTANCES = 4_096
+// Why derived: PDH emits one field per counter per instance plus a timestamp, so
+// a fixed cap silently shrinks the parsable process count each time a counter is
+// added. The 1 MB line cap bounds memory independently.
+const TYPEPERF_MAX_FIELDS = 1 + TYPEPERF_COUNTERS.length * TYPEPERF_MAX_INSTANCES
 const TYPEPERF_MAX_LINE_CHARS = 1024 * 1024
 
 export type WindowsProcessResourceRow = {

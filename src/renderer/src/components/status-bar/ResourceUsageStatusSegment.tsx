@@ -967,7 +967,7 @@ export function ResourceUsageStatusSegment({
   // Why null-not-zero: a host that cannot read commit (every Unix host, and any
   // host older than the field) must render nothing here, never "0 B committed".
   const commitMetricCopy = resourceSnapshot?.processCommitMetric
-    ? getResourceCommitMetricCopy(resourceSnapshot.processCommitMetric)
+    ? getResourceCommitMetricCopy()
     : null
   const { totalMemory, totalCpu, memBadgeLabel, totalPrivateMemory, commitToneClass } =
     useMemo(() => {
