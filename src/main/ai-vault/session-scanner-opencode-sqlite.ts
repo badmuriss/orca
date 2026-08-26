@@ -249,20 +249,20 @@ export async function parseOpenCodeSqliteSession(args: {
   sessionId: string
   platform: NodeJS.Platform
 }): Promise<AiVaultSession | null> {
-  const { dbPath, sessionId, platform } = args
   return readOpenCodeDatabase({
-    dbPath,
-    read: (db) => readSession(db, dbPath, sessionId, platform)
+    dbPath: args.dbPath,
+    read: (db) => readSession({ db, ...args })
   })
 }
 
 // Extracted so the bounded busy-timeout open/retry wrapper owns the handle.
-function readSession(
-  db: SyncDatabase,
-  dbPath: string,
-  sessionId: string,
+function readSession(args: {
+  db: SyncDatabase
+  dbPath: string
+  sessionId: string
   platform: NodeJS.Platform
-): AiVaultSession | null {
+}): AiVaultSession | null {
+  const { db, dbPath, sessionId, platform } = args
   if (!canReadOpenCodeSessions(db)) {
     return null
   }

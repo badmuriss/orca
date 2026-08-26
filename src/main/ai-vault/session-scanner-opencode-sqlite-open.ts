@@ -12,14 +12,34 @@ import { errorMessage } from './session-scanner-values'
 // mid-write routinely. With no busy timeout sqlite3 gives up in ~1 ms with
 // SQLITE_BUSY, and one contended DB emptied the entire Agent Session History
 // panel. Every OpenCode read now opens with a bounded busy timeout.
-export const OPENCODE_SQLITE_BUSY_TIMEOUT_MS = 1_500
+const OPENCODE_SQLITE_BUSY_TIMEOUT_MS = 1_500
 // Bounded, never unbounded: one extra attempt covers a write that outlives the
 // busy timeout without turning a wedged DB into an open-ended stall.
-export const OPENCODE_SQLITE_MAX_ATTEMPTS = 2
-export const OPENCODE_SQLITE_RETRY_DELAY_MS = 250
+const OPENCODE_SQLITE_MAX_ATTEMPTS = 2
+const OPENCODE_SQLITE_RETRY_DELAY_MS = 250
 // Ceiling for a whole list pass: N contended DBs must still finish well inside
 // the worker's 30 s LIST_TIMEOUT_MS, so waiting stops once the budget is spent.
 export const OPENCODE_SQLITE_CONTENTION_BUDGET_MS = 12_000
+// Why: parses run one session at a time, so a wedged DB would charge the full
+// wait once per session and eat the whole scan's budget. After a contended read
+// the same DB fast-fails (its pre-#15036 cost) until this expires; any success
+// clears it, and the window matches the panel's 15 s host-leg cache so the next
+// natural refresh still gets a full-wait attempt.
+const OPENCODE_SQLITE_CONTENTION_BACKOFF_MS = 15_000
+
+const contendedUntilByDbPath = new Map<string, number>()
+
+function isBackingOffFromContention(dbPath: string): boolean {
+  const until = contendedUntilByDbPath.get(dbPath)
+  if (until === undefined) {
+    return false
+  }
+  if (until > Date.now()) {
+    return true
+  }
+  contendedUntilByDbPath.delete(dbPath)
+  return false
+}
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -28,19 +48,14 @@ function delay(ms: number): Promise<void> {
   })
 }
 
-/**
- * Open an OpenCode database read-only with a bounded SQLite busy timeout.
- * @param dbPath - Absolute path to an opencode.db file.
- * @returns An open read-only handle the caller must close.
- */
-export function openOpenCodeDatabaseReadonly(dbPath: string): SyncDatabase {
+// Read-only, plus `query_only` as a belt-and-suspenders guard so a bug in a
+// SELECT list can never mutate the user's opencode.db.
+function openOpenCodeDatabaseReadonly(dbPath: string, busyTimeoutMs: number): SyncDatabase {
   const db = new SyncDatabase(dbPath, {
     readonly: true,
     fileMustExist: true,
-    timeout: OPENCODE_SQLITE_BUSY_TIMEOUT_MS
+    timeout: busyTimeoutMs
   })
-  // Belt-and-suspenders guard so a bug in a SELECT list can never mutate the
-  // user's opencode.db.
   db.pragma('query_only = ON')
   return db
 }
@@ -58,19 +73,24 @@ export async function readOpenCodeDatabase<T>(args: {
   read: (db: SyncDatabase) => T
   contentionDeadline?: number
 }): Promise<T> {
+  const backingOff = isBackingOffFromContention(args.dbPath)
+  const maxAttempts = backingOff ? 1 : OPENCODE_SQLITE_MAX_ATTEMPTS
+  const busyTimeoutMs = backingOff ? 0 : OPENCODE_SQLITE_BUSY_TIMEOUT_MS
   for (let attempt = 1; ; attempt += 1) {
     let db: SyncDatabase | null = null
     try {
-      db = openOpenCodeDatabaseReadonly(args.dbPath)
-      return args.read(db)
+      db = openOpenCodeDatabaseReadonly(args.dbPath, busyTimeoutMs)
+      const value = args.read(db)
+      contendedUntilByDbPath.delete(args.dbPath)
+      return value
     } catch (error) {
+      const contended = isTransientSqliteContention(error)
+      if (contended) {
+        contendedUntilByDbPath.set(args.dbPath, Date.now() + OPENCODE_SQLITE_CONTENTION_BACKOFF_MS)
+      }
       const budgetLeft =
         args.contentionDeadline === undefined || Date.now() < args.contentionDeadline
-      if (
-        attempt >= OPENCODE_SQLITE_MAX_ATTEMPTS ||
-        !budgetLeft ||
-        !isTransientSqliteContention(error)
-      ) {
+      if (attempt >= maxAttempts || !budgetLeft || !contended) {
         throw error
       }
     } finally {
@@ -90,12 +110,9 @@ function walIndexAdvice(dbPath: string): string {
 /**
  * Describe a whole-database read failure as a scan issue.
  *
- * Kinded so the panel renders the scanner's own copy instead of counting a
- * failed *source* as a skipped *transcript* — the DB holds every OpenCode
- * session, so "1 transcript skipped" understates it by orders of magnitude.
- * `scope` (not a new member) because a shipped client validates `kind` against
- * a closed enum and reports a non-matching issue as an invalid, *unkinded*
- * entry — which would resurrect the very miscount this replaces.
+ * Kinded so the panel renders this copy instead of counting a failed *source*
+ * as a skipped *transcript*; `scope` rather than a new member — see
+ * `aiVaultScanIssueSchema` in session-list-result-validation.ts.
  * @param dbPath - Absolute path to the opencode.db that could not be read.
  * @param error - The thrown value from the read.
  * @returns A kinded scan issue with actionable copy.

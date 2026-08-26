@@ -8,10 +8,11 @@ import Database from '../sqlite/sync-database'
 import { listOpenCodeSqliteSessions } from './session-scanner-opencode-sqlite-list'
 import {
   openCodeDatabaseScanIssue,
-  readOpenCodeDatabase,
-  OPENCODE_SQLITE_BUSY_TIMEOUT_MS,
-  OPENCODE_SQLITE_MAX_ATTEMPTS
+  readOpenCodeDatabase
 } from './session-scanner-opencode-sqlite-open'
+
+// Every wait/attempt expectation below is a literal on purpose: deriving it from
+// the constant under test would keep the suite green if that constant went to 0.
 
 // Reproduces #15036: OpenCode holds opencode.db open while it runs, so a scan
 // lands mid-write. The reader had no busy timeout, failed in ~1 ms with the bare
@@ -118,7 +119,8 @@ describe('listOpenCodeSqliteSessions against a database OpenCode is writing to',
 
   it('reads the sessions once the write finishes inside the busy timeout', async () => {
     const path = seededDatabase('opencode.db', 'session-a')
-    await holdWriteLock(path, 200)
+    // Longer than every retry delay combined, so only a real busy timeout survives it.
+    await holdWriteLock(path, 900)
     const issues: AiVaultScanIssue[] = []
 
     const candidates = await listOpenCodeSqliteSessions({ dbPaths: [path], limit: 10, issues })
@@ -130,7 +132,7 @@ describe('listOpenCodeSqliteSessions against a database OpenCode is writing to',
 
   it('retries once past the busy timeout when the writer outlives it', async () => {
     const path = seededDatabase('opencode.db', 'session-a')
-    await holdWriteLock(path, OPENCODE_SQLITE_BUSY_TIMEOUT_MS + 200)
+    await holdWriteLock(path, 1_700)
     const issues: AiVaultScanIssue[] = []
 
     const candidates = await listOpenCodeSqliteSessions({ dbPaths: [path], limit: 10, issues })
@@ -156,7 +158,7 @@ describe('readOpenCodeDatabase retry bounds', () => {
         }
       })
     ).rejects.toThrow('database is locked')
-    expect(attempts).toBe(OPENCODE_SQLITE_MAX_ATTEMPTS)
+    expect(attempts).toBe(2)
   })
 
   it('makes a single attempt once the contention budget is spent', async () => {
@@ -174,6 +176,64 @@ describe('readOpenCodeDatabase retry bounds', () => {
       })
     ).rejects.toThrow('database is locked')
     expect(attempts).toBe(1)
+  })
+
+  it('fast-fails a database that just proved contended instead of waiting again', async () => {
+    const path = seededDatabase('opencode.db', 'session-a')
+    let attempts = 0
+    const read = (): never => {
+      attempts += 1
+      throw busy
+    }
+
+    await expect(readOpenCodeDatabase({ dbPath: path, read })).rejects.toThrow('locked')
+    expect(attempts).toBe(2)
+
+    attempts = 0
+    await expect(readOpenCodeDatabase({ dbPath: path, read })).rejects.toThrow('locked')
+    expect(attempts).toBe(1)
+  })
+
+  it('skips the busy wait entirely while backing off', async () => {
+    const path = seededDatabase('opencode.db', 'session-a')
+    await holdWriteLock(path, 60_000)
+    const issues: AiVaultScanIssue[] = []
+    await listOpenCodeSqliteSessions({ dbPaths: [path], limit: 10, issues })
+
+    const startedAt = Date.now()
+    await listOpenCodeSqliteSessions({ dbPaths: [path], limit: 10, issues })
+
+    expect(Date.now() - startedAt).toBeLessThan(500)
+    expect(issues).toHaveLength(2)
+  }, 20_000)
+
+  it('gives the database its full wait back after a successful read', async () => {
+    const path = seededDatabase('opencode.db', 'session-a')
+    await expect(
+      readOpenCodeDatabase({
+        dbPath: path,
+        read: (): never => {
+          throw busy
+        }
+      })
+    ).rejects.toThrow('locked')
+
+    await readOpenCodeDatabase({
+      dbPath: path,
+      read: (db) => db.prepare('SELECT id FROM session').all()
+    })
+
+    let attempts = 0
+    await expect(
+      readOpenCodeDatabase({
+        dbPath: path,
+        read: (): never => {
+          attempts += 1
+          throw busy
+        }
+      })
+    ).rejects.toThrow('locked')
+    expect(attempts).toBe(2)
   })
 
   it('does not retry a failure that retrying cannot fix', async () => {

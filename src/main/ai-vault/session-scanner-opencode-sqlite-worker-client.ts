@@ -94,8 +94,7 @@ export class OpenCodeSqliteWorkerClient {
       return value.candidates
     } catch (err) {
       if (err instanceof OpenCodeSqliteWorkerUnavailableError) {
-        // Kinded: a whole source failed, not a transcript — see
-        // openCodeDatabaseScanIssue for why 'scope' and not a new kind.
+        // Kinded: a whole source failed, not a transcript.
         args.issues.push({
           agent: 'opencode',
           kind: 'scope',
