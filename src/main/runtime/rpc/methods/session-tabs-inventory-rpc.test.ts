@@ -31,7 +31,9 @@ describe('session tabs inventory RPC methods', () => {
       (message) => messages.push(message),
       { clientKind: 'runtime' }
     )
-    await Promise.resolve()
+    for (let index = 0; index < 20 && !resolveInventory; index += 1) {
+      await Promise.resolve()
+    }
     expect(messages).toEqual([])
 
     resolveInventory({ snapshots: [], authoritative: true })

@@ -2,6 +2,7 @@ import { SESSION_TABS_AUTHORITATIVE_INVENTORY_RUNTIME_CAPABILITY } from '../../.
 import type { RuntimeMobileSessionTabsResult } from '../../../../shared/runtime-types'
 import type { RpcContext } from '../core'
 import { projectSessionTabAgentStatus } from './session-tab-agent-status-projection'
+import { projectSessionTabBrowserPlacements } from './session-tab-browser-placement-projection'
 
 type SessionTabsInventory = {
   snapshots: RuntimeMobileSessionTabsResult[]
@@ -22,7 +23,10 @@ function projectInventory(
 ): SessionTabsInventory {
   return {
     snapshots: inventory.snapshots.map((snapshot) =>
-      projectSessionTabAgentStatus(snapshot, context.clientKind, context.clientCapabilities)
+      projectSessionTabBrowserPlacements(
+        projectSessionTabAgentStatus(snapshot, context.clientKind, context.clientCapabilities),
+        context.clientCapabilities
+      )
     ),
     ...(inventory.authoritative && clientUnderstandsAuthoritativeInventory(context)
       ? { authoritative: true as const }
@@ -76,7 +80,10 @@ export async function subscribeSessionTabsInventory(
     }
     emit({
       type: 'updated',
-      ...projectSessionTabAgentStatus(snapshot, context.clientKind, context.clientCapabilities)
+      ...projectSessionTabBrowserPlacements(
+        projectSessionTabAgentStatus(snapshot, context.clientKind, context.clientCapabilities),
+        context.clientCapabilities
+      )
     })
   }, pairedDeviceId)
   runtime.registerSubscriptionCleanup(
