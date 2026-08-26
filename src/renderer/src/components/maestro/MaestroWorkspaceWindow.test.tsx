@@ -133,6 +133,31 @@ describe('MaestroWorkspaceWindow', () => {
     expect(callbacks.onMoveCommit).not.toHaveBeenCalled()
   })
 
+  it('scales drag deltas into world units by the canvas zoom', () => {
+    render(
+      <TooltipProvider>
+        <MaestroWorkspaceWindow
+          {...callbacks}
+          surfaceKey="terminal-1"
+          surface={terminal()}
+          placement={placement}
+          selected={false}
+          pending={false}
+          linkTarget={false}
+          runtimeTarget={{ kind: 'local' }}
+          worldZoom={0.5}
+        />
+      </TooltipProvider>
+    )
+    const header = screen.getByText('Build').closest('header')
+    fireEvent.pointerDown(header!, { pointerId: 1, clientX: 10, clientY: 10 })
+    fireEvent.pointerMove(header!, { pointerId: 1, clientX: 30, clientY: 40 })
+    fireEvent.pointerUp(header!, { pointerId: 1, clientX: 30, clientY: 40 })
+
+    expect(callbacks.onMove).toHaveBeenCalledWith({ x: 40, y: 60 })
+    expect(callbacks.onMoveCommit).toHaveBeenCalledWith({ x: 40, y: 60 })
+  })
+
   it('renders the exact existing Browser page through the capture preview', () => {
     const surface: WorkspaceSurface = {
       id: { ...scope, unified_tab_id: 'tab-2' },

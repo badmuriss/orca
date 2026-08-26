@@ -295,6 +295,7 @@ export function MaestroWorkspaceCanvas({
         setPlacements={setPlacements}
         optimisticPlacements={optimisticPlacements}
         worldStyle={board.worldStyle}
+        worldZoom={board.viewport.zoom}
         onRevealPlacement={(placement) =>
           board.reveal(workspaceWindowBounds(placement), REVEAL_INSETS)
         }

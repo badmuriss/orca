@@ -18,6 +18,8 @@ type MaestroWorkspaceWindowProps = {
   pending: boolean
   linkTarget: boolean
   runtimeTarget: RuntimeClientTarget
+  // Canvas zoom, so screen-px drag deltas can be converted into world placement units.
+  worldZoom?: number
   onSelect: () => void
   onEdit: () => void
   onLinkPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => void
@@ -108,6 +110,7 @@ function bindingDetail(
 
 function startPointerGesture(
   event: React.PointerEvent,
+  worldZoom: number,
   onDelta: (delta: { x: number; y: number }) => void,
   onCommit: (delta: { x: number; y: number }) => void
 ): void {
@@ -121,7 +124,10 @@ function startPointerGesture(
     if (!(moveEvent instanceof PointerEvent)) {
       return
     }
-    const delta = { x: moveEvent.clientX - origin.x, y: moveEvent.clientY - origin.y }
+    const delta = {
+      x: (moveEvent.clientX - origin.x) / worldZoom,
+      y: (moveEvent.clientY - origin.y) / worldZoom
+    }
     total.x += delta.x
     total.y += delta.y
     onDelta(delta)
@@ -149,6 +155,7 @@ export function MaestroWorkspaceWindow({
   pending,
   linkTarget,
   runtimeTarget,
+  worldZoom = 1,
   onSelect,
   onEdit,
   onLinkPointerDown,
@@ -201,7 +208,7 @@ export function MaestroWorkspaceWindow({
           className="flex h-9 shrink-0 cursor-move items-center gap-2 border-b border-border/80 bg-muted/35 px-2.5"
           onPointerDown={(event) => {
             onSelect()
-            startPointerGesture(event, onMove, onMoveCommit)
+            startPointerGesture(event, worldZoom, onMove, onMoveCommit)
           }}
         >
           <span className="flex size-5 shrink-0 items-center justify-center rounded-md border border-border/70 bg-background/70">
@@ -331,7 +338,7 @@ export function MaestroWorkspaceWindow({
         )}
         onPointerDown={(event) => {
           onSelect()
-          startPointerGesture(event, onResize, onResizeCommit)
+          startPointerGesture(event, worldZoom, onResize, onResizeCommit)
         }}
       />
     </article>

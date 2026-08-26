@@ -38,6 +38,7 @@ type WindowLayerProps = {
   setPlacements: Dispatch<SetStateAction<PlacementMap>>
   optimisticPlacements: MutableRefObject<Record<string, MaestroWorkspaceWindowPlacement>>
   worldStyle: React.CSSProperties
+  worldZoom?: number
   onRevealPlacement: (placement: MaestroWorkspaceWindowPlacement) => void
 }
 
@@ -157,6 +158,7 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
               pending={props.pendingSurfaceKey === surfaceKey}
               linkTarget={linkDrag?.targetKey === surfaceKey}
               runtimeTarget={props.target}
+              worldZoom={props.worldZoom}
               onSelect={() => {
                 props.onRevealPlacement(placement)
                 setSelectedKey(surfaceKey)
