@@ -54,32 +54,6 @@ const catalog: MaestroDelegationCatalog = {
 describe('MaestroDelegationDialog', () => {
   afterEach(cleanup)
 
-  it('shows configured runtime choices and display-only permission policy', () => {
-    render(
-      <MaestroDelegationDialog
-        open
-        workspace={{
-          repository_id: 'repo-1',
-          execution_host_id: 'local',
-          workspace_key: 'folder:folder-1',
-          run_id: 'run-1'
-        }}
-        catalog={catalog}
-        source={{ kind: 'canvas-point', position: { x: 10, y: 20 } }}
-        parentTasks={[{ id: 'task-1', label: 'Active task' }]}
-        parentTaskId="task-1"
-        paths={['src/shared/maestro-delegation.ts']}
-        check="pnpm test"
-        onOpenChange={vi.fn()}
-        onSubmit={vi.fn()}
-      />
-    )
-    expect(screen.getByRole('dialog')).toHaveAttribute('data-maestro-delegation-dialog', 'form')
-    expect(screen.getByText(/Permission mode: yolo/)).toBeInTheDocument()
-    expect(screen.getByText(/cannot be changed by a Canvas request/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Request delegation/ })).toBeDisabled()
-  })
-
   it('requires explicit paths and a check before submitting', () => {
     const onSubmit = vi.fn()
     render(

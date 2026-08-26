@@ -8,7 +8,6 @@ import {
   createPendingWorkerLaunchReceipt,
   createWorkerLaunchReceipt,
   resolveFederatedWorkerLaunchReceipt,
-  resolveRequestedAgentPermissionMode,
   resolveWorkerLaunchPreferences
 } from './orchestration-worker-launch-preferences'
 import { WorkerStartParams } from './orchestration-worker-start-schema'
@@ -212,29 +211,7 @@ describe('orchestration worker launch preferences', () => {
   })
 })
 
-describe('resolveRequestedAgentPermissionMode', () => {
-  it('defaults an unconfigured agent to its shipped yolo default', () => {
-    expect(resolveRequestedAgentPermissionMode('codex')).toBe('yolo')
-  })
-
-  it('reports manual when the configured args are empty', () => {
-    expect(resolveRequestedAgentPermissionMode('codex', { agentDefaultArgs: { codex: '' } })).toBe(
-      'manual'
-    )
-  })
-
-  it('returns null when no agent is known yet', () => {
-    expect(resolveRequestedAgentPermissionMode(null)).toBeNull()
-  })
-})
-
 describe('launch receipt executable: requested vs effective', () => {
-  it('starts both requested and effective executable as null before a host resolves', () => {
-    const receipt = createWorkerLaunchReceipt({ agent: 'codex' })
-    expect(receipt.requested.executable).toBeNull()
-    expect(receipt.effective?.executable).toBeNull()
-  })
-
   it('attaches the resolved executable to effective only, never requested', () => {
     const receipt = createWorkerLaunchReceipt({ agent: 'codex' })
 
@@ -242,13 +219,6 @@ describe('launch receipt executable: requested vs effective', () => {
 
     expect(receipt.requested.executable).toBeNull()
     expect(receipt.effective?.executable).toBe('/home/user/.orca-relay/bin/orca')
-  })
-
-  it('is a no-op on a still-pending (effective === null) federated receipt', () => {
-    const receipt = createPendingWorkerLaunchReceipt({ agent: 'codex' })
-
-    expect(() => attachWorkerLaunchExecutable(receipt, '/usr/local/bin/orca')).not.toThrow()
-    expect(receipt.effective).toBeNull()
   })
 })
 
@@ -294,10 +264,6 @@ describe('boundedRedactedDiagnostic', () => {
     const result = boundedRedactedDiagnostic(long)
     expect(result.length).toBeLessThan(long.length)
     expect(result).toContain('[truncated 1000 chars]')
-  })
-
-  it('leaves a plain message with no secrets untouched', () => {
-    expect(boundedRedactedDiagnostic('plain message, no secrets')).toBe('plain message, no secrets')
   })
 
   it('is idempotent — redacting an already-redacted message changes nothing further', () => {

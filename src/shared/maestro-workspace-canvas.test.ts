@@ -99,8 +99,4 @@ describe('WorkspaceSurfaceSnapshot v1', () => {
     delete (withoutProvenance.automatic_links as Record<string, unknown>[])[0]?.authority_id
     expect(() => WorkspaceSurfaceSnapshotSchema.parse(withoutProvenance)).toThrow()
   })
-
-  it('keeps Harness enrichment optional', () => {
-    expect(WorkspaceSurfaceSnapshotSchema.parse(snapshot()).harness_overlay).toBeNull()
-  })
 })

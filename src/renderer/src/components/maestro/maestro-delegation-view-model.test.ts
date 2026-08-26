@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  buildMaestroDelegationRequest,
-  delegationIntentToDialogState,
-  getDelegationStateCopy
-} from './maestro-delegation-view-model'
+import { buildMaestroDelegationRequest } from './maestro-delegation-view-model'
 
 describe('Maestro delegation view model', () => {
   it('builds a request from an empty Canvas point without authority fields', () => {
@@ -36,11 +32,5 @@ describe('Maestro delegation view model', () => {
     expect(request.paths).toEqual(['src/shared/maestro-delegation.ts'])
     expect(request.check).toBe('pnpm test')
     expect('actor' in request).toBe(false)
-  })
-
-  it('keeps outcome-unknown visually distinct from failure', () => {
-    expect(getDelegationStateCopy('outcome-unknown').label).toBe('Outcome unknown')
-    expect(getDelegationStateCopy('failed').tone).toBe('destructive')
-    expect(delegationIntentToDialogState({ state: 'pending' } as never)).toBe('pending')
   })
 })

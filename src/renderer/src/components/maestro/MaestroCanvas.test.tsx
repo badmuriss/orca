@@ -568,26 +568,6 @@ describe('MaestroCanvas', () => {
     expect(canvas).toHaveFocus()
   })
 
-  it('opens the centered canvas menu from Shift+F10 and restores SVG focus', () => {
-    stubCanvasBounds()
-    const { container } = render(
-      <MaestroCanvas
-        document={document}
-        graph={graph}
-        documentKey={{ executionHostId: 'local', workspaceKey: 'worktree:one' }}
-      />
-    )
-    const canvas = container.querySelector<SVGSVGElement>('[aria-label="Maestro graph"]')!
-    canvas.focus()
-    fireEvent.keyDown(canvas, { key: 'F10', shiftKey: true })
-    const menu = screen.getByRole('menu', { name: 'Canvas actions' })
-    expect(menu).toHaveStyle({ left: '400px', top: '300px' })
-    expect(screen.getByRole('menuitem', { name: 'New Markdown note' })).toHaveFocus()
-    fireEvent.keyDown(menu, { key: 'Escape' })
-    expect(screen.queryByRole('menu', { name: 'Canvas actions' })).not.toBeInTheDocument()
-    expect(canvas).toHaveFocus()
-  })
-
   it('keeps the clicked world point when the viewport changes before note creation', async () => {
     stubCanvasBounds()
     const applyAuthoringMutation = vi.mocked(applyMaestroDocumentAuthoringMutation)

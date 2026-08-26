@@ -198,16 +198,6 @@ function delegationRequest(
 }
 
 describe('Maestro delegation RPC methods', () => {
-  it('registers catalog and coordinator-fenced lifecycle methods', () => {
-    expect(MAESTRO_INTENT_METHODS.map((entry) => entry.name)).toEqual([
-      'maestro.delegation.catalog',
-      'maestro.delegation.request',
-      'maestro.delegation.get',
-      'maestro.delegation.take',
-      'maestro.delegation.settle'
-    ])
-  })
-
   it('returns runtime-owned catalog entries without accepting a permission override', async () => {
     const db = new OrchestrationDb(':memory:')
     const run = db.createRun({

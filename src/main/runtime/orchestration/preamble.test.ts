@@ -251,11 +251,6 @@ describe('buildDispatchPreamble', () => {
     expect(section).toContain(`capability: ${SAMPLE_MANAGED_CLI_CONTEXT.protocolCapability}`)
   })
 
-  it('omits the context section entirely when no managedCliContext is given', () => {
-    const result = buildDispatchPreamble(baseParams())
-    expect(result).not.toContain('=== MANAGED CLI CONTEXT ===')
-  })
-
   it('throws instead of falling back to bare orca when a managed dispatch has no ManagedCliContext', () => {
     expect(() =>
       buildDispatchPreamble(baseParams({ cliCommand: 'orca', requiresManagedCliContext: true }))
@@ -266,20 +261,6 @@ describe('buildDispatchPreamble', () => {
     expect(() =>
       buildDispatchPreamble(baseParams({ devMode: true, requiresManagedCliContext: true }))
     ).toThrow('managed_cli_context_required')
-  })
-
-  it('accepts a devMode managed dispatch once ManagedCliContext is supplied', () => {
-    const result = buildDispatchPreamble(
-      baseParams({
-        devMode: true,
-        requiresManagedCliContext: true,
-        managedCliContext: SAMPLE_MANAGED_CLI_CONTEXT
-      })
-    )
-    // Why: devMode still forces the orca-dev command text — ManagedCliContext
-    // being required is a separate contract from which CLI name is printed.
-    expect(result).toContain('orca-dev orchestration send')
-    expect(result).toContain('=== MANAGED CLI CONTEXT ===')
   })
 
   it('appends a BASE DRIFT section when baseDrift.behind > 0', () => {

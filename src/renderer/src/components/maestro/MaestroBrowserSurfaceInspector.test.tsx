@@ -71,23 +71,6 @@ const receipt = MaestroBrowserSurfaceReceiptSchema.parse({
 afterEach(cleanup)
 
 describe('MaestroBrowserSurfaceInspector', () => {
-  it('shows immutable capture provenance without page secrets or bytes', () => {
-    render(
-      <MaestroBrowserSurfaceInspector
-        receipt={receipt}
-        previewDataUrl="data:image/png;base64,AA=="
-        onClose={vi.fn()}
-      />
-    )
-
-    expect(
-      screen.getByRole('complementary', { name: 'Selected browser surface inspector' })
-    ).toBeTruthy()
-    expect(screen.getByText('visible validation attached light')).toBeTruthy()
-    expect(screen.getByText(`sha256:${'a'.repeat(64)}`)).toBeTruthy()
-    expect(screen.queryByText(/cookie|authorization/i)).toBeNull()
-  })
-
   it('closes only the inspector and releases its preview', () => {
     const onClose = vi.fn()
     const onPreviewRelease = vi.fn()

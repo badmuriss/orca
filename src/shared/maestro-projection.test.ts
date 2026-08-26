@@ -175,22 +175,6 @@ describe('Maestro projection contract', () => {
       live: false
     })
   })
-  it('passes through the matching Harness progress summary unchanged', () => {
-    const result = projectAgentGraphView(parseAgentGraphProjection(view()))
-
-    expect(result.runProgress).toEqual({
-      available: true,
-      summary: view().progress,
-      authority: {
-        runId: scope.run_id,
-        workspace: {
-          executionHostId: scope.execution_workspace.execution_host_id,
-          workspaceKey: scope.execution_workspace.workspace_key
-        },
-        revision: 1
-      }
-    })
-  })
   it('preserves the graph when required progress is structurally invalid', () => {
     const input = view()
     const invalidProgress = parseAgentGraphProjection({

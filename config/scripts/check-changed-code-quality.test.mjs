@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
   OXLINT_SCANS,
+  assertSupportedNodeEngine,
   diagnosticTouchesAddedLines,
+  expectedNodeMajor,
   isMovedCode,
+  main,
   overlapsAddedLines,
-  parseAddedLineRanges
+  parseAddedLineRanges,
+  parseOxlintOutput,
+  resolvePnpmCommand,
+  runOxlintScan
 } from './check-changed-code-quality.mjs'
 
 describe('changed-code quality line matching', () => {
@@ -51,6 +57,79 @@ describe('changed-code quality line matching', () => {
 
     expect(scan.args).not.toContain('--config')
     expect(scan.args).not.toContain('--disable-nested-config')
+  })
+})
+
+describe('changed-code quality execution safety', () => {
+  it('extracts the Oxlint report after a JSON-shaped pnpm engine warning', () => {
+    const warning =
+      'WARN Unsupported engine: wanted: {"node":"24"} (current: {"node":"22.23.2","pnpm":"10.24.0"})'
+    const report = { diagnostics: [], number_of_files: 1, number_of_rules: 167 }
+
+    expect(parseOxlintOutput(`${warning}\n${JSON.stringify(report)}`, 'code quality')).toEqual(
+      report
+    )
+  })
+
+  it('rejects malformed or missing Oxlint reports with bounded diagnostics', () => {
+    expect(() => parseOxlintOutput('{"diagnostics":[}', 'code quality')).toThrow(
+      /one validated Oxlint JSON report/
+    )
+    const hugeStderr = 'engine warning '.repeat(1000)
+    expect(() =>
+      runOxlintScan(
+        process.cwd(),
+        OXLINT_SCANS[0],
+        ['config/scripts/check-changed-code-quality.mjs'],
+        () => ({ status: 1, stdout: '', stderr: hugeStderr })
+      )
+    ).toThrow(/code quality output stage failed/)
+  })
+
+  it('preserves diagnostics and the Windows pnpm command', () => {
+    const file = 'config/scripts/check-changed-code-quality.test.mjs'
+    const diagnostic = {
+      filename: file,
+      message: 'A real changed-line finding',
+      code: 'no-debugger',
+      labels: [{ span: { line: 24 } }]
+    }
+    let invokedCommand
+    const diagnostics = runOxlintScan(
+      process.cwd(),
+      OXLINT_SCANS[0],
+      [file],
+      (command) => {
+        invokedCommand = command
+        return { status: 1, stdout: JSON.stringify({ diagnostics: [diagnostic] }), stderr: '' }
+      },
+      'win32'
+    )
+
+    expect(invokedCommand).toBe('pnpm.cmd')
+    expect(diagnostics).toEqual([diagnostic])
+    expect(resolvePnpmCommand('win32')).toBe('pnpm.cmd')
+    expect(resolvePnpmCommand('linux')).toBe('pnpm')
+  })
+
+  it('fails before scanning on an unsupported Node engine', () => {
+    expect(expectedNodeMajor(process.cwd())).toBe(24)
+    expect(assertSupportedNodeEngine(process.cwd(), '24.7.0')).toEqual({
+      expectedMajor: 24,
+      observedMajor: 24,
+      observedVersion: '24.7.0'
+    })
+    const error = console.error
+    const messages = []
+    console.error = (...args) => messages.push(args.join(' '))
+    try {
+      expect(main(process.cwd(), undefined, { nodeVersion: '22.23.2' })).toBe(1)
+    } finally {
+      console.error = error
+    }
+    expect(messages.join('\n')).toMatch(
+      /Node engine preflight failed: expected Node 24, observed 22\.23\.2\./
+    )
   })
 })
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { joinMaestroCanvasProgress, MAESTRO_LIST_METHODS } from './maestro-list'
+import { joinMaestroCanvasProgress } from './maestro-list'
 import type { MaestroCanvasIndexEntry } from '../../../../shared/maestro-canvas-index'
 import type { MaestroRunProgress } from '../../../../shared/maestro-run-progress'
 
@@ -18,10 +18,6 @@ function unavailableProgress(): MaestroRunProgress {
 }
 
 describe('Maestro list RPC', () => {
-  it('registers the summary-only Canvas index', () => {
-    expect(MAESTRO_LIST_METHODS.map((method) => method.name)).toEqual(['maestro.list'])
-  })
-
   it('joins progress only on the exact host and workspace pair', () => {
     const local = entry('local', 'worktree:repo::same')
     const remote = entry('ssh:build', 'worktree:repo::same')

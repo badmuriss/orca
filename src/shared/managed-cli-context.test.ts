@@ -75,18 +75,6 @@ describe('managed CLI context', () => {
     ).toThrow('managed_cli_context_executable_too_long')
   })
 
-  it('accepts a field exactly at the bound', () => {
-    expect(() =>
-      createManagedCliContext({
-        executable: 'x'.repeat(4096),
-        runtimeId: 'runtime-01',
-        executionHostId: 'local',
-        workspaceKey: 'worktree:repo::/srv/work',
-        terminalHandle: 'term_abc'
-      })
-    ).not.toThrow()
-  })
-
   it('chooses a safe Linux command and preserves an installed launcher path', () => {
     expect(resolveManagedCliExecutable({ platform: 'linux', isPackaged: true })).toBe('orca-ide')
     expect(

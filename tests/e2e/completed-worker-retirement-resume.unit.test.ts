@@ -2,6 +2,8 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SleepingAgentSessionRecord } from '../../src/shared/agent-session-resume'
 import { makePaneKey } from '../../src/shared/stable-pane-id'
+import { createManagedCliContext } from '../../src/shared/managed-cli-context'
+import { worktreeWorkspaceKey } from '../../src/shared/workspace-scope'
 import { parseWorkspaceSession } from '../../src/shared/workspace-session-schema'
 import type { TerminalTab } from '../../src/shared/terminal-tab-types'
 import type { Worktree } from '../../src/shared/worktree/types'
@@ -157,7 +159,7 @@ function seedWorkspace(options: { helper?: boolean } = {}): void {
     settings: {
       ...initialAppStoreState.settings,
       agentCmdOverrides: {},
-      agentDefaultArgs: { codex: '--dangerously-bypass-approvals-and-sandbox' },
+      agentDefaultArgs: { codex: '--yolo' },
       setupScriptLaunchMode: 'new-tab'
     },
     markWorktreeVisited: vi.fn(),
@@ -260,9 +262,15 @@ async function releaseCompletedWorker(terminalState: 'running' | 'exited'): Prom
   vi.spyOn(runtime, 'getOrchestrationDispatchAuthority').mockImplementation((handle) =>
     handle === TERMINAL_HANDLE
       ? ({
+          runtimeId: runtime.getRuntimeId(),
           terminalHandle: TERMINAL_HANDLE,
+          ptyId: 'pty-background-worker',
+          // Why: release proves identity against the whole authority, so the fixture
+          // seeds every field the resource records — worktree, pane, incarnation, host.
+          worktreeId: WORKTREE_ID,
           paneKey: ORIGINAL_PANE_KEY,
           processIncarnation: 'runtime:test:worker:1',
+          launchTokenHash: null,
           hostScope: { kind: 'local', hostId: 'local' }
         } as never)
       : null
@@ -282,6 +290,19 @@ async function releaseCompletedWorker(terminalState: 'running' | 'exited'): Prom
     exitCode: null
   })
   vi.spyOn(runtime, 'getTerminalOrchestrationCliCommand').mockReturnValue('orca')
+  vi.spyOn(runtime, 'preflightWorktreeManagedCliExecutable').mockReturnValue('orca')
+  vi.spyOn(runtime, 'assertTerminalManagedCliAvailable').mockImplementation(() => {})
+  // Why: the worker start proves the terminal's managed-CLI identity from a live pty
+  // record, which a spied terminal creation never registers.
+  vi.spyOn(runtime, 'buildTerminalManagedCliContext').mockImplementation((handle) =>
+    createManagedCliContext({
+      executable: 'orca',
+      runtimeId: runtime.getRuntimeId(),
+      executionHostId: 'local',
+      workspaceKey: worktreeWorkspaceKey(WORKTREE_ID),
+      terminalHandle: handle
+    })
+  )
   vi.spyOn(runtime, 'sendTerminalAgentPrompt').mockResolvedValue({
     handle: TERMINAL_HANDLE,
     accepted: true,
@@ -316,7 +337,9 @@ async function releaseCompletedWorker(terminalState: 'running' | 'exited'): Prom
     const started = (await call('orchestration.workerStart', {
       task: task.id,
       from: 'terminal-coordinator',
-      agent: 'codex'
+      agent: 'codex',
+      // Why: a worker lease is bound to the attempt it was issued for.
+      attemptId: 'attempt_release_completed_worker'
     })) as { dispatchId: string; state: string }
     expect(started.state).toBe('ready')
     expect(db.getWorkerDispatch(started.dispatchId)?.state).toBe('ready')

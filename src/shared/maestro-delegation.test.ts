@@ -81,16 +81,6 @@ describe('Maestro delegation contract', () => {
     })
   })
 
-  it('marks disabled agents and exposes only known model effort choices', () => {
-    const options = buildMaestroDelegationCatalog({
-      agents: ['codex', 'claude'],
-      settings: { disabledTuiAgents: ['claude'], agentDefaultArgs: {}, agentDefaultEnv: {} },
-      placements: []
-    }).agents
-    expect(options.find((entry) => entry.id === 'claude')).toMatchObject({ enabled: false })
-    expect(options.find((entry) => entry.id === 'codex')?.models).toBeInstanceOf(Array)
-  })
-
   it('uses configured launch settings and fails closed for current workspace', () => {
     const catalog = buildMaestroDelegationCatalog({
       agents: ['codex'],

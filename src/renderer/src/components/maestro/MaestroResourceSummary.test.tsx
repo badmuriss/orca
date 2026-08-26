@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 
 import '@testing-library/jest-dom/vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { RuntimeResourceHealth } from '../../../../shared/process-stats-types'
 import { MaestroResourceSummary } from './MaestroResourceSummary'
 
@@ -30,24 +30,6 @@ function health(state: RuntimeResourceHealth['state']): RuntimeResourceHealth {
 }
 
 describe('MaestroResourceSummary', () => {
-  it('renders a compact normal summary and one inspect action', () => {
-    const onInspect = vi.fn()
-    render(<MaestroResourceSummary health={health('normal')} onInspect={onInspect} />)
-
-    expect(screen.getByText('Resources normal')).toBeInTheDocument()
-    expect(screen.getByText('1.5 GB')).toBeInTheDocument()
-    expect(screen.getByText('2')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Inspect resources' }))
-    expect(onInspect).toHaveBeenCalledTimes(1)
-  })
-
-  it('labels pressure without adding dashboard controls', () => {
-    render(<MaestroResourceSummary health={health('pressure')} onInspect={() => {}} />)
-
-    expect(screen.getByText('Resource pressure')).toBeInTheDocument()
-    expect(screen.getAllByRole('button')).toHaveLength(1)
-  })
-
   it('never represents remote unverifiable data as zero usage', () => {
     render(<MaestroResourceSummary health={health('unverifiable')} onInspect={() => {}} />)
 

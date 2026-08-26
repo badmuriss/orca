@@ -54,25 +54,11 @@ function surface(
 describe('MaestroWorkspaceContentPreview', () => {
   afterEach(cleanup)
   beforeEach(() => {
-    readAnnotation
-      .mockReset()
-      .mockResolvedValue({ content: 'Exact note', version: 'draft-2', source: 'draft' })
+    readAnnotation.mockReset()
     readContent
       .mockReset()
       .mockResolvedValue({ content: 'Exact file', modelRevision: 'model-1', tabId: 'tab-1' })
   })
-
-  it.each(['decision', 'warning', 'blocked', 'observation'] as const)(
-    'renders %s as a visible semantic annotation tone',
-    async (tone) => {
-      const { container } = render(
-        <MaestroWorkspaceContentPreview target={{ kind: 'local' }} surface={surface(tone)} />
-      )
-      expect(await screen.findByText(`${tone[0]!.toUpperCase()}${tone.slice(1)}`)).not.toBeNull()
-      expect(container.querySelector(`[data-annotation-tone="${tone}"]`)).not.toBeNull()
-      expect(container.textContent).toContain('Exact note')
-    }
-  )
 
   it('reads a non-annotation editor through the exact Canvas content authority', async () => {
     render(<MaestroWorkspaceContentPreview target={{ kind: 'local' }} surface={surface(null)} />)

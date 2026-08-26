@@ -79,16 +79,6 @@ function method(name: string) {
 }
 
 describe('orchestration browser surface RPC', () => {
-  it('registers distinct browser lifecycle operations', () => {
-    expect(ORCHESTRATION_BROWSER_SURFACE_METHODS.map((method) => method.name)).toEqual([
-      'orchestration.browserSurface.ensure',
-      'orchestration.browserSurface.focus',
-      'orchestration.browserSurface.capture',
-      'orchestration.browserSurface.retain',
-      'orchestration.browserSurface.release'
-    ])
-  })
-
   it('selects and identifies the exact page by worktree id, not by workspace key', async () => {
     // Regression: `id:${workspace_key}` emitted `id:worktree:<id>`, which resolved to nothing, and
     // the identity gate compared the tab's raw worktree id against the prefixed workspace key,

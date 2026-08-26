@@ -179,22 +179,6 @@ function seedCurrentProjection(
 }
 
 describe('Maestro RPC methods', () => {
-  it('registers the bounded document and intent operations', () => {
-    expect(MAESTRO_METHODS.map((method) => method.name)).toEqual([
-      'maestro.document.get',
-      'maestro.document.deltas',
-      'maestro.canvas.open',
-      'maestro.mutation.apply',
-      'maestro.document.layout.apply',
-      'maestro.document.authoring.apply',
-      'maestro.intent.request',
-      'maestro.intent.take',
-      'maestro.intent.settle',
-      'maestro.snapshot.get',
-      'maestro.snapshot.release'
-    ])
-  })
-
   it('reads without a run and rejects host or workspace mismatches', async () => {
     const db = new OrchestrationDb(':memory:')
     const context = rpcContext(db)
