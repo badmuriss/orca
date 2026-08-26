@@ -48,18 +48,20 @@ export async function mutateExistingMaestroWorkspaceSurface(params: {
         }
       }
     }
-    const current = await runtime.readMobileMarkdownTab(selector, surface.id.unified_tab_id)
-    if (!current.editable) {
-      throw new Error(current.readOnlyReason ?? 'annotation_read_only')
-    }
-    const saved = await runtime.saveMobileMarkdownTab(
-      selector,
-      surface.id.unified_tab_id,
-      current.version,
-      request.content
-    )
-    if (saved.tabId !== surface.id.unified_tab_id || saved.content !== request.content) {
-      throw new Error('annotation_save_identity_mismatch')
+    if (request.content !== undefined) {
+      const current = await runtime.readMobileMarkdownTab(selector, surface.id.unified_tab_id)
+      if (!current.editable) {
+        throw new Error(current.readOnlyReason ?? 'annotation_read_only')
+      }
+      const saved = await runtime.saveMobileMarkdownTab(
+        selector,
+        surface.id.unified_tab_id,
+        current.version,
+        request.content
+      )
+      if (saved.tabId !== surface.id.unified_tab_id || saved.content !== request.content) {
+        throw new Error('annotation_save_identity_mismatch')
+      }
     }
     const document = structuredClone(before.canvas.document)
     const annotation = document.annotations[key]

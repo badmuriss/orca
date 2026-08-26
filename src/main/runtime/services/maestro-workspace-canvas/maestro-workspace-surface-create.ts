@@ -27,6 +27,7 @@ export async function createMaestroWorkspaceSurface(params: {
   if (request.surface_type === 'terminal') {
     const created = await runtime.createMobileSessionTerminal(selector, {
       clientMutationId: request.idempotency_key,
+      ...(request.agent ? { agent: request.agent } : {}),
       activate: false,
       select: false
     })
@@ -74,6 +75,15 @@ export async function createMaestroWorkspaceSurface(params: {
     relativePath,
     title
   })
+  const renamed = await runtime.commandMaestroWorkspaceTab({
+    kind: 'rename',
+    worktreeId: created.worktreeId,
+    tabId: acknowledged.tabId,
+    title
+  })
+  if (renamed.tabId !== acknowledged.tabId) {
+    throw new Error('annotation_title_identity_mismatch')
+  }
   const surfaceId = { ...request.scope, unified_tab_id: acknowledged.tabId }
   const key = workspaceSurfaceKey(surfaceId)
   const document = structuredClone(before.canvas.document)

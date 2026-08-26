@@ -27,13 +27,15 @@ const placement = {
 }
 const callbacks = {
   onSelect: vi.fn(),
-  onActivate: vi.fn(),
+  onEdit: vi.fn(),
+  onLinkPointerDown: vi.fn(),
   onFocus: vi.fn(),
   onClose: vi.fn(),
   onMove: vi.fn(),
   onResize: vi.fn(),
   onMoveCommit: vi.fn(),
-  onResizeCommit: vi.fn()
+  onResizeCommit: vi.fn(),
+  onUpdateAnnotationTone: vi.fn()
 }
 
 function terminal(): WorkspaceSurface {
@@ -61,8 +63,8 @@ describe('MaestroWorkspaceWindow', () => {
   beforeEach(() => Object.values(callbacks).forEach((callback) => callback.mockClear()))
   afterEach(cleanup)
 
-  it('attaches real terminal output only for the selected single claim', () => {
-    const { rerender } = render(
+  it('keeps real terminal output visible without selecting the window', () => {
+    render(
       <TooltipProvider>
         <MaestroWorkspaceWindow
           {...callbacks}
@@ -71,22 +73,7 @@ describe('MaestroWorkspaceWindow', () => {
           placement={placement}
           selected={false}
           pending={false}
-          linkTargetMode={false}
-          runtimeTarget={{ kind: 'local' }}
-        />
-      </TooltipProvider>
-    )
-    expect(screen.queryByTestId('terminal-preview')).toBeNull()
-    rerender(
-      <TooltipProvider>
-        <MaestroWorkspaceWindow
-          {...callbacks}
-          surfaceKey="terminal-1"
-          surface={terminal()}
-          placement={placement}
-          selected
-          pending={false}
-          linkTargetMode={false}
+          linkTarget={false}
           runtimeTarget={{ kind: 'local' }}
         />
       </TooltipProvider>
@@ -104,7 +91,7 @@ describe('MaestroWorkspaceWindow', () => {
           placement={placement}
           selected
           pending={false}
-          linkTargetMode={false}
+          linkTarget={false}
           runtimeTarget={{ kind: 'local' }}
         />
       </TooltipProvider>
@@ -117,7 +104,7 @@ describe('MaestroWorkspaceWindow', () => {
 
     expect(pointer.defaultPrevented).toBe(false)
     expect(callbacks.onSelect).not.toHaveBeenCalled()
-    expect(callbacks.onActivate).not.toHaveBeenCalled()
+    expect(callbacks.onEdit).not.toHaveBeenCalled()
     expect(callbacks.onFocus).not.toHaveBeenCalled()
   })
 
@@ -131,7 +118,7 @@ describe('MaestroWorkspaceWindow', () => {
           placement={placement}
           selected={false}
           pending={false}
-          linkTargetMode={false}
+          linkTarget={false}
           runtimeTarget={{ kind: 'local' }}
         />
       </TooltipProvider>
@@ -175,7 +162,7 @@ describe('MaestroWorkspaceWindow', () => {
           placement={placement}
           selected={false}
           pending={false}
-          linkTargetMode={false}
+          linkTarget={false}
           runtimeTarget={{ kind: 'local' }}
         />
       </TooltipProvider>

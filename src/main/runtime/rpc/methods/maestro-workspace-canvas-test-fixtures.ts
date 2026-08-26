@@ -182,6 +182,8 @@ export function harness() {
       filePath: '/workspace/.orca/maestro/annotation.md'
     }),
     commandMaestroWorkspaceTab: vi.fn().mockResolvedValue({ tabId: 'annotation-tab-1' }),
+    readMobileMarkdownTab: vi.fn(),
+    saveMobileMarkdownTab: vi.fn(),
     readMobileFile: vi
       .fn()
       .mockResolvedValue({ content: 'exact content', truncated: false, byteLength: 13 }),

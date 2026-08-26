@@ -14,6 +14,7 @@ import {
   activateNormalTab,
   capture,
   createAnnotation,
+  createCanvasResource,
   openMaestro,
   prepareEvidence,
   removeWorkspaceResources,
@@ -86,9 +87,16 @@ test.describe('Maestro workspace Canvas in Electron', () => {
           ).toBeVisible()
           if (checkpoint === 'resize') {
             await capture(orcaPage, 'no-tabs', profile)
+            const canvasBackground = orcaPage.locator(
+              '[data-maestro-workspace-canvas] [data-slot="context-menu-trigger"]'
+            )
+            await canvasBackground.click({ button: 'right', position: { x: 16, y: 16 } })
+            await expect(orcaPage.getByText('Add to canvas', { exact: true })).toBeVisible()
+            await capture(orcaPage, 'context-menu-open', profile)
+            await orcaPage.keyboard.press('Escape')
           }
 
-          await orcaPage.getByRole('button', { name: 'Terminal', exact: true }).click()
+          await createCanvasResource(orcaPage, 'terminal')
           const surfaces = orcaPage.locator('[data-maestro-workspace-surface]')
           await expect(surfaces).toHaveCount(1, { timeout: 30_000 })
           if (checkpoint === 'resize') {
@@ -114,25 +122,14 @@ test.describe('Maestro workspace Canvas in Electron', () => {
             await orcaPage.keyboard.press('Enter')
             await waitForTerminalOutput(orcaPage, 'MWC_REAL_PTY_OUTPUT', 30_000)
             await openMaestro(orcaPage)
-            await surfaces.first().locator('header').click()
             await expect(surfaces.first()).toContainText('MWC_REAL_PTY_OUTPUT')
             await setTheme(orcaPage, 'dark')
-            const inspector = orcaPage
-              .locator('aside')
-              .filter({ has: orcaPage.getByLabel('Tab title') })
-            if (await inspector.isVisible().catch(() => false)) {
-              await inspector.getByRole('button', { name: 'Close', exact: true }).click()
-            }
             await expect(orcaPage.getByLabel('Tab title')).toHaveCount(0)
             await capture(orcaPage, 'terminal-normal', profile)
             await surfaces.first().locator('header').click()
-            await expect(orcaPage.getByLabel('Tab title')).toBeVisible()
+            await expect(orcaPage.getByLabel('Tab title')).toHaveCount(0)
             await expect(surfaces.first()).toContainText('Terminal')
             await capture(orcaPage, 'terminal-focused', profile)
-            await inspector
-              .getByRole('button', { name: 'Close', exact: true })
-              .dispatchEvent('click')
-            await expect(inspector).toBeHidden()
             const beforeResize = await surfaces.first().boundingBox()
             const resizeHandle = await surfaces
               .first()
@@ -162,10 +159,6 @@ test.describe('Maestro workspace Canvas in Electron', () => {
             expect(afterResize?.width ?? 0).toBeGreaterThan(beforeResize?.width ?? 0)
             expect(afterResize?.height ?? 0).toBeGreaterThan(beforeResize?.height ?? 0)
             await capture(orcaPage, 'terminal-resized', profile)
-            await inspector
-              .getByRole('button', { name: 'Close', exact: true })
-              .dispatchEvent('click')
-            await expect(inspector).toBeHidden()
             const restoreHandle = await surfaces
               .first()
               .getByRole('button', { name: /^Resize / })
@@ -193,19 +186,7 @@ test.describe('Maestro workspace Canvas in Electron', () => {
           }
 
           await setTheme(orcaPage, 'light')
-          const browserCreateButton = orcaPage.getByRole('button', {
-            name: 'Browser',
-            exact: true
-          })
-          await expect(browserCreateButton).toBeVisible()
-          const browserCreateBounds = await browserCreateButton.boundingBox()
-          if (!browserCreateBounds) {
-            throw new Error('Browser create button geometry is unavailable')
-          }
-          await orcaPage.mouse.click(
-            browserCreateBounds.x + browserCreateBounds.width / 2,
-            browserCreateBounds.y + browserCreateBounds.height / 2
-          )
+          await createCanvasResource(orcaPage, 'browser')
           await expect(surfaces).toHaveCount(2, { timeout: 30_000 })
           const browserSurfaceIndex = await surfaces.evaluateAll((nodes) => {
             const state = window.__store?.getState()
@@ -269,7 +250,7 @@ test.describe('Maestro workspace Canvas in Electron', () => {
             timeout: 30_000
           })
           const beforeDecoyCreate = await surfaces.count()
-          await browserCreateButton.click()
+          await createCanvasResource(orcaPage, 'browser')
           await expect(surfaces).toHaveCount(beforeDecoyCreate + 1, { timeout: 30_000 })
           const browserSurfaces = orcaPage.locator(
             '[data-maestro-workspace-content-type="browser"]'
@@ -461,64 +442,35 @@ test.describe('Maestro workspace Canvas in Electron', () => {
             return
           }
 
-          const visibleSourceIndex = await surfaces.evaluateAll((nodes) =>
-            nodes.findIndex((node) => {
-              const header = node.querySelector('header')
-              if (!header) {
-                return false
-              }
-              const bounds = header.getBoundingClientRect()
-              const hit = document.elementFromPoint(
-                bounds.x + bounds.width / 2,
-                bounds.y + bounds.height / 2
-              )
-              return hit === header || header.contains(hit)
-            })
-          )
-          expect(visibleSourceIndex).toBeGreaterThanOrEqual(0)
-          await surfaces.nth(visibleSourceIndex).locator('header').click()
-          await orcaPage.getByRole('button', { name: 'Link from this surface' }).click()
-          const linkTargets = orcaPage.getByRole('button', { name: 'Link to this surface' })
-          const clickVisibleLinkTarget = async (): Promise<string> => {
-            const visibleTargetIndex = await linkTargets.evaluateAll((buttons) =>
-              buttons.findIndex((button) => {
-                const bounds = button.getBoundingClientRect()
-                const hit = document.elementFromPoint(
-                  bounds.x + bounds.width / 2,
-                  bounds.y + bounds.height / 2
-                )
-                return hit === button || button.contains(hit)
-              })
-            )
-            expect(visibleTargetIndex).toBeGreaterThanOrEqual(0)
-            const target = linkTargets.nth(visibleTargetIndex)
-            const targetSurfaceKey = await target.evaluate((button) =>
-              button
-                .closest('[data-maestro-workspace-surface]')
-                ?.getAttribute('data-maestro-workspace-surface')
-            )
-            if (!targetSurfaceKey) {
-              throw new Error('Visible link target has no exact surface identity')
-            }
-            await target.click()
-            return targetSurfaceKey
+          const manualLinkSource = browserSurface
+          const manualLinkTarget = surfaces.first()
+          const [linkHandleBox, linkTargetBox] = await Promise.all([
+            manualLinkSource.getByRole('button', { name: /Drag a link from/ }).boundingBox(),
+            manualLinkTarget.boundingBox()
+          ])
+          expect(linkHandleBox).not.toBeNull()
+          expect(linkTargetBox).not.toBeNull()
+          if (!linkHandleBox || !linkTargetBox) {
+            throw new Error('Manual-link drag geometry is unavailable')
           }
-          const manualTargetSurfaceKey = await clickVisibleLinkTarget()
+          await orcaPage.mouse.move(
+            linkHandleBox.x + linkHandleBox.width / 2,
+            linkHandleBox.y + linkHandleBox.height / 2
+          )
+          await orcaPage.mouse.down()
+          await orcaPage.mouse.move(
+            linkTargetBox.x + linkTargetBox.width / 2,
+            linkTargetBox.y + linkTargetBox.height / 2,
+            { steps: 8 }
+          )
+          await expect(manualLinkTarget).toHaveAttribute('data-maestro-link-target', 'true')
+          await orcaPage.mouse.up()
           const linkInspector = orcaPage.locator('aside').filter({
             has: orcaPage.getByLabel('Tab title')
           })
           const manualPaths = orcaPage.locator('[data-link-provenance="manual"]')
           await expect(manualPaths).toHaveCount(1, { timeout: 30_000 })
-          await linkInspector.getByRole('button', { name: 'Close', exact: true }).click()
-          const manualTargetIndex = await surfaces.evaluateAll(
-            (nodes, surfaceKey) =>
-              nodes.findIndex(
-                (node) => node.getAttribute('data-maestro-workspace-surface') === surfaceKey
-              ),
-            manualTargetSurfaceKey
-          )
-          expect(manualTargetIndex).toBeGreaterThanOrEqual(0)
-          await surfaces.nth(manualTargetIndex).locator('header').click()
+          await manualLinkTarget.getByRole('button', { name: 'Rename tab' }).click()
           await expect(linkInspector.getByText('Manual', { exact: true })).toHaveCount(1)
           await expect(linkInspector.getByText('Suggestion', { exact: true }).first()).toBeVisible()
           await linkInspector
@@ -539,7 +491,7 @@ test.describe('Maestro workspace Canvas in Electron', () => {
           await expect(orcaPage.locator('[data-link-provenance="automatic"]')).toBeVisible({
             timeout: 30_000
           })
-          await browserSurface.locator('header').click()
+          await browserSurface.getByRole('button', { name: 'Rename tab' }).click()
           const suggestions = linkInspector.locator('.rounded-md').filter({ hasText: 'Suggestion' })
           const suggestionCount = await suggestions.count()
           expect(suggestionCount).toBeGreaterThanOrEqual(2)

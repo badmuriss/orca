@@ -95,12 +95,66 @@ export async function setTheme(page: Page, theme: 'light' | 'dark'): Promise<voi
   await expect(page.locator('html')).toHaveClass(new RegExp(theme))
 }
 
+export async function createCanvasResource(
+  page: Page,
+  resource: 'terminal' | 'browser' | 'annotation'
+): Promise<void> {
+  const background = page.locator(
+    '[data-maestro-workspace-canvas] [data-slot="context-menu-trigger"]'
+  )
+  await background.click({ button: 'right', position: { x: 16, y: 16 }, force: true })
+  if (resource === 'terminal') {
+    await page.getByRole('menuitem', { name: 'Terminal', exact: true }).hover()
+    await page.getByRole('menuitem', { name: 'Normal shell', exact: true }).dispatchEvent('click')
+    return
+  }
+  await page
+    .getByRole('menuitem', {
+      name: resource === 'browser' ? 'Browser' : 'New annotation',
+      exact: true
+    })
+    .dispatchEvent('click')
+}
+
 export async function createAnnotation(page: Page, tone: string, text: string): Promise<void> {
-  await page.getByLabel('Annotation text').fill(text)
-  await page.getByLabel('Annotation tone').click()
-  await page.getByRole('option', { name: new RegExp(`^${tone}$`, 'i') }).click()
-  await page.getByRole('button', { name: 'Content', exact: true }).click()
-  await expect(page.locator(`[data-annotation-tone="${tone.toLowerCase()}"]`)).toBeVisible({
+  const surfaces = page.locator('[data-maestro-workspace-surface]')
+  const before = await surfaces.count()
+  const existingKeys = await surfaces.evaluateAll((nodes) =>
+    nodes.map((node) => node.getAttribute('data-maestro-workspace-surface'))
+  )
+  await createCanvasResource(page, 'annotation')
+  await expect(surfaces).toHaveCount(before + 1, { timeout: 30_000 })
+  let annotationIndex = -1
+  await expect
+    .poll(async () => {
+      annotationIndex = await surfaces.evaluateAll((nodes, knownKeys) => {
+        const known = new Set(knownKeys)
+        return nodes.findIndex(
+          (node) => !known.has(node.getAttribute('data-maestro-workspace-surface'))
+        )
+      }, existingKeys)
+      return annotationIndex
+    })
+    .toBeGreaterThanOrEqual(0)
+  const annotation = surfaces.nth(annotationIndex)
+  await annotation.getByRole('button', { name: 'Rename tab' }).click()
+  const inspector = page.locator('aside').filter({ has: page.getByLabel('Tab title') })
+  await inspector.getByLabel('Tab title').fill(text)
+  await inspector.getByRole('button', { name: 'Rename', exact: true }).click()
+  await page.locator('aside').getByRole('button', { name: 'Close', exact: true }).click()
+  const tonePicker = annotation.getByLabel('Annotation color')
+  await tonePicker.click()
+  await page.getByRole('option', { name: new RegExp(`^${tone}$`, 'i') }).evaluate((option) => {
+    const pointerEvent = {
+      bubbles: true,
+      cancelable: true,
+      pointerType: 'mouse',
+      button: 0
+    }
+    option.dispatchEvent(new PointerEvent('pointerdown', pointerEvent))
+    option.dispatchEvent(new PointerEvent('pointerup', pointerEvent))
+  })
+  await expect(annotation.locator(`[data-annotation-tone="${tone.toLowerCase()}"]`)).toBeVisible({
     timeout: 30_000
   })
 }

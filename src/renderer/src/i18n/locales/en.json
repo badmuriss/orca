@@ -13667,7 +13667,7 @@
           "0b65d32766": "Exact Browser page {{value0}}"
         },
         "MaestroWorkspaceCanvas": {
-          "1605610d90": "Open a Terminal, Browser, or content tab. A Harness Run is optional.",
+          "1605610d90": "Right-click the board to add a Terminal, Browser, or annotation. A Harness Run is optional.",
           "402ed16622": "No workspace resources yet",
           "5036690f36": "This action is unavailable from the workspace authority.",
           "d4bfd06870": "The outcome is unknown. The window remains until authority confirms it.",

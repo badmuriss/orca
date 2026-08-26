@@ -1,5 +1,7 @@
 import { z } from 'zod'
 import { WorkspaceSurfaceIdSchema } from '../../../../shared/maestro-workspace-canvas'
+import { ALL_TUI_AGENTS } from '../../../../shared/tui-agent-display-names'
+import type { TuiAgent } from '../../../../shared/tui-agent'
 import { resolveMaestroLayoutPrincipal } from '../maestro-principal'
 import { defineMethod, type RpcMethod } from '../core'
 import { getMaestroWorkspaceCanvasAuthority } from '../../services/maestro-workspace-canvas/maestro-workspace-canvas-authority'
@@ -21,12 +23,24 @@ const documentMutationBase = {
   expected_canvas_revision: z.number().int().min(0)
 }
 const surfaceKey = z.string().min(1).max(12_288)
+const tuiAgentSchema = z.custom<TuiAgent>(
+  (value) => typeof value === 'string' && ALL_TUI_AGENTS.includes(value as TuiAgent)
+)
 const mutationSchema = z.union([
   z
     .object({
       ...mutationBase,
       action: z.literal('create'),
-      surface_type: z.enum(['terminal', 'browser']),
+      surface_type: z.literal('terminal'),
+      title: z.string().min(1).max(512).optional(),
+      agent: tuiAgentSchema.optional()
+    })
+    .strict(),
+  z
+    .object({
+      ...mutationBase,
+      action: z.literal('create'),
+      surface_type: z.literal('browser'),
       title: z.string().min(1).max(512).optional()
     })
     .strict(),
@@ -50,7 +64,7 @@ const mutationSchema = z.union([
       title: z.string().min(1).max(512).optional(),
       annotation: z
         .object({
-          text: z.string().min(1).max(65_536),
+          text: z.string().max(65_536),
           tone: z.enum(['decision', 'warning', 'blocked', 'observation'])
         })
         .strict()
@@ -83,7 +97,7 @@ const mutationSchema = z.union([
       ...documentMutationBase,
       action: z.literal('update-annotation'),
       surface_id: WorkspaceSurfaceIdSchema,
-      content: z.string().min(1).max(65_536),
+      content: z.string().max(65_536).optional(),
       tone: z.enum(['decision', 'warning', 'blocked', 'observation'])
     })
     .strict(),

@@ -22,7 +22,7 @@ function emptySession(): RuntimeMobileSessionTabsResult {
 }
 
 describe('Maestro workspace empty terminal creation', () => {
-  it('creates an exact terminal surface from an empty workspace session', async () => {
+  it('creates an exact selected-agent terminal from an empty workspace session', async () => {
     const database = new OrchestrationDb(':memory:')
     let created = false
     let pollsAfterCreate = 0
@@ -70,6 +70,8 @@ describe('Maestro workspace empty terminal creation', () => {
       browserTabCreate: vi.fn(),
       createMaestroWorkspaceAnnotation: vi.fn(),
       commandMaestroWorkspaceTab: vi.fn(),
+      readMobileMarkdownTab: vi.fn(),
+      saveMobileMarkdownTab: vi.fn(),
       readMobileFile: vi.fn(),
       getTerminalProcessIncarnation: vi.fn().mockReturnValue('pty-created:incarnation-1'),
       getOrchestrationDb: () => database
@@ -86,6 +88,7 @@ describe('Maestro workspace empty terminal creation', () => {
     const result = await authority.mutate({
       action: 'create',
       surface_type: 'terminal',
+      agent: 'opencode',
       scope,
       actor_id: 'actor-1',
       expected_authority_revision: current.snapshot.authority_revision,
@@ -98,6 +101,7 @@ describe('Maestro workspace empty terminal creation', () => {
     })
     expect(createMobileSessionTerminal).toHaveBeenCalledWith('id:folder-1', {
       clientMutationId: 'terminal-create-empty-1',
+      agent: 'opencode',
       activate: false,
       select: false
     })
@@ -139,6 +143,8 @@ describe('Maestro workspace empty terminal creation', () => {
       browserTabCreate: vi.fn(),
       createMaestroWorkspaceAnnotation: vi.fn(),
       commandMaestroWorkspaceTab: vi.fn(),
+      readMobileMarkdownTab: vi.fn(),
+      saveMobileMarkdownTab: vi.fn(),
       readMobileFile: vi.fn(),
       getTerminalProcessIncarnation: vi.fn().mockReturnValue('pty-delayed:incarnation-1'),
       getOrchestrationDb: () => database

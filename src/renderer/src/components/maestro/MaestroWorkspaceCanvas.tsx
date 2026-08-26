@@ -4,6 +4,7 @@ import type { WorkspaceCanvasDocument } from '../../../../shared/maestro-documen
 import { workspaceSurfaceKey } from '../../../../shared/maestro-workspace-canvas'
 import type { RuntimeMaestroWorkspaceCanvasScope } from '../../../../shared/runtime-types'
 import { Button } from '@/components/ui/button'
+import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu'
 import type { RuntimeClientTarget } from '@/runtime/runtime-client-target'
 import { useMaestroWorkspaceCanvas } from '@/hooks/useMaestroWorkspaceCanvas'
 import { MaestroWorkspaceLinks } from './MaestroWorkspaceLinks'
@@ -17,6 +18,7 @@ import {
 import { useMaestroWorkspaceViewport } from './useMaestroWorkspaceViewport'
 import { translate } from '@/i18n/i18n'
 import { MaestroWorkspaceToolbar } from './MaestroWorkspaceToolbar'
+import { MaestroWorkspaceContextMenu } from './MaestroWorkspaceContextMenu'
 import { MaestroWorkspaceWindowLayer } from './MaestroWorkspaceWindowLayer'
 import { useMaestroWorkspaceRunProgress } from './useMaestroWorkspaceRunProgress'
 
@@ -202,25 +204,27 @@ export function MaestroWorkspaceCanvas({
       data-maestro-workspace-canvas=""
       data-authority-state={resource.status}
     >
-      <div
-        className="absolute inset-0 touch-none cursor-grab active:cursor-grabbing"
-        style={{
-          backgroundImage:
-            'radial-gradient(color-mix(in srgb, var(--foreground) 13%, transparent) 1px, transparent 1px)',
-          ...board.canvasStyle
-        }}
-        ref={board.canvasRef}
-        onWheel={board.onWheel}
-        onPointerDown={board.onPointerDown}
-        onPointerMove={board.onPointerMove}
-        onPointerUp={board.onPointerUp}
-        onPointerCancel={board.onPointerUp}
-      />
-      <MaestroWorkspaceToolbar
-        resource={resource}
-        workspaceKey={scope.workspace_key}
-        board={board}
-      />
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div
+            className="absolute inset-0 touch-none cursor-grab active:cursor-grabbing"
+            style={{
+              backgroundColor: 'color-mix(in srgb, var(--background) 96%, var(--foreground))',
+              backgroundImage:
+                'linear-gradient(to right, color-mix(in srgb, var(--foreground) 8%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in srgb, var(--foreground) 8%, transparent) 1px, transparent 1px)',
+              ...board.canvasStyle
+            }}
+            ref={board.canvasRef}
+            onWheel={board.onWheel}
+            onPointerDown={board.onPointerDown}
+            onPointerMove={board.onPointerMove}
+            onPointerUp={board.onPointerUp}
+            onPointerCancel={board.onPointerUp}
+          />
+        </ContextMenuTrigger>
+        <MaestroWorkspaceContextMenu resource={resource} workspaceKey={scope.workspace_key} />
+      </ContextMenu>
+      <MaestroWorkspaceToolbar board={board} />
 
       {resource.status === 'unavailable' ? (
         <div className="absolute left-3 right-3 top-14 z-30 flex items-center justify-center gap-2 rounded-md border border-destructive/50 bg-card px-3 py-2 text-center text-xs font-medium text-destructive shadow-xs">
@@ -267,7 +271,7 @@ export function MaestroWorkspaceCanvas({
             <p className="mt-1 text-sm text-muted-foreground">
               {translate(
                 'auto.components.maestro.MaestroWorkspaceCanvas.1605610d90',
-                'Open a Terminal, Browser, or content tab. A Harness Run is optional.'
+                'Right-click the board to add a Terminal, Browser, or annotation. A Harness Run is optional.'
               )}
             </p>
           </div>

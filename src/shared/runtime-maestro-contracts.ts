@@ -1,5 +1,6 @@
 import type { WorkspaceCanvasDocument } from './maestro-document-contract'
 import type { WorkspaceSurfaceId, WorkspaceSurfaceSnapshot } from './maestro-workspace-canvas'
+import type { TuiAgent } from './tui-agent'
 
 export type RuntimeMaestroWorkspaceCanvasScope = {
   execution_host_id: string
@@ -33,7 +34,13 @@ type RuntimeMaestroWorkspaceCanvasDocumentMutationBase =
 export type RuntimeMaestroWorkspaceCanvasMutation =
   | (RuntimeMaestroWorkspaceCanvasMutationBase & {
       action: 'create'
-      surface_type: 'terminal' | 'browser'
+      surface_type: 'terminal'
+      title?: string
+      agent?: TuiAgent
+    })
+  | (RuntimeMaestroWorkspaceCanvasMutationBase & {
+      action: 'create'
+      surface_type: 'browser'
       title?: string
     })
   | (RuntimeMaestroWorkspaceCanvasDocumentMutationBase & {
@@ -57,7 +64,7 @@ export type RuntimeMaestroWorkspaceCanvasMutation =
   | (RuntimeMaestroWorkspaceCanvasDocumentMutationBase & {
       action: 'update-annotation'
       surface_id: WorkspaceSurfaceId
-      content: string
+      content?: string
       tone: 'decision' | 'warning' | 'blocked' | 'observation'
     })
   | (RuntimeMaestroWorkspaceCanvasDocumentMutationBase & {

@@ -135,21 +135,24 @@ export function useMaestroWorkspaceViewport(params: {
       event.preventDefault()
       const bounds = event.currentTarget.getBoundingClientRect()
       const current = viewportRef.current
-      const next =
-        event.ctrlKey || event.metaKey
-          ? zoomMaestroViewportAtPointer(
+      const scrollDelta =
+        Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX
+      const next = event.shiftKey
+        ? {
+            ...current,
+            center: { ...current.center, x: current.center.x + scrollDelta / current.zoom }
+          }
+        : event.ctrlKey || event.metaKey
+          ? {
+              ...current,
+              center: { ...current.center, y: current.center.y + scrollDelta / current.zoom }
+            }
+          : zoomMaestroViewportAtPointer(
               current,
               size,
               { x: event.clientX - bounds.left, y: event.clientY - bounds.top },
-              current.zoom * Math.exp(-event.deltaY * 0.002)
+              current.zoom * Math.exp(-scrollDelta * 0.002)
             )
-          : {
-              ...current,
-              center: {
-                x: current.center.x + event.deltaX / current.zoom,
-                y: current.center.y + event.deltaY / current.zoom
-              }
-            }
       update(next)
     },
     [size, update]

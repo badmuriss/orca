@@ -369,7 +369,13 @@ describe('Maestro workspace Canvas authority', () => {
       surface_id: first.surface_id
     })
     expect(runtime.createMaestroWorkspaceAnnotation).toHaveBeenCalledTimes(1)
-    expect(runtime.commandMaestroWorkspaceTab).toHaveBeenCalledTimes(1)
+    expect(runtime.commandMaestroWorkspaceTab).toHaveBeenCalledTimes(2)
+    expect(runtime.commandMaestroWorkspaceTab).toHaveBeenLastCalledWith({
+      kind: 'rename',
+      worktreeId: 'folder-1',
+      tabId: 'annotation-tab-1',
+      title: 'Decision'
+    })
     const reopened = await authority.query(scope, 'actor-1')
     if (reopened.status !== 'available') {
       throw new Error('missing annotation snapshot')

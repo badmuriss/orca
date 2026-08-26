@@ -50,7 +50,7 @@ export function MaestroWorkspaceBrowserPreview({
           'Exact Browser page {{value0}}',
           { value0: pageId }
         )}
-        className="size-full object-cover object-top"
+        className="size-full bg-white object-cover object-top"
         data-browser-page-id={pageId}
       />
     )

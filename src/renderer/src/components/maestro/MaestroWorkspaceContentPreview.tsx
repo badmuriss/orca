@@ -8,17 +8,26 @@ import {
   readRuntimeMaestroDiff
 } from '@/runtime/runtime-maestro-workspace-client'
 import { translate } from '@/i18n/i18n'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '@/components/ui/select'
 
 type Preview = { content: string; revision: string; source: string }
+type AnnotationTone = 'decision' | 'warning' | 'blocked' | 'observation'
 
 const TONE_CLASS = {
   decision:
-    'border-l-[var(--status-success)] bg-[color-mix(in_srgb,var(--status-success)_6%,var(--editor-surface))]',
+    'border-l-[var(--status-success)] bg-[color-mix(in_srgb,var(--status-success)_10%,var(--editor-surface))]',
   warning:
-    'border-l-[var(--agent-question-text)] bg-[color-mix(in_srgb,var(--annotation-highlight)_8%,var(--editor-surface))]',
+    'border-l-[var(--agent-question-text)] bg-[color-mix(in_srgb,var(--annotation-highlight)_14%,var(--editor-surface))]',
   blocked:
-    'border-l-destructive bg-[color-mix(in_srgb,var(--destructive)_6%,var(--editor-surface))]',
-  observation: 'border-l-muted-foreground bg-editor-surface'
+    'border-l-destructive bg-[color-mix(in_srgb,var(--destructive)_10%,var(--editor-surface))]',
+  observation:
+    'border-l-muted-foreground bg-[color-mix(in_srgb,var(--muted)_55%,var(--editor-surface))]'
 } as const
 
 const TONE_LABEL = {
@@ -30,10 +39,12 @@ const TONE_LABEL = {
 
 export function MaestroWorkspaceContentPreview({
   target,
-  surface
+  surface,
+  onUpdateAnnotationTone
 }: {
   target: RuntimeClientTarget
   surface: WorkspaceSurface
+  onUpdateAnnotationTone?: (tone: AnnotationTone) => void
 }): React.JSX.Element {
   const [preview, setPreview] = useState<Preview | null>(null)
   const [unavailable, setUnavailable] = useState(false)
@@ -110,9 +121,35 @@ export function MaestroWorkspaceContentPreview({
         data-annotation-tone={tone}
       >
         {tone ? (
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
-            {TONE_LABEL[tone]}
-          </p>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
+              {TONE_LABEL[tone]}
+            </p>
+            {onUpdateAnnotationTone ? (
+              <Select
+                value={tone}
+                onValueChange={(value) => onUpdateAnnotationTone(value as AnnotationTone)}
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="h-6 w-28 bg-background/65 px-2 text-[10px]"
+                  aria-label={translate(
+                    'auto.components.maestro.MaestroWorkspaceContentPreview.a83bb54e16',
+                    'Annotation color'
+                  )}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(TONE_LABEL) as AnnotationTone[]).map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {TONE_LABEL[value]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
+          </div>
         ) : null}
         <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-5 text-foreground">
           {preview.content}

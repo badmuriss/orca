@@ -10,6 +10,7 @@ import {
   PROFILES,
   capture,
   createAnnotation,
+  createCanvasResource,
   openMaestro,
   prepareEvidence,
   removeWorkspaceResources,
@@ -63,21 +64,23 @@ async function waitForExactBrowserTab(page: Page, surface: Locator) {
   const unifiedTabId = surfaceKey ? (JSON.parse(surfaceKey) as [string, string, string])[2] : null
   expect(unifiedTabId).toBeTruthy()
   await expect
-    .poll(() =>
-      page.evaluate((tabId) => {
-        const state = window.__store?.getState()
-        const worktreeId = state?.activeWorktreeId
-        const unifiedTab = worktreeId
-          ? state?.unifiedTabsByWorktree[worktreeId]?.find(
-              (tab) => tab.id === tabId && tab.contentType === 'browser'
-            )
-          : null
-        return (
-          state?.activeTabType === 'browser' &&
-          Boolean(unifiedTab) &&
-          state.activeBrowserTabIdByWorktree?.[worktreeId ?? ''] === unifiedTab?.entityId
-        )
-      }, unifiedTabId)
+    .poll(
+      () =>
+        page.evaluate((tabId) => {
+          const state = window.__store?.getState()
+          const worktreeId = state?.activeWorktreeId
+          const unifiedTab = worktreeId
+            ? state?.unifiedTabsByWorktree[worktreeId]?.find(
+                (tab) => tab.id === tabId && tab.contentType === 'browser'
+              )
+            : null
+          return (
+            state?.activeTabType === 'browser' &&
+            Boolean(unifiedTab) &&
+            state.activeBrowserTabIdByWorktree?.[worktreeId ?? ''] === unifiedTab?.entityId
+          )
+        }, unifiedTabId),
+      { timeout: 30_000 }
     )
     .toBe(true)
 }
@@ -135,8 +138,24 @@ test.describe('Maestro workspace Canvas visual refinement', () => {
       const userDataDir = await electronApp.evaluate(({ app }) => app.getPath('userData'))
       const runtimeClient = new RuntimeClient(userDataDir, 30_000, null, null)
       await removeWorkspaceResources(orcaPage)
+      await expect(orcaPage.getByText('No workspace resources yet')).toBeVisible()
+      const canvasBackground = orcaPage.locator(
+        '[data-maestro-workspace-canvas] [data-slot="context-menu-trigger"]'
+      )
+      await capture(orcaPage, 'no-tabs', notebook)
+      await canvasBackground.click({ button: 'right', position: { x: 16, y: 16 } })
+      await expect(orcaPage.getByText('Add to canvas', { exact: true })).toBeVisible()
+      await capture(orcaPage, 'context-menu-open', notebook)
+      await orcaPage.keyboard.press('Escape')
+      await setEvidenceProfile(orcaPage, desktop)
+      await capture(orcaPage, 'no-tabs', desktop)
+      await canvasBackground.click({ button: 'right', position: { x: 16, y: 16 } })
+      await expect(orcaPage.getByText('Add to canvas', { exact: true })).toBeVisible()
+      await capture(orcaPage, 'context-menu-open', desktop)
+      await orcaPage.keyboard.press('Escape')
+      await setEvidenceProfile(orcaPage, notebook)
 
-      await orcaPage.getByRole('button', { name: 'Terminal', exact: true }).click()
+      await createCanvasResource(orcaPage, 'terminal')
       const surfaces = orcaPage.locator('[data-maestro-workspace-surface]')
       await expect(surfaces).toHaveCount(1, { timeout: 30_000 })
       const terminal = surfaces.first()
@@ -144,6 +163,8 @@ test.describe('Maestro workspace Canvas visual refinement', () => {
       const inspector = orcaPage.locator('aside').filter({
         has: orcaPage.getByLabel('Tab title')
       })
+      await expect(inspector).toBeHidden()
+      await terminal.getByRole('button', { name: 'Rename tab' }).click()
       await expect(inspector).toBeVisible()
       await expectInsideCanvas(orcaPage, terminal)
       const [terminalBox, inspectorBox] = await Promise.all([
@@ -160,13 +181,16 @@ test.describe('Maestro workspace Canvas visual refinement', () => {
           terminalBox.y < inspectorBox.y + inspectorBox.height &&
           terminalBox.y + terminalBox.height > inspectorBox.y
       ).toBe(false)
+      await inspector.getByRole('button', { name: 'Close', exact: true }).click()
+      await expect(inspector).toBeHidden()
       await setTheme(orcaPage, 'dark')
       await capture(orcaPage, 'terminal-focused', notebook)
-      await inspector.getByRole('button', { name: 'Close', exact: true }).dispatchEvent('click')
-      await expect(inspector).toBeHidden()
+      await setEvidenceProfile(orcaPage, desktop)
+      await capture(orcaPage, 'terminal-focused', desktop)
+      await setEvidenceProfile(orcaPage, notebook)
 
       await setTheme(orcaPage, 'light')
-      await orcaPage.getByRole('button', { name: 'Browser', exact: true }).click()
+      await createCanvasResource(orcaPage, 'browser')
       await expect(surfaces).toHaveCount(2, { timeout: 30_000 })
       const browser = await surfaceForContentType(orcaPage, 'browser')
       await expectInsideCanvas(orcaPage, browser)
@@ -205,7 +229,13 @@ test.describe('Maestro workspace Canvas visual refinement', () => {
         timeout: 30_000
       })
       await expectInsideCanvas(orcaPage, projectedBrowser)
+      await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
       await capture(orcaPage, 'browser-rendered', notebook)
+      await setEvidenceProfile(orcaPage, desktop)
+      await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
+      await capture(orcaPage, 'browser-rendered', desktop)
+      await setEvidenceProfile(orcaPage, notebook)
+      await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
 
       const contentPath = path.join(testRepoPath, 'MWC-EVIDENCE.md')
       writeFileSync(
@@ -222,7 +252,16 @@ test.describe('Maestro workspace Canvas visual refinement', () => {
       })
       await expectInsideCanvas(orcaPage, content)
       await setTheme(orcaPage, 'dark')
+      await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
+      await expect(content).toContainText('Workspace-owned recognizable content.', {
+        timeout: 30_000
+      })
       await capture(orcaPage, 'content-rendered', notebook)
+      await setEvidenceProfile(orcaPage, desktop)
+      await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
+      await capture(orcaPage, 'content-rendered', desktop)
+      await setEvidenceProfile(orcaPage, notebook)
+      await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
 
       await createAnnotation(orcaPage, 'decision', 'Decision: preserve exact workspace tabs')
       await createAnnotation(orcaPage, 'warning', 'Warning: receipt identity must remain exact')
@@ -231,19 +270,41 @@ test.describe('Maestro workspace Canvas visual refinement', () => {
       await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
       await setTheme(orcaPage, 'light')
       await capture(orcaPage, 'annotation-tones', notebook)
+      await setEvidenceProfile(orcaPage, desktop)
+      await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
+      await capture(orcaPage, 'annotation-tones', desktop)
+      await setEvidenceProfile(orcaPage, notebook)
+      await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
 
       const linkSource = await surfaceForContentType(orcaPage, 'browser')
       const linkTarget = await surfaceForContentType(orcaPage, 'terminal')
-      await linkSource.locator('header').click()
-      await inspector.getByRole('button', { name: 'Link from this surface' }).click()
-      const exactLinkTarget = linkTarget.getByRole('button', { name: 'Link to this surface' })
-      await expect(exactLinkTarget).toBeVisible()
-      await exactLinkTarget.click()
+      const linkHandle = linkSource.getByRole('button', { name: /Drag a link from/ })
+      const [handleBox, targetBox] = await Promise.all([
+        linkHandle.boundingBox(),
+        linkTarget.boundingBox()
+      ])
+      expect(handleBox).not.toBeNull()
+      expect(targetBox).not.toBeNull()
+      if (!handleBox || !targetBox) {
+        throw new Error('Manual-link drag geometry is unavailable')
+      }
+      await orcaPage.mouse.move(
+        handleBox.x + handleBox.width / 2,
+        handleBox.y + handleBox.height / 2
+      )
+      await orcaPage.mouse.down()
+      await orcaPage.mouse.move(
+        targetBox.x + targetBox.width / 2,
+        targetBox.y + targetBox.height / 2,
+        {
+          steps: 8
+        }
+      )
+      await expect(linkTarget).toHaveAttribute('data-maestro-link-target', 'true')
+      await orcaPage.mouse.up()
       await expect(orcaPage.locator('[data-link-provenance="manual"]')).toHaveCount(1, {
         timeout: 30_000
       })
-      await inspector.getByRole('button', { name: 'Close', exact: true }).dispatchEvent('click')
-      await expect(inspector).toBeHidden()
       await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
       await expect(orcaPage.locator('[data-link-provenance="manual"] text')).toHaveText('Manual')
       await capture(orcaPage, 'links-manual', notebook)
@@ -267,7 +328,7 @@ test.describe('Maestro workspace Canvas visual refinement', () => {
       })
       await orcaPage.getByLabel('Fit resources').click()
       const refreshedBrowser = await surfaceForContentType(orcaPage, 'browser')
-      await refreshedBrowser.locator('header').click()
+      await refreshedBrowser.getByRole('button', { name: 'Rename tab' }).click()
       const suggestions = inspector.locator('.rounded-md').filter({ hasText: 'Suggestion' })
       const suggestionCount = await suggestions.count()
       expect(suggestionCount).toBeGreaterThanOrEqual(2)

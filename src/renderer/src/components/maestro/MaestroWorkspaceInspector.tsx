@@ -1,7 +1,7 @@
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { WorkspaceCanvasDocument } from '../../../../shared/maestro-document-contract'
 import type {
   WorkspaceSurface,
@@ -14,9 +14,9 @@ export function MaestroWorkspaceInspector({
   surface,
   snapshot,
   document,
+  editingTitle,
   onClose,
   onRename,
-  onStartLink,
   onDeleteManualLink,
   onDecideSuggestion
 }: {
@@ -24,13 +24,14 @@ export function MaestroWorkspaceInspector({
   surface: WorkspaceSurface
   snapshot: WorkspaceSurfaceSnapshot
   document: WorkspaceCanvasDocument
+  editingTitle: boolean
   onClose: () => void
   onRename: (title: string) => void
-  onStartLink: () => void
   onDeleteManualLink: (linkId: string) => void
   onDecideSuggestion: (fingerprint: string, decision: 'accepted' | 'hidden') => void
 }): React.JSX.Element {
   const [title, setTitle] = useState(surface.title)
+  useEffect(() => setTitle(surface.title), [surface.id.unified_tab_id, surface.title])
   const automatic = snapshot.automatic_links.filter(
     (link) => link.source_surface_key === surfaceKey || link.target_surface_key === surfaceKey
   )
@@ -51,31 +52,33 @@ export function MaestroWorkspaceInspector({
         </Button>
       </header>
       <div className="scrollbar-sleek min-h-0 flex-1 space-y-4 overflow-y-auto p-3 text-xs">
-        <section className="space-y-2">
-          <h2 className="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
-            {translate('auto.components.maestro.MaestroWorkspaceInspector.66a9bf23e0', 'Actions')}
-          </h2>
-          <div className="flex gap-1">
-            <Input
-              value={title}
-              maxLength={512}
-              onChange={(event) => setTitle(event.target.value)}
-              aria-label={translate(
-                'auto.components.maestro.MaestroWorkspaceInspector.d719df1c6d',
-                'Tab title'
+        {editingTitle ? (
+          <section className="space-y-2">
+            <h2 className="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
+              {translate(
+                'auto.components.maestro.MaestroWorkspaceInspector.02c0bc322a',
+                'Rename tab'
               )}
-            />
-            <Button size="sm" disabled={!title.trim()} onClick={() => onRename(title.trim())}>
-              {translate('auto.components.maestro.MaestroWorkspaceInspector.5e4708a68d', 'Rename')}
-            </Button>
-          </div>
-          <Button size="sm" variant="outline" onClick={onStartLink}>
-            {translate(
-              'auto.components.maestro.MaestroWorkspaceInspector.ca5941a55e',
-              'Link from this surface'
-            )}
-          </Button>
-        </section>
+            </h2>
+            <div className="flex gap-1">
+              <Input
+                value={title}
+                maxLength={512}
+                onChange={(event) => setTitle(event.target.value)}
+                aria-label={translate(
+                  'auto.components.maestro.MaestroWorkspaceInspector.d719df1c6d',
+                  'Tab title'
+                )}
+              />
+              <Button size="sm" disabled={!title.trim()} onClick={() => onRename(title.trim())}>
+                {translate(
+                  'auto.components.maestro.MaestroWorkspaceInspector.5e4708a68d',
+                  'Rename'
+                )}
+              </Button>
+            </div>
+          </section>
+        ) : null}
         <section>
           <h2 className="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
             {translate(
