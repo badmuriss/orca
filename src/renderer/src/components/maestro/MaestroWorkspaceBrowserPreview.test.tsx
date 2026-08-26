@@ -77,14 +77,12 @@ describe('MaestroWorkspaceBrowserPreview', () => {
 
   it('keeps the previous image in place while a revision recapture is pending', async () => {
     let resolveSecondCapture!: (value: typeof SCREENSHOT) => void
-    callRuntimeRpc
-      .mockResolvedValueOnce(SCREENSHOT)
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            resolveSecondCapture = resolve
-          })
-      )
+    callRuntimeRpc.mockResolvedValueOnce(SCREENSHOT).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSecondCapture = resolve
+        })
+    )
     const view = render(
       <MaestroWorkspaceBrowserPreview
         target={{ kind: 'local' }}

@@ -329,6 +329,9 @@ test.describe('Maestro workspace Canvas in Electron', () => {
               'Workspace-owned recognizable content.',
               { timeout: 30_000 }
             )
+            await expect(targetSurface.locator('img[data-browser-page-id]')).toBeVisible({
+              timeout: 30_000
+            })
             await capture(orcaPage, 'content-rendered', profile)
             return
           }
