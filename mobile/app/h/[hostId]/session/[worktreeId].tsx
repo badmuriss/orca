@@ -39,6 +39,7 @@ import {
   Keyboard as KeyboardIcon,
   MessageSquare,
   Monitor,
+  PanelsTopLeft,
   MoreHorizontal,
   Plus,
   RefreshCw,
@@ -108,6 +109,7 @@ import type {
   TerminalWebViewHandle
 } from '../../../../src/terminal/terminal-webview-contract'
 import { isTerminalOscLinkRanges } from '../../../../../src/shared/terminal-osc-link-ranges'
+import { isWorkspaceKey, worktreeWorkspaceKey } from '../../../../../src/shared/workspace-scope'
 import { computeActiveTerminalKeyboardLift } from '../../../../src/terminal/terminal-keyboard-avoidance-lift'
 import { useTerminalViewportRefit } from '../../../../src/terminal/terminal-viewport-refit'
 import {
@@ -725,13 +727,17 @@ export default function SessionScreen() {
     worktreeId,
     name: routeWorktreeName,
     created,
-    warning: createdWarning
+    warning: createdWarning,
+    tabId: requestedTabId,
+    executionHostId = 'local'
   } = useLocalSearchParams<{
     hostId: string
     worktreeId: string
     name?: string
     created?: string
     warning?: string
+    tabId?: string
+    executionHostId?: string
   }>()
   const isFolderWorkspaceRoute = worktreeId.startsWith('folder:') // Synthetic ids have no repo scope.
   // Why: the floating sentinel has no repo/worktree, so repo-backed surfaces hide.
@@ -2896,6 +2902,19 @@ export default function SessionScreen() {
   // Ref to latest switchSessionTab so fetchSessionTabs can activate a synced browser tab without a dependency cycle.
   switchSessionTabRef.current = switchSessionTab
 
+  const requestedTabHandledRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!requestedTabId || requestedTabHandledRef.current === requestedTabId) {
+      return
+    }
+    const requested = sessionTabs.find((tab) => tab.id === requestedTabId)
+    if (!requested) {
+      return
+    }
+    requestedTabHandledRef.current = requestedTabId
+    switchSessionTab(requested)
+  }, [requestedTabId, sessionTabs, switchSessionTab])
+
   // Why: only store the ref; subscribe on web-ready to avoid the blank-terminal race (init queued before xterm.js loaded).
   const setTerminalWebViewRef = useCallback((handle: string, ref: TerminalWebViewHandle | null) => {
     terminalDiagnosticsRef.current.webViewRef(handle, ref != null)
@@ -4425,7 +4444,7 @@ export default function SessionScreen() {
             ) : null}
           </View>
 
-          {visibleTabs.length > 0 && (
+          {!isFloatingWorkspaceRoute && (
             <View style={styles.tabBar}>
               {/* Why: tab taps must register on first press with the keyboard open instead of being eaten by dismissal (#5106). */}
               <ScrollView
@@ -4448,6 +4467,28 @@ export default function SessionScreen() {
                   scrollActiveTabIntoView(activeSessionTabIdRef.current, false)
                 }}
               >
+                <Pressable
+                  accessibilityLabel="Maestro workspace Canvas"
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: false }}
+                  style={styles.tab}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/h/[hostId]/maestro/[workspaceKey]',
+                      params: {
+                        hostId,
+                        executionHostId,
+                        workspaceKey: isWorkspaceKey(worktreeId)
+                          ? worktreeId
+                          : worktreeWorkspaceKey(worktreeId),
+                        name: worktreeName
+                      }
+                    })
+                  }
+                  testID="mobile-maestro-system-tab"
+                >
+                  <PanelsTopLeft size={16} color={colors.textSecondary} strokeWidth={2.1} />
+                </Pressable>
                 {visibleTabs.map((t) => (
                   <Pressable
                     key={t.id}
