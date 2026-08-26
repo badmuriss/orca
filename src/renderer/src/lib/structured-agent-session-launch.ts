@@ -11,6 +11,32 @@ type StructuredLaunchState = {
 
 const pendingStructuredLaunchesByWorktree = new Map<string, StructuredLaunchState>()
 
+function trackLaunchSettlement(
+  worktreeId: string,
+  state: StructuredLaunchState,
+  promise: Promise<string>
+): void {
+  void promise.then(
+    () => {
+      if (
+        state.promise === promise &&
+        pendingStructuredLaunchesByWorktree.get(worktreeId) === state
+      ) {
+        pendingStructuredLaunchesByWorktree.delete(worktreeId)
+      }
+    },
+    () => {
+      if (
+        state.promise === promise &&
+        !state.visibilityUnknown &&
+        pendingStructuredLaunchesByWorktree.get(worktreeId) === state
+      ) {
+        pendingStructuredLaunchesByWorktree.delete(worktreeId)
+      }
+    }
+  )
+}
+
 async function verifyPublishedSession(worktreeId: string, sessionId: string): Promise<string> {
   const snapshots = await refreshLocalStructuredSessionTabs()
   const published = snapshots.some(
@@ -33,6 +59,7 @@ function launchStructuredCodexSessionOnce(worktreeId: string): Promise<string> {
         existing.visibilityUnknown = true
         throw error
       })
+      trackLaunchSettlement(worktreeId, existing, existing.promise)
     }
     return existing.promise
   }
@@ -55,26 +82,7 @@ function launchStructuredCodexSessionOnce(worktreeId: string): Promise<string> {
       throw error
     })
   pendingStructuredLaunchesByWorktree.set(worktreeId, state)
-  const launchPromise = state.promise
-  void launchPromise.then(
-    () => {
-      if (
-        state.promise === launchPromise &&
-        pendingStructuredLaunchesByWorktree.get(worktreeId) === state
-      ) {
-        pendingStructuredLaunchesByWorktree.delete(worktreeId)
-      }
-    },
-    () => {
-      if (
-        state.promise === launchPromise &&
-        !state.visibilityUnknown &&
-        pendingStructuredLaunchesByWorktree.get(worktreeId) === state
-      ) {
-        pendingStructuredLaunchesByWorktree.delete(worktreeId)
-      }
-    }
-  )
+  trackLaunchSettlement(worktreeId, state, state.promise)
   return state.promise
 }
 

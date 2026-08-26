@@ -172,6 +172,12 @@ describe('structured chat adoption guard on the launch path', () => {
       .mockResolvedValueOnce([
         { worktree: 'wt-1', tabs: [{ type: 'agent-session', sessionId: 'codex-session-1' }] }
       ])
+      .mockResolvedValueOnce([
+        { worktree: 'wt-1', tabs: [{ type: 'agent-session', sessionId: 'codex-session-2' }] }
+      ])
+    mockLaunchStructuredCodexSession
+      .mockResolvedValueOnce('codex-session-1')
+      .mockResolvedValueOnce('codex-session-2')
     const { launchAgentInNewTab } = await import('./launch-agent-in-new-tab')
 
     launchAgentInNewTab({ agent: 'codex', worktreeId: 'wt-1' })
@@ -181,6 +187,12 @@ describe('structured chat adoption guard on the launch path', () => {
     await vi.waitFor(() => expect(mockRefreshLocalStructuredSessionTabs).toHaveBeenCalledTimes(2))
 
     expect(mockLaunchStructuredCodexSession).toHaveBeenCalledTimes(1)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    // A successful retry must release the reservation so a later launch can start normally.
+    launchAgentInNewTab({ agent: 'codex', worktreeId: 'wt-1' })
+    await vi.waitFor(() => expect(mockRefreshLocalStructuredSessionTabs).toHaveBeenCalledTimes(3))
+    expect(mockLaunchStructuredCodexSession).toHaveBeenCalledTimes(2)
   })
 
   it('keeps prompted Codex on the ordinary terminal launch path', async () => {
