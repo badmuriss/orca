@@ -142,7 +142,10 @@ function waitForForegroundChild(
       terminateChild()
     }
     const forwardSignal = (signal: NodeJS.Signals): void => {
-      child.kill(signal)
+      // A Windows console delivers Ctrl-C to parent and child; child.kill would terminate the child mid-teardown.
+      if (process.platform !== 'win32') {
+        child.kill(signal)
+      }
       forceKillTimer ??= setTimeout(() => child.kill('SIGKILL'), SERVE_CHILD_FORCE_KILL_GRACE_MS)
     }
     const handleMessage = (value: unknown): void => {

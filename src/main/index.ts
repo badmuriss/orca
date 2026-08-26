@@ -220,6 +220,7 @@ import { ensureWindowsUserDataAclGrant } from './startup/windows-user-data-acl'
 import { probeWindowsInstallDirAcl } from './startup/windows-install-dir-acl-probe'
 import { neutralizeLegacyTerminalShimDir } from './pty/legacy-terminal-shim-dir'
 import { shouldQuitWhenAllWindowsClosed } from './startup/window-all-closed-quit-policy'
+import { registerServeSignalHandlers } from './startup/serve-signal-handlers'
 import {
   createServeDesktopActivationGate,
   settleServeDesktopActivation as settleServeDesktopActivationGate
@@ -2085,21 +2086,6 @@ async function printServeReady(options: ServeOptions): Promise<void> {
   notifyServeSupervisorReady(runtime.getRuntimeId())
 }
 
-function installServeSignalHandlers(): void {
-  let quitStarted = false
-  const quit = (): void => {
-    if (quitStarted) {
-      return
-    }
-    quitStarted = true
-    // Why: route SIGINT/SIGTERM through Electron's normal quit so runtime metadata, daemon checkpoints, and telemetry flush.
-    app.quit()
-  }
-  // Keep both listeners installed so a terminal-delivered signal plus the supervisor's forwarded copy cannot trigger default termination.
-  process.on('SIGINT', quit)
-  process.on('SIGTERM', quit)
-}
-
 // Why: on PTY teardown drop the spinner entry explicitly, else the shared timer keeps ticking with sendSyntheticTitle no-oping forever.
 registerPaneKeyTeardownListener((paneKey) => {
   stopSyntheticTitleSpinner(paneKey)
@@ -3306,7 +3292,8 @@ void app.whenReady().then(async () => {
       throw error
     })
     settleServeDesktopActivation()
-    installServeSignalHandlers()
+    // Why: every attempt must reach app.quit(); a page beforeunload can veto an earlier signal.
+    registerServeSignalHandlers(process, () => app.quit())
     // Why: headless serve has no renderer to run the normal cli:install flow; do it here for macOS/Linux only (Windows-excluded: install() only mutates registry PATH, not child terminals).
     if (process.platform === 'darwin' || process.platform === 'linux') {
       try {

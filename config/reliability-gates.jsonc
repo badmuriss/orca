@@ -16178,21 +16178,22 @@
       "providers": ["local", "remote-runtime", "ssh", "wsl"],
       "coveredPlatforms": ["macos"],
       "coveredProviders": ["local"],
-      "coverageNotes": "The owner-boundary contract injects an isolated BrowserManager, offscreen WebContents, and AgentBrowserBridge. It proves the exact named-session close settles before guest unregister on explicit close, runs on unexpected renderer destruction, preserves unrelated pages, joins pending creation/retirement during shutdown, rejects command admission after terminal cleanup begins, bounds process-swap retirement to five seconds, and caps cleanup concurrency at four. A built-CLI macOS headless serve run used an isolated profile, folder workspace, socket directory, and port: exact PPID-1 helper/session identity disappeared within five seconds after page close and after Ctrl-C runtime shutdown, while an unrelated page survived close and reconnect. Linux cgroup and paired/SSH journeys remain gaps.",
+      "coverageNotes": "The owner-boundary contract injects an isolated BrowserManager, offscreen WebContents, and AgentBrowserBridge. It proves explicit close removes the page from command routing before awaiting exact named-session retirement, runs retirement on unexpected renderer destruction, preserves unrelated pages, joins pending creation/retirement during shutdown, rejects command admission after terminal cleanup begins, retries Electron quit after a vetoed signal, preserves Windows shared-console graceful Ctrl-C, bounds process-swap retirement to five seconds, and caps cleanup concurrency at four. A built-CLI macOS headless serve run used an isolated profile, folder workspace, socket directory, and port: exact PPID-1 helper/session identity disappeared within five seconds after page close and after Ctrl-C runtime shutdown, while an unrelated page survived close and reconnect. Linux cgroup and paired/SSH journeys remain gaps.",
       "motivatingLinks": [
         "https://linear.app/stably/issue/STA-5400",
         "https://github.com/stablyai/orca/issues/16367"
       ],
       "invariant": "For each Orca-owned page identity, after its owner closes or is destroyed and a five-second third-party shutdown grace expires, no live helper session named orca-tab-<pageId> may remain; unrelated live page identities must survive, and runtime quit must join the bounded cleanup attempt.",
-      "oracle": "Create two isolated offscreen pages and register their WebContents. Close one and require onPageClosed for its stable page ID to settle before unregisterGuest, while the other page and owner remain live. Emit destroyed and require the same exact retirement. Race shutdown with creation and process-swap destruction, require no replacement session or command after terminal cleanup starts, require the swap close command to use the five-second cleanup timeout, and require at most four concurrent close commands. In direct built-CLI serve, inspect exact session/PID/socket identity plus RSS/fd inventory before close and after a five-second grace; reconnect between commands and stop via Ctrl-C. The Electron signal handler must absorb both the terminal and supervisor signal until the 20-second quit barrier drains; no process-name kill or global sweep is permitted.",
+      "oracle": "Create two isolated offscreen pages and register their WebContents. Close one, block onPageClosed for its stable page ID, and require unregisterGuest to have already removed that page from command routing while the unrelated page remains live. Emit destroyed and require the same exact retirement. Race shutdown with creation, pending retirement, and process-swap destruction; require no replacement session or command after terminal cleanup starts, require shutdown to remain pending until retirement settles, require the swap close command to use the five-second cleanup timeout, and require at most four concurrent close commands. Deliver repeated signals and require every attempt to reach Electron quit; under Windows shared-console semantics require the child to handle Ctrl-C without an immediate child.kill. In direct built-CLI serve, inspect exact session/PID/socket identity plus RSS/fd inventory before close and after a five-second grace; reconnect between commands and stop via Ctrl-C. No process-name kill or global sweep is permitted.",
       "commands": [
-        "pnpm exec vitest run --config config/vitest.config.ts src/cli/runtime/serve-signal-exit-diagnostic.test.ts src/main/browser/offscreen-browser-backend-lifecycle.test.ts src/main/browser/agent-browser-bridge-session-lifecycle.test.ts src/main/browser/agent-browser-bridge-tab-routing.test.ts src/main/startup/desktop-startup-ordering.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/cli/runtime/serve-signal-exit-diagnostic.test.ts src/main/browser/offscreen-browser-backend-lifecycle.test.ts src/main/browser/agent-browser-bridge-session-lifecycle.test.ts src/main/browser/agent-browser-bridge-tab-routing.test.ts src/main/startup/serve-signal-handlers.test.ts src/main/startup/desktop-startup-ordering.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/browser"
       ],
       "testFiles": [
         "src/main/browser/offscreen-browser-backend-lifecycle.test.ts",
         "src/main/browser/agent-browser-bridge-session-lifecycle.test.ts",
         "src/main/browser/agent-browser-bridge-tab-routing.test.ts",
+        "src/main/startup/serve-signal-handlers.test.ts",
         "src/main/startup/desktop-startup-ordering.test.ts",
         "src/cli/runtime/serve-signal-exit-diagnostic.test.ts"
       ],
@@ -16200,7 +16201,7 @@
         {
           "file": "src/main/browser/offscreen-browser-backend-lifecycle.test.ts",
           "assertions": [
-            "exact owner cleanup settles before guest unregister on explicit close while unrelated pages survive",
+            "explicit close unregisters the page before awaiting exact owner cleanup while unrelated pages survive",
             "unexpected offscreen renderer destruction invokes and joins exact helper-owner cleanup",
             "backend shutdown joins every pending owner cleanup with concurrency capped at four"
           ]
@@ -16216,16 +16217,24 @@
           ]
         },
         {
+          "file": "src/main/startup/serve-signal-handlers.test.ts",
+          "assertions": [
+            "every repeated serve signal retries Electron quit after a possible renderer veto",
+            "SIGINT and SIGTERM listeners remain installed during quit draining"
+          ]
+        },
+        {
           "file": "src/main/startup/desktop-startup-ordering.test.ts",
           "assertions": [
             "agent-browser cleanup is joined by the committed quit teardown barrier",
-            "repeated serve signals remain handled until committed quit drains"
+            "repeatable serve signal handling is registered before readiness"
           ]
         },
         {
           "file": "src/cli/runtime/serve-signal-exit-diagnostic.test.ts",
           "assertions": [
-            "serve supervisor force-kill grace exceeds the shared Electron quit deadline"
+            "serve supervisor force-kill grace exceeds the shared Electron quit deadline",
+            "Windows shared-console Ctrl-C is not forwarded as an immediate child termination"
           ]
         }
       ],
@@ -16235,9 +16244,9 @@
           "runner": "local",
           "platform": "macos",
           "result": "passed",
-          "command": "pnpm exec vitest run --config config/vitest.config.ts src/cli/runtime/serve-signal-exit-diagnostic.test.ts src/main/browser/offscreen-browser-backend-lifecycle.test.ts src/main/browser/agent-browser-bridge-session-lifecycle.test.ts src/main/browser/agent-browser-bridge-tab-routing.test.ts src/main/startup/desktop-startup-ordering.test.ts",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/cli/runtime/serve-signal-exit-diagnostic.test.ts src/main/browser/offscreen-browser-backend-lifecycle.test.ts src/main/browser/agent-browser-bridge-session-lifecycle.test.ts src/main/browser/agent-browser-bridge-tab-routing.test.ts src/main/startup/serve-signal-handlers.test.ts src/main/startup/desktop-startup-ordering.test.ts",
           "durationSeconds": 0.44,
-          "summary": "Candidate passed 60 lifecycle, bridge, routing, signal, and quit-order tests plus 1,469 browser tests. The production-reverted control was red, and disabling only the final swap-timeout/admission controls failed 3 of 15 bridge lifecycle tests. Direct built-CLI serve observed exact PPID-1 helpers at 10-11 MiB RSS and 16-18 fd rows. Closing one page removed only its helper/session within five seconds while the other page survived reconnect. With the signal fix disabled, Ctrl-C left exact helpers alive after the listener exited; the final candidate emptied session inventory and removed app/helper PIDs and port within five seconds."
+          "summary": "Candidate passed 62 lifecycle, bridge, routing, signal, and quit-order tests plus 1,469 browser tests. The production-reverted control was red; disabling the final swap-timeout/admission controls failed 3 of 15 bridge lifecycle tests; removing the pending-retirement join, page-routing fence, repeat-signal behavior, or Windows shared-console guard failed its exact focused oracle. Direct built-CLI serve observed exact PPID-1 helpers at 10-11 MiB RSS and 16-18 fd rows. Closing one page removed only its helper/session within five seconds while the other page survived reconnect. With the signal fix disabled, Ctrl-C left exact helpers alive after the listener exited; the final candidate emptied session inventory and removed app/helper PIDs and port within five seconds."
         }
       ],
       "runtimeBudget": {

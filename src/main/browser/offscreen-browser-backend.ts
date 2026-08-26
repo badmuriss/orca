@@ -107,12 +107,12 @@ export class OffscreenBrowserBackend implements BrowserBackend {
   async closeTab(browserPageId: string): Promise<void> {
     const win = this.windowsByPageId.get(browserPageId)
     this.windowsByPageId.delete(browserPageId)
+    this.browserManager.unregisterGuest(browserPageId)
     try {
       if (win) {
         await this.retirePageOwner(browserPageId)
       }
     } finally {
-      this.browserManager.unregisterGuest(browserPageId)
       if (win && !win.isDestroyed()) {
         win.destroy()
       }

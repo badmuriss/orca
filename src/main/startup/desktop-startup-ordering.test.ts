@@ -293,18 +293,15 @@ describe('startup ordering', () => {
     expect(willQuit.slice(barrierStart)).toContain("{ name: 'browser', promise: browserShutdown }")
   })
 
-  it('keeps serve signal handlers installed while committed quit drains', () => {
+  it('registers repeatable serve signal handling before headless startup completes', () => {
     const source = readFileSync(join(process.cwd(), 'src/main/index.ts'), 'utf8')
-    const handlerStart = source.indexOf('function installServeSignalHandlers()')
-    const handlerEnd = source.indexOf('registerPaneKeyTeardownListener', handlerStart)
-    const handler = source.slice(handlerStart, handlerEnd)
+    const serveStart = source.indexOf('if (serveOptions) {')
+    const signalHandlers = source.indexOf('registerServeSignalHandlers(process', serveStart)
+    const serveReady = source.indexOf('await printServeReady(serveOptions)', serveStart)
 
-    expect(handlerStart).toBeGreaterThanOrEqual(0)
-    expect(handlerEnd).toBeGreaterThan(handlerStart)
-    expect(handler).toContain('let quitStarted = false')
-    expect(handler).toContain("process.on('SIGINT', quit)")
-    expect(handler).toContain("process.on('SIGTERM', quit)")
-    expect(handler).not.toContain("process.once('SIGINT', quit)")
+    expect(serveStart).toBeGreaterThanOrEqual(0)
+    expect(signalHandlers).toBeGreaterThan(serveStart)
+    expect(signalHandlers).toBeLessThan(serveReady)
   })
 
   it('starts the automation scheduler before headless serve reports ready', () => {

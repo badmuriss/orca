@@ -94,28 +94,34 @@ describe('OffscreenBrowserBackend lifecycle', () => {
     vi.useRealTimers()
   })
 
-  it('retires the named agent-browser owner before unregistering a closed page', async () => {
+  it('unregisters a closing page before awaiting owner retirement', async () => {
     const browserManager = {
       registerOffscreenGuest: vi.fn(),
       unregisterGuest: vi.fn()
     }
-    const onPageClosed = vi.fn(async () => {})
+    let releaseOwnerRetirement!: () => void
+    const ownerRetirementBlocked = new Promise<void>((resolve) => {
+      releaseOwnerRetirement = resolve
+    })
+    const onPageClosed = vi.fn(() => ownerRetirementBlocked)
     const backend = new OffscreenBrowserBackend(browserManager as never, {
       getAgentBrowserBridge: () => ({ onPageClosed })
     })
 
     await backend.createTab({ browserPageId: 'page-1', url: 'about:blank', worktreeId: 'wt' })
     await backend.createTab({ browserPageId: 'page-2', url: 'about:blank', worktreeId: 'wt' })
-    await backend.closeTab('page-1')
+    const close = backend.closeTab('page-1')
+    await vi.waitFor(() => expect(onPageClosed).toHaveBeenCalledWith('page-1'))
+    const pageWasUnregisteredBeforeRetirement = browserManager.unregisterGuest.mock.calls.some(
+      ([pageId]) => pageId === 'page-1'
+    )
+    releaseOwnerRetirement()
+    await close
 
     expect(onPageClosed).toHaveBeenCalledOnce()
-    expect(onPageClosed).toHaveBeenCalledWith('page-1')
     expect(onPageClosed).not.toHaveBeenCalledWith('page-2')
     expect(backend.getWebContentsId('page-2')).toBe(2)
-    expect(browserManager.unregisterGuest).toHaveBeenCalledWith('page-1')
-    expect(onPageClosed.mock.invocationCallOrder[0]).toBeLessThan(
-      browserManager.unregisterGuest.mock.invocationCallOrder[0]
-    )
+    expect(pageWasUnregisteredBeforeRetirement).toBe(true)
   })
 
   it('retires the helper when an offscreen renderer is destroyed unexpectedly', async () => {
@@ -199,16 +205,15 @@ describe('OffscreenBrowserBackend lifecycle', () => {
     mocks.windows[0].webContents.emit('destroyed')
     await vi.waitFor(() => expect(onPageClosed).toHaveBeenCalledWith('page-1'))
 
-    let shutdownSettled = false
-    const shutdown = backend.destroyAll().then(() => {
-      shutdownSettled = true
-    })
-    await Promise.resolve()
-    expect(shutdownSettled).toBe(false)
+    const shutdown = backend.destroyAll()
+    const outcome = await Promise.race([
+      shutdown.then(() => 'settled'),
+      new Promise<string>((resolve) => setImmediate(() => resolve('pending')))
+    ])
+    expect(outcome).toBe('pending')
 
     releaseOwnerRetirement()
     await shutdown
-    expect(shutdownSettled).toBe(true)
   })
 
   it('bounds concurrent helper retirements during shutdown', async () => {

@@ -21,7 +21,13 @@ function setPlatform(platform: NodeJS.Platform): void {
 
 function superviseUntilExit(code: number | null, signal: NodeJS.Signals | null): Promise<number> {
   const child = new FakeChildProcess()
-  const supervised = superviseForegroundServe({
+  const supervised = superviseChild(child)
+  child.emit('exit', code, signal)
+  return supervised
+}
+
+function superviseChild(child: FakeChildProcess): Promise<number> {
+  return superviseForegroundServe({
     executable: '/Applications/Orca.app/Contents/MacOS/Orca',
     childArgs: ['--serve'],
     spawnOptions: {},
@@ -30,12 +36,11 @@ function superviseUntilExit(code: number | null, signal: NodeJS.Signals | null):
     child: child as never,
     expectedHandoff: null
   })
-  child.emit('exit', code, signal)
-  return supervised
 }
 
 afterEach(() => {
   Object.defineProperty(process, 'platform', originalPlatform)
+  vi.useRealTimers()
 })
 
 describe('serveSignalExitError', () => {
@@ -81,6 +86,21 @@ describe('superviseForegroundServe signal exits', () => {
   it('lets the Electron quit barrier finish before force-killing serve', () => {
     expect(SERVE_CHILD_FORCE_KILL_GRACE_MS).toBeGreaterThan(WILL_QUIT_TEARDOWN_DEADLINE_MS)
     expect(SERVE_CHILD_FORCE_KILL_GRACE_MS).toBeLessThanOrEqual(30_000)
+  })
+
+  it('lets a shared-console Windows child handle Ctrl-C gracefully', async () => {
+    setPlatform('win32')
+    vi.useFakeTimers()
+    const child = new FakeChildProcess()
+    const supervised = superviseChild(child)
+
+    process.emit('SIGINT', 'SIGINT')
+    expect(child.kill).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(1)
+
+    child.emit('exit', 0, null)
+    await expect(supervised).resolves.toBe(0)
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('throws the macOS diagnostic when the child aborts on darwin', async () => {
