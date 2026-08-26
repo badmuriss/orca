@@ -301,6 +301,9 @@ test.describe('Maestro workspace Canvas in Electron', () => {
           await expect(targetSurface).toBeVisible()
           if (checkpoint === 'browser') {
             await orcaPage.getByLabel('Fit resources').click()
+            await expect(targetSurface.locator('img[data-browser-page-id]')).toBeVisible({
+              timeout: 30_000
+            })
             await capture(orcaPage, 'browser-rendered', profile)
           }
 
@@ -319,6 +322,13 @@ test.describe('Maestro workspace Canvas in Electron', () => {
           await setTheme(orcaPage, 'dark')
           if (checkpoint === 'browser') {
             await orcaPage.getByLabel('Fit resources').click()
+            const contentSurface = orcaPage.locator(
+              '[data-maestro-workspace-content-type="editor"]'
+            )
+            await expect(contentSurface.locator('pre')).toContainText(
+              'Workspace-owned recognizable content.',
+              { timeout: 30_000 }
+            )
             await capture(orcaPage, 'content-rendered', profile)
             return
           }
