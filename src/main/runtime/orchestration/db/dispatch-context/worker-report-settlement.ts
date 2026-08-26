@@ -55,18 +55,26 @@ export function settleWorkerReportInTransaction(
 
   const expectedDispatchStatus = params.outcome === 'succeeded' ? 'completed' : 'failed'
   const expectedTaskStatus = params.outcome === 'succeeded' ? 'completed' : 'failed'
-  if (dispatch.status === expectedDispatchStatus && task.status === expectedTaskStatus) {
-    return { action: 'settled', outcome: params.outcome, duplicate: true }
-  }
   // Why (#16095): worker-start records a stalled prompt as failed, but the preamble was written
   // before verification ran — the worker may have been executing it the whole time. Its own report
   // is first-hand evidence and must be able to correct that record instead of being thrown away.
+  // Checked before the duplicate short-circuit: a `failed` report lands on the very statuses that
+  // short-circuit reads as already settled, dropping the worker's real cause and result body.
   const settledByUnobservedPrompt =
     dispatch.status === 'failed' &&
     dispatch.last_failure === AGENT_PROMPT_STALLED_ERROR &&
     task.status === 'failed'
-  const previousStatus = settledByUnobservedPrompt ? 'failed' : 'dispatched'
-  if (dispatch.status !== previousStatus || task.status !== previousStatus) {
+  if (
+    !settledByUnobservedPrompt &&
+    dispatch.status === expectedDispatchStatus &&
+    task.status === expectedTaskStatus
+  ) {
+    return { action: 'settled', outcome: params.outcome, duplicate: true }
+  }
+  const previous = settledByUnobservedPrompt
+    ? { status: 'failed', workerState: 'failed' }
+    : { status: 'dispatched', workerState: 'ready' }
+  if (dispatch.status !== previous.status || task.status !== previous.status) {
     return {
       action: 'rejected',
       code: 'inactive_dispatch',
@@ -121,7 +129,7 @@ export function settleWorkerReportInTransaction(
       expectedDispatchStatus,
       params.result,
       params.dispatchId,
-      previousStatus
+      previous.status
     )
   const taskUpdate = this.db
     .prepare(
@@ -129,7 +137,7 @@ export function settleWorkerReportInTransaction(
        SET status = ?, result = ?, completed_at = datetime('now')
        WHERE id = ? AND status = ?`
     )
-    .run(expectedTaskStatus, params.result, params.taskId, previousStatus)
+    .run(expectedTaskStatus, params.result, params.taskId, previous.status)
   if (dispatchUpdate.changes !== 1 || taskUpdate.changes !== 1) {
     this.db.exec('ROLLBACK TO settle_worker_report')
     this.db.exec('RELEASE settle_worker_report')
@@ -148,7 +156,7 @@ export function settleWorkerReportInTransaction(
     .run(
       params.outcome === 'succeeded' ? 'succeeded' : 'failed',
       params.dispatchId,
-      settledByUnobservedPrompt ? 'failed' : 'ready'
+      previous.workerState
     )
   settleActiveDispatchesForTask(
     this,

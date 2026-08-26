@@ -70,7 +70,7 @@ describe('worker start settled by an unobserved prompt', () => {
     expect(db.getTask(taskId)?.status).toBe('failed')
   })
 
-  it('treats a failure report on an unobserved-prompt dispatch as already settled', () => {
+  it('lets a failure report replace the unobserved-prompt cause with the real one', () => {
     db = new OrchestrationDb(':memory:')
     const { taskId, dispatchId } = startWorker('reports its own failure')
 
@@ -79,8 +79,19 @@ describe('worker start settled by an unobserved prompt', () => {
     })
 
     expect(
-      db.settleWorkerReport({ taskId, dispatchId, outcome: 'failed', result: 'gave up' })
+      db.settleWorkerReport({ taskId, dispatchId, outcome: 'failed', result: 'build broke on X' })
+    ).toEqual({ action: 'settled', outcome: 'failed', duplicate: false })
+    expect(db.getTask(taskId)).toMatchObject({ status: 'failed', result: 'build broke on X' })
+    expect(db.getDispatchContextById(dispatchId)).toMatchObject({
+      status: 'failed',
+      last_failure: 'build broke on X'
+    })
+    expect(db.getWorkerDispatch(dispatchId)).toMatchObject({ state: 'failed', stage: 'settled' })
+
+    // The stalled cause is gone, so a repeat report has nothing left to correct.
+    expect(
+      db.settleWorkerReport({ taskId, dispatchId, outcome: 'failed', result: 'again' })
     ).toEqual({ action: 'settled', outcome: 'failed', duplicate: true })
-    expect(db.getTask(taskId)?.status).toBe('failed')
+    expect(db.getTask(taskId)?.result).toBe('build broke on X')
   })
 })

@@ -4,7 +4,8 @@ export const AGENT_PROMPT_EFFECT_TIMEOUT_MS = 5_000
 // Why: these panes prove a turn start only through the out-of-process hook — kimi has no synthetic
 // title profile and codex suppresses the hook-driven working frame (synthesizeWorkingTitle: false),
 // so the first proof lags Enter by agent startup, not by one TUI repaint. Capped so the worst case
-// (8s render gate + this wait) still fits a paired client's 30s request budget.
+// (8s render gate + this wait + chunked paste) still fits RELAY_TO_CLIENT_REQUEST_TIMEOUT_MS
+// (30s, src/relay/dispatcher.ts), the budget a paired client's submission runs under.
 export const AGENT_PROMPT_HOOK_EFFECT_TIMEOUT_MS = 15_000
 const AGENT_PROMPT_EFFECT_POLL_MS = 50
 

@@ -19939,9 +19939,7 @@ export class OrcaRuntimeService {
     wait: () => Promise<void>
     dispose: () => void
   } | null {
-    const pty = this.ptysById.get(ptyId)
-    const agent = pty?.launchAgent ?? pty?.foregroundAgent
-    if (!isTerminalSendSettlementAgent(agent)) {
+    if (!isTerminalSendSettlementAgent(this.getPtyAgent(ptyId))) {
       return null
     }
     let armed = false

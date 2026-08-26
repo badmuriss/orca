@@ -104,7 +104,15 @@ describe('coordinator dispatch with an unobserved prompt', () => {
         processIncarnation: 'incarnation-1'
       })
     ).toEqual({ valid: true })
-    db.completeDispatch(dispatchId)
+    expect(
+      db.settleWorkerReport({
+        taskId: task.id,
+        dispatchId,
+        outcome: 'succeeded',
+        result: 'done the work'
+      })
+    ).toEqual({ action: 'settled', outcome: 'succeeded', duplicate: false })
+    expect(db.getTask(task.id)).toMatchObject({ status: 'completed', result: 'done the work' })
     expect(db.getDispatchContextById(dispatchId)?.status).toBe('completed')
   })
 
