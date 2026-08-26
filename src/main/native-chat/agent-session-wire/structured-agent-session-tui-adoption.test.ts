@@ -87,7 +87,7 @@ async function reserveAdoption(attach: AgentSessionAttachParams, spawnToken: str
     clientOperationId: attach.envelope.clientOperationId,
     fingerprint: attach.envelope.payloadFingerprint,
     location: attach.location,
-    provider: 'codex',
+    provider: attach.provider,
     accountHome: attach.accountHome,
     spawnToken,
     claimKeyId: 'key-1'
@@ -120,6 +120,43 @@ describe('structured TUI adoption', () => {
       phase: 'idle',
       terminal: adoptedOwner.terminal
     })
+  })
+
+  it('accepts a reproved Claude owner after its advisory branch cursor advances', async () => {
+    const providerSessionId = 'claude-session-1'
+    const attach = hostTestAttachParams(null, {
+      provider: 'claude',
+      agent: 'claude',
+      accountHome: { variable: 'CLAUDE_CONFIG_DIR', path: '/home/dev/.claude' },
+      runtimeKind: 'tui',
+      providerHandle: { kind: 'claude', sessionId: providerSessionId, leafUuid: 'leaf-old' }
+    })
+    const adoptedOwner: StructuredTuiOwner = {
+      ...owner(),
+      link: {
+        linkId: 'claude-adopted-old',
+        handle: { provider: 'claude', sessionId: providerSessionId, leafUuid: 'leaf-old' },
+        origin: 'adopted',
+        mintedAtFence: 1,
+        observedAt: NOW
+      }
+    }
+    await reserveAdoption(attach, adoptedOwner.process.spawnToken)
+    await host.adoptTuiOwner({ caller: CALLER, params: attach, owner: adoptedOwner })
+
+    const advancedOwner: StructuredTuiOwner = {
+      ...adoptedOwner,
+      link: {
+        ...adoptedOwner.link,
+        linkId: 'claude-resumed-new',
+        handle: { provider: 'claude', sessionId: providerSessionId, leafUuid: 'leaf-new' },
+        origin: 'resumed'
+      }
+    }
+
+    await expect(
+      host.adoptTuiOwner({ caller: CALLER, params: attach, owner: advancedOwner })
+    ).resolves.toMatchObject({ ok: true, replayed: true })
   })
 
   it('refuses input whose durable identity fingerprint changed', async () => {

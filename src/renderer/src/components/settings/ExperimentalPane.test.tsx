@@ -234,11 +234,16 @@ describe('ExperimentalPane', () => {
     const settings = {
       ...getDefaultSettings('/tmp'),
       experimentalNativeChat: true,
+      experimentalStructuredNativeChat: false,
       openAgentTabsInChatByDefault: false
     }
     const { root, container } = await renderExperimentalPane({ updateSettings, settings })
 
     expect(container.textContent).toContain('Default view')
+    expect(container.textContent).toContain('Use updated structured native chat')
+    expect(container.textContent).toContain(
+      'Local sessions only. Remote and SSH sessions continue to use terminal chat.'
+    )
     expect(container.textContent).toContain('Terminal chat')
     expect(container.textContent).toContain('Chat UI')
     expect(

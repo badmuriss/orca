@@ -9,12 +9,16 @@ import {
   type ClaudeControlRequest
 } from './claude-stream-json-connection'
 import { answerClaudePrompt, cancelClaudeTurn } from './claude-structured-control-actions'
+import {
+  closeFailedClaudeAcquisition,
+  resolveClaudeLaunchBeforeSpawn,
+  stopSupersededClaudeAcquisition
+} from './claude-structured-acquisition-lifecycle'
 import { dispatchClaudeTurn, resolveClaudeReplayWaiter } from './claude-structured-dispatch'
 import { handleClaudeInboundControl } from './claude-structured-inbound-control'
 import {
   claudeAuthDiagnostic,
   readClaudeInit,
-  readClaudeRootUserFrameUuid,
   readClaudeModels
 } from './claude-structured-init-proof'
 import {
@@ -29,18 +33,18 @@ import { readClaudeStructuredSessionOptions } from './claude-structured-session-
 import { createClaudeSessionPublication } from './claude-structured-session-publication'
 import { createClaudeSessionJournalTranslator } from './claude-structured-journal-translation'
 import {
-  cancelClaudeAcquisitionAttempt,
   ClaudeAcquisitionRegistry,
   type ClaudeAcquisitionAttempt,
   type ClaudeSession,
   type ClaudeStructuredSessionAdapterDeps,
   type ClaudeStructuredSessionEvent
 } from './claude-structured-session-state'
-import { settleClaudeExitedSession } from './claude-structured-session-close'
+import { handleClaudeSessionExit } from './claude-structured-session-close'
 import {
   closeAllClaudeSessions,
   closeClaudeSession,
-  closePublishedClaudeSession
+  closePublishedClaudeSession,
+  releaseClaudeAcquisition
 } from './claude-structured-session-shutdown'
 
 export type { ClaudeStructuredLaunch } from './claude-structured-launch-resolution'
@@ -72,8 +76,6 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
     const translator = createClaudeSessionJournalTranslator(input.events, prompts)
     const { previous, attempt } = this.acquisitions.start(sessionId, prompts)
     let liveSession: ClaudeSession | null = null
-    let observedLeafUuid: string | null = null
-    let observedProviderSessionId: string | undefined
     const initTimeoutMs = this.deps.initTimeoutMs ?? CLAUDE_STRUCTURED_INIT_TIMEOUT_MS
     const initDeadline = createClaudeInitDeadline(sessionId, initTimeoutMs)
 
@@ -82,19 +84,11 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       if (init) {
         initDeadline.resolve(init)
       }
-      const rootPromptLeaf = readClaudeRootUserFrameUuid(
-        message,
-        liveSession?.providerSessionId ?? observedProviderSessionId
-      )
-      if (rootPromptLeaf) {
-        observedLeafUuid = rootPromptLeaf
-      }
       if (liveSession) {
-        liveSession.leafUuid = observedLeafUuid
         resolveClaudeReplayWaiter(liveSession, message)
       }
       this.deliver(attempt, sessionId, () =>
-        this.emit(liveSession, input.events, { type: 'message', sessionId, message })
+        this.emit(liveSession, { type: 'message', sessionId, message })
       )
     }
     const onControlRequest = (request: ClaudeControlRequest): void => {
@@ -102,15 +96,17 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
         sessionId,
         attempt,
         request,
-        emit: (event) =>
-          this.deliver(attempt, sessionId, () => this.emit(liveSession, input.events, event))
+        emit: (event) => this.deliver(attempt, sessionId, () => this.emit(liveSession, event))
       })
     }
 
     try {
-      if (!(await cancelClaudeAcquisitionAttempt(previous))) {
-        throw new Error(`claude acquisition for session ${sessionId} could not be stopped`)
-      }
+      await stopSupersededClaudeAcquisition({
+        sessionId,
+        registry: this.acquisitions,
+        replacement: attempt,
+        previous
+      })
       this.acquisitions.assertCurrent(sessionId, attempt)
       if (
         (await closePublishedClaudeSession({
@@ -123,9 +119,7 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
         throw new Error(`claude stream-json for session ${sessionId} could not be stopped`)
       }
       this.acquisitions.assertCurrent(sessionId, attempt)
-      const launch = await this.deps.resolveLaunch({ identity: input.identity })
-      observedLeafUuid = launch.resumeLeafUuid
-      observedProviderSessionId = launch.providerSessionId
+      const launch = await resolveClaudeLaunchBeforeSpawn(this.deps, input.identity)
       this.acquisitions.assertCurrent(sessionId, attempt)
       const open = this.deps.openConnection ?? openClaudeStreamJsonConnection
       const connection = await open(
@@ -146,7 +140,7 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
             const prompt = prompts.cancel(requestId)
             if (prompt) {
               this.deliver(attempt, sessionId, () =>
-                this.emit(liveSession, input.events, {
+                this.emit(liveSession, {
                   type: 'prompt-cancelled',
                   sessionId,
                   promptKey: prompt.promptKey
@@ -171,7 +165,7 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       ])
       const models = readClaudeModels(initialization)
       this.deliver(attempt, sessionId, () =>
-        this.emit(liveSession, input.events, { type: 'options', sessionId, models })
+        this.emit(liveSession, { type: 'options', sessionId, models })
       )
       initDeadline.clear()
       this.acquisitions.assertCurrent(sessionId, attempt)
@@ -184,7 +178,7 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
         .request('get_settings', {}, { timeoutMs: this.deps.requestTimeoutMs })
         .catch(() => null)
       this.deliver(attempt, sessionId, () =>
-        this.emit(liveSession, input.events, {
+        this.emit(liveSession, {
           type: 'auth-diagnostic',
           sessionId,
           diagnostic: claudeAuthDiagnostic(init, settings)
@@ -198,10 +192,18 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       if (connection.closed) {
         throw new Error(`claude stream-json for session ${sessionId} exited while being acquired`)
       }
+      const leafUuid = launch.resumed
+        ? await this.deps.proveTranscriptCursor({
+            sessionId,
+            providerSessionId: launch.providerSessionId,
+            previousLeafUuid: launch.resumeLeafUuid
+          })
+        : launch.resumeLeafUuid
+      this.acquisitions.assertCurrent(sessionId, attempt)
       const publication = createClaudeSessionPublication({
         connection,
         init,
-        leafUuid: observedLeafUuid,
+        leafUuid: leafUuid ?? null,
         fence: input.fence,
         resumed: launch.resumed,
         prompts,
@@ -223,12 +225,19 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       return acquired
     } catch (error) {
       initDeadline.clear()
-      this.acquisitions.deleteIfCurrent(sessionId, attempt)
       if (this.sessions.get(sessionId)?.connection !== attempt.connection) {
-        translator?.dispose()
-        prompts.clear()
-        await attempt.connection?.close()
+        return closeFailedClaudeAcquisition({
+          sessionId,
+          registry: this.acquisitions,
+          attempt,
+          cause: error,
+          dispose: () => {
+            translator?.dispose()
+            prompts.clear()
+          }
+        })
       }
+      this.acquisitions.deleteIfCurrent(sessionId, attempt)
       throw error
     } finally {
       attempt.finish()
@@ -246,20 +255,16 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
   }
 
   private handleExit(sessionId: string, attempt: ClaudeAcquisitionAttempt, error: Error): void {
-    const session = this.sessions.get(sessionId)
-    if (!session || session.connection !== attempt.connection) {
-      return
-    }
-    this.sessions.delete(sessionId)
-    this.emit(session, session.events, { type: 'ended', sessionId, reason: error.message })
-    settleClaudeExitedSession(session)
+    handleClaudeSessionExit({
+      sessions: this.sessions,
+      sessionId,
+      attempt,
+      error,
+      ...(this.deps.onEvent ? { onEvent: this.deps.onEvent } : {})
+    })
   }
 
-  private emit(
-    _session: ClaudeSession | null,
-    _events: StructuredAgentSessionEventSink | undefined,
-    event: ClaudeStructuredSessionEvent
-  ): void {
+  private emit(_session: ClaudeSession | null, event: ClaudeStructuredSessionEvent): void {
     _session?.translator?.handle(event)
     this.deps.onEvent?.(event)
   }
@@ -288,25 +293,20 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
     setClaudeStructuredOption(this.session(input.sessionId), input, this.deps.requestTimeoutMs)
   readOptions = (input: { sessionId: string; fence: number }) =>
     readClaudeStructuredSessionOptions(this.session(input.sessionId), this.deps.requestTimeoutMs)
-  releaseAcquisition = (input: { sessionId: string }): Promise<void> =>
-    this.closeSession(input.sessionId).then(() => undefined)
+  releaseAcquisition = ({ sessionId }: { sessionId: string }): Promise<boolean> =>
+    this.disposeSession(sessionId)
 
   closeSession = (sessionId: string): Promise<boolean> =>
-    closeClaudeSession({
-      sessionId,
-      sessions: this.sessions,
-      acquisitions: this.acquisitions,
-      deps: this.deps
-    })
+    closeClaudeSession(sessionId, this.sessions, this.acquisitions, this.deps)
+  disposeSession = (sessionId: string): Promise<boolean> =>
+    releaseClaudeAcquisition(sessionId, this.sessions, this.acquisitions, this.deps)
   closeAll = (): Promise<void> =>
-    closeAllClaudeSessions({
-      sessions: this.sessions,
-      acquisitions: this.acquisitions,
-      close: (sessionId) => this.closeSession(sessionId)
-    })
+    closeAllClaudeSessions(this.sessions, this.acquisitions, (sessionId) =>
+      this.disposeSession(sessionId)
+    )
   private session(sessionId: string): ClaudeSession {
     const session = this.sessions.get(sessionId)
-    if (!session) {
+    if (!session || session.ended) {
       throw new Error(`no live claude stream-json session for ${sessionId}`)
     }
     return session

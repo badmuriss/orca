@@ -8,9 +8,11 @@ import type { AgentSessionHandoffRequest } from '../../../shared/agent-session-w
 import { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
 import { setStoredAgentSessionHandoffStage } from '../../runtime/agent-session-handoff-record-transitions'
 import { openAgentSessionJournal } from '../agent-session-journal/journal-store'
+import { AgentSessionAcquisitionExitUnprovenError } from './structured-agent-session-adapter'
 import { StructuredAgentSessionHandoffCoordinator } from './structured-agent-session-handoff'
 import type {
   StructuredAgentSessionHandoffTransport,
+  StructuredNativeSuspendResult,
   StructuredTuiOwner
 } from './structured-agent-session-handoff-types'
 
@@ -32,9 +34,10 @@ let launchTui: Mock<StructuredAgentSessionHandoffTransport['launchTui']>
 let reproveTuiOwner: Mock<StructuredAgentSessionHandoffTransport['reproveTuiOwner']>
 let closeTuiOwner: Mock<NonNullable<StructuredAgentSessionHandoffTransport['closeTuiOwner']>>
 let stopRecoveredOwner: Mock<StructuredAgentSessionHandoffTransport['stopRecoveredOwner']>
-let suspendNative: Mock<(sessionId: string) => Promise<void | boolean>>
+let suspendNative: Mock<(sessionId: string) => Promise<StructuredNativeSuspendResult>>
 let acquireNativeStop: Mock<(turnId: string) => Promise<boolean>>
 let acquireNativeCalls: number
+let nativeAcquireFailure: Error | null
 
 function operationId(sequence: number): string {
   return `${NOW}-${sequence.toString(16).padStart(32, '0')}`
@@ -167,6 +170,9 @@ function createCoordinator(): void {
         process: processIdentity(spawnToken, 4300 + acquireNativeCalls),
         now: NOW
       })
+      if (nativeAcquireFailure) {
+        throw nativeAcquireFailure
+      }
       return store.proveOwner({
         sessionId: SESSION,
         fence,
@@ -207,9 +213,10 @@ beforeEach(async () => {
   stopRecoveredOwner = vi.fn<StructuredAgentSessionHandoffTransport['stopRecoveredOwner']>(
     async () => undefined
   )
-  suspendNative = vi.fn(async () => undefined)
+  suspendNative = vi.fn(async () => ({ state: 'stopped' }))
   acquireNativeStop = vi.fn<(turnId: string) => Promise<boolean>>(async () => true)
   acquireNativeCalls = 0
+  nativeAcquireFailure = null
   await establishNativeOwner()
   createCoordinator()
 })
@@ -220,30 +227,8 @@ afterEach(async () => {
 })
 
 describe('structured handoff failure injection', () => {
-  it('leaves the native owner and preparing checkpoint when provider close fails', async () => {
+  it('rolls back preparing when provider close fails before stopping the owner', async () => {
     suspendNative.mockRejectedValueOnce(new Error('durable handle unavailable'))
-
-    expect(await coordinator.request('client-1', handoff('to-tui', 'now', 2))).toMatchObject({
-      ok: true
-    })
-    await coordinator.drain()
-
-    expect(launchTui).not.toHaveBeenCalled()
-    expect(store.getRecord(SESSION)?.lease).toMatchObject({
-      runtimeKind: 'native',
-      claimStatus: 'live',
-      handoffStage: 'preparing',
-      handoffOperationId: expect.any(String)
-    })
-    expect(coordinator.status(SESSION)).toMatchObject({
-      owner: 'native',
-      phase: 'failed',
-      error: { recoverableOwner: 'native' }
-    })
-  })
-
-  it('rolls back preparing when provider close cannot prove exit', async () => {
-    suspendNative.mockResolvedValueOnce(false)
 
     expect(await coordinator.request('client-1', handoff('to-tui', 'now', 2))).toMatchObject({
       ok: true
@@ -261,6 +246,49 @@ describe('structured handoff failure injection', () => {
       owner: 'native',
       phase: 'failed',
       error: { recoverableOwner: 'native' }
+    })
+  })
+
+  it('rolls back preparing when provider close cannot prove exit', async () => {
+    suspendNative.mockResolvedValueOnce({ state: 'live' })
+
+    expect(await coordinator.request('client-1', handoff('to-tui', 'now', 2))).toMatchObject({
+      ok: true
+    })
+    await coordinator.drain()
+
+    expect(launchTui).not.toHaveBeenCalled()
+    expect(store.getRecord(SESSION)?.lease).toMatchObject({
+      runtimeKind: 'native',
+      claimStatus: 'live',
+      handoffStage: null,
+      handoffOperationId: null
+    })
+    expect(coordinator.status(SESSION)).toMatchObject({
+      owner: 'native',
+      phase: 'failed',
+      error: { recoverableOwner: 'native' }
+    })
+  })
+
+  it('never restores a native claim after post-close cleanup fails', async () => {
+    suspendNative.mockResolvedValueOnce({
+      state: 'stopped-cleanup-failed',
+      error: new Error('journal flush unavailable')
+    })
+
+    expect(await coordinator.request('client-1', handoff('to-tui', 'now', 2))).toMatchObject({
+      ok: true
+    })
+    await coordinator.drain()
+
+    expect(launchTui).not.toHaveBeenCalled()
+    expect(store.getRecord(SESSION)?.lease).toMatchObject({
+      runtimeKind: 'native',
+      claimStatus: 'released',
+      handoffStage: 'manual-recovery',
+      handoffOperationId: operationId(2),
+      ownerProcess: null
     })
   })
 
@@ -286,6 +314,25 @@ describe('structured handoff failure injection', () => {
       handoffStage: null,
       handoffOperationId: null
     })
+  })
+
+  it('does not leak a rejection when outcome bookkeeping fails', async () => {
+    const unhandled: unknown[] = []
+    const onUnhandled = (error: unknown): void => {
+      unhandled.push(error)
+    }
+    process.on('unhandledRejection', onUnhandled)
+    vi.spyOn(store, 'recordOperationOutcome').mockRejectedValue(new Error('outcome write failed'))
+    try {
+      expect(await coordinator.request('client-1', handoff('to-tui', 'now', 2))).toMatchObject({
+        ok: true
+      })
+      await coordinator.drain()
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
   })
 
   it('discovers a rollout created after the first TUI launch', async () => {
@@ -318,6 +365,37 @@ describe('structured handoff failure injection', () => {
       runtimeKind: 'native',
       claimStatus: 'live',
       handoffStage: null
+    })
+  })
+
+  it('keeps an unproven native cleanup in manual recovery', async () => {
+    launchTui.mockImplementationOnce(async ({ fence, spawnToken }) =>
+      tuiOwner(fence, spawnToken, join(root, 'rollout.jsonl'))
+    )
+    expect(await coordinator.request('client-1', handoff('to-tui', 'now', 2))).toMatchObject({
+      ok: true
+    })
+    await coordinator.drain()
+    nativeAcquireFailure = new AgentSessionAcquisitionExitUnprovenError(
+      new Error('native child exit was not proven')
+    )
+
+    expect(await coordinator.request('client-1', handoff('to-native', 'now', 3))).toMatchObject({
+      ok: true
+    })
+    await coordinator.drain()
+
+    expect(store.getRecord(SESSION)?.lease).toMatchObject({
+      runtimeKind: 'native',
+      claimStatus: 'reserved',
+      handoffStage: 'manual-recovery',
+      handoffOperationId: operationId(3),
+      ownerProcess: { pid: 4301 }
+    })
+    expect(coordinator.status(SESSION)).toMatchObject({
+      owner: 'none',
+      phase: 'failed',
+      error: { recoverableOwner: 'none' }
     })
   })
 

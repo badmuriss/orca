@@ -59,12 +59,17 @@ export type StructuredAgentSessionHandoffTransport = {
   stopFailedTuiLaunch?(owner: StructuredTuiOwner): Promise<void>
 }
 
+export type StructuredNativeSuspendResult =
+  | { state: 'live' }
+  | { state: 'stopped' }
+  | { state: 'stopped-cleanup-failed'; error: unknown }
+
 export type StructuredAgentSessionHandoffDeps = {
   store: AgentSessionRecordStore
   claimKeyId: string
   transport?: StructuredAgentSessionHandoffTransport
   session: (sessionId: string) => { journal: AgentSessionJournal; fence: number }
-  suspendNative: (sessionId: string) => Promise<void | boolean>
+  suspendNative: (sessionId: string) => Promise<StructuredNativeSuspendResult>
   acquireNative: (input: {
     sessionId: string
     fence: number

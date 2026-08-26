@@ -229,6 +229,17 @@ export function isWindowsProcessTableAvailable(): boolean {
 }
 
 /**
+ * PID-reuse-safe ownership needs the native creation-time field, not merely a
+ * process list. Older addon builds expose the table without that field; keep
+ * structured ownership unavailable on those hosts instead of fabricating proof
+ * from a PID.
+ */
+export function isWindowsProcessStartTimeAvailable(): boolean {
+  const native = moduleLoader()
+  return native !== null && typeof native.ProcessDataFlag.CreationTime === 'number'
+}
+
+/**
  * Test-only: substitute the native module.
  *
  * Why an injector and not `vi.mock`: the module is resolved through

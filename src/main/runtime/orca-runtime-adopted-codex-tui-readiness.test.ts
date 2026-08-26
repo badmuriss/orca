@@ -1,17 +1,24 @@
-import { describe, expect, it, vi } from 'vitest'
-import { AGENT_HOOK_SESSION_NONCE_ENV_VAR } from '../../shared/agent-hook-session-nonce'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { StructuredAgentSessionHandoffTransport } from '../native-chat/agent-session-wire/structured-agent-session-handoff-types'
-import type { AdoptedCodexReadinessEvent } from '../codex/adopted-codex-tui-readiness'
 import { OrcaRuntimeService } from './orca-runtime'
 
-const { proveCodexTuiRollout, readStructuredTuiProcessIdentity, resolvePinnedCodexRolloutProof } =
-  vi.hoisted(() => ({
-    proveCodexTuiRollout: vi.fn(),
-    readStructuredTuiProcessIdentity: vi.fn(),
-    resolvePinnedCodexRolloutProof: vi.fn()
-  }))
+const {
+  probeAgentSessionProcessIdentity,
+  proveCodexTuiRollout,
+  readStructuredTuiProcessIdentity,
+  resolvePinnedCodexRolloutProof
+} = vi.hoisted(() => ({
+  probeAgentSessionProcessIdentity: vi.fn(),
+  proveCodexTuiRollout: vi.fn(),
+  readStructuredTuiProcessIdentity: vi.fn(),
+  resolvePinnedCodexRolloutProof: vi.fn()
+}))
 
 vi.mock('./structured-tui-process-identity', () => ({ readStructuredTuiProcessIdentity }))
+vi.mock('./agent-session-process-identity-probe', async (importOriginal) => ({
+  ...(await importOriginal()),
+  probeAgentSessionProcessIdentity
+}))
 vi.mock('../codex/codex-tui-rollout-proof', () => ({
   proveCodexTuiRollout,
   resolveLiveCodexTuiRollout: vi.fn(),
@@ -20,33 +27,26 @@ vi.mock('../codex/codex-tui-rollout-proof', () => ({
 
 const WORKTREE_ID = 'repo-1::/tmp/adopted-readiness'
 const PANE_KEY = 'tab-adopt:leaf-adopt'
-const THREAD_ID = 'thread-adopt'
+const THREAD_ID = '01a03a0d-acbd-74e0-86f2-2615984d3b37'
 const SESSION_ID = 'session-adopt'
 const TRANSCRIPT = '/tmp/codex-home/rollout.jsonl'
-
-/** The tail a bare shell leaves behind once adoption has stopped the pane's Codex. */
 const READY_SHELL_TAIL = ['dev@host ~/repo %']
 
-function returnToTerminalHarness(settingsOverrides: Record<string, unknown> = {}) {
-  const listeners = new Set<(event: AdoptedCodexReadinessEvent) => void>()
-  const runtime = new OrcaRuntimeService(
-    {
-      getSettings: () => ({
-        disabledTuiAgents: [],
-        agentCmdOverrides: {},
-        agentDefaultArgs: {},
-        agentDefaultEnv: {},
-        ...settingsOverrides
-      })
-    } as never,
-    undefined,
-    {
-      subscribeAgentHookEvents: (listener) => {
-        listeners.add(listener)
-        return () => listeners.delete(listener)
-      }
-    }
-  )
+function returnToTerminalHarness(
+  input: {
+    settingsOverrides?: Record<string, unknown>
+    processCommand?: string
+  } = {}
+) {
+  const runtime = new OrcaRuntimeService({
+    getSettings: () => ({
+      disabledTuiAgents: [],
+      agentCmdOverrides: {},
+      agentDefaultArgs: {},
+      agentDefaultEnv: {},
+      ...input.settingsOverrides
+    })
+  } as never)
   const writeAgentSessionProof = vi.fn(() => true)
   runtime.setPtyController({
     writeAgentSessionProof,
@@ -70,7 +70,7 @@ function returnToTerminalHarness(settingsOverrides: Record<string, unknown> = {}
     paneKey: PANE_KEY,
     worktreeId: WORKTREE_ID,
     incarnationId: 'inc-adopt',
-    // Decoys: exactly the two signals a `tui-idle` wait would settle on.
+    // These stale signals describe the shell left after TUI-to-native adoption.
     lastAgentStatus: 'idle',
     tailBuffer: READY_SHELL_TAIL,
     tailPartialLine: '',
@@ -103,12 +103,32 @@ function returnToTerminalHarness(settingsOverrides: Record<string, unknown> = {}
     folderWorkspace: null
   }))
 
-  readStructuredTuiProcessIdentity.mockResolvedValue({
-    hostId: 'local',
-    pid: 5252,
-    processStartTimeMs: 20,
-    spawnToken: 'spawn-adopt'
-  })
+  const processCommand =
+    input.processCommand ??
+    `node /opt/codex/bin/codex --dangerously-bypass-approvals-and-sandbox resume ${THREAD_ID}`
+  readStructuredTuiProcessIdentity.mockImplementation(
+    async (proof: {
+      processCommandMatches?: (command: string) => boolean
+      excludedProcessTreeRootIdentities?: readonly {
+        pid: number
+        processStartTimeMs: number | null
+      }[]
+    }) => {
+      if (
+        !proof.processCommandMatches?.(processCommand) ||
+        proof.excludedProcessTreeRootIdentities?.[0]?.pid !== 4242 ||
+        proof.excludedProcessTreeRootIdentities[0]?.processStartTimeMs !== 10
+      ) {
+        throw new Error('The resumed terminal did not expose one exact Codex child process.')
+      }
+      return {
+        hostId: 'local',
+        pid: 5252,
+        processStartTimeMs: 20,
+        spawnToken: 'spawn-adopt'
+      }
+    }
+  )
   resolvePinnedCodexRolloutProof.mockResolvedValue(TRANSCRIPT)
 
   const launch = (): Promise<{ transcriptPath?: string }> =>
@@ -124,143 +144,71 @@ function returnToTerminalHarness(settingsOverrides: Record<string, unknown> = {}
       spawnToken: 'spawn-adopt'
     }) as Promise<{ transcriptPath?: string }>
 
-  const writtenNonce = (): string => {
-    const written = writeAgentSessionProof.mock.calls
-      .map((call) => (call as unknown as [string, string])[1])
-      .join('')
-    const match = new RegExp(`${AGENT_HOOK_SESSION_NONCE_ENV_VAR}[=:']*([0-9a-f-]{36})`).exec(
-      written
-    )
-    if (!match?.[1]) {
-      throw new Error(`no session nonce in written command: ${written}`)
-    }
-    return match[1]
-  }
-
-  const emit = (event: Partial<AdoptedCodexReadinessEvent>): void => {
-    const full = {
-      paneKey: PANE_KEY,
-      source: 'codex',
-      hookEventName: 'SessionStart',
-      providerSession: { key: 'session_id', id: THREAD_ID },
-      ...event
-    } as AdoptedCodexReadinessEvent
-    for (const listener of Array.from(listeners)) {
-      listener(full)
-    }
-  }
-
-  return { runtime, launch, emit, writtenNonce, writeAgentSessionProof }
-}
-
-/** Resolves to `'pending'` unless `promise` settles first. */
-async function settlesBefore<T>(promise: Promise<T>): Promise<T | 'pending'> {
-  return Promise.race([
-    promise,
-    new Promise<'pending'>((resolve) => {
-      setTimeout(() => resolve('pending'), 0)
-    })
-  ])
+  return { launch, writeAgentSessionProof }
 }
 
 describe('returning an adopted Codex session to its terminal', () => {
-  it('does not accept a ready shell as the resumed Codex, only its SessionStart hook', async () => {
-    const rig = returnToTerminalHarness()
-    const owner = rig.launch()
-    const stillWaiting = owner.then(
-      () => 'resolved' as const,
-      () => 'rejected' as const
-    )
-
-    // The pane now looks exactly like a settled agent terminal: an idle status
-    // left over from the Codex adoption stopped, and a shell prompt on screen.
-    expect(await settlesBefore(stillWaiting)).toBe('pending')
-    expect(proveCodexTuiRollout).not.toHaveBeenCalled()
-
-    rig.emit({ sessionNonce: rig.writtenNonce() })
-    await expect(owner).resolves.toMatchObject({ transcriptPath: TRANSCRIPT })
-  })
-
-  it('stamps a one-shot nonce into the resume command and ignores a SessionStart without it', async () => {
-    const rig = returnToTerminalHarness()
-    const owner = rig.launch()
-    const stillWaiting = owner.then(
-      () => 'resolved' as const,
-      () => 'rejected' as const
-    )
-    await settlesBefore(stillWaiting)
-    const nonce = rig.writtenNonce()
-
-    // A SessionStart from an earlier Codex in this pane: same pane, same thread,
-    // a nonce Orca minted for some other invocation.
-    rig.emit({ sessionNonce: `stale-${nonce}` })
-    expect(await settlesBefore(stillWaiting)).toBe('pending')
-
-    rig.emit({ sessionNonce: nonce })
-    await expect(owner).resolves.toMatchObject({ transcriptPath: TRANSCRIPT })
-  })
-
-  it('ignores non-SessionStart codex hooks and replayed ones', async () => {
-    const rig = returnToTerminalHarness()
-    const owner = rig.launch()
-    const stillWaiting = owner.then(
-      () => 'resolved' as const,
-      () => 'rejected' as const
-    )
-    await settlesBefore(stillWaiting)
-    const sessionNonce = rig.writtenNonce()
-
-    rig.emit({ sessionNonce, hookEventName: 'Stop' })
-    rig.emit({ sessionNonce, hookEventName: 'UserPromptSubmit' })
-    rig.emit({ sessionNonce, isReplay: true })
-    rig.emit({ sessionNonce, source: 'claude' })
-    rig.emit({ sessionNonce, paneKey: 'tab-other:leaf-other' })
-    expect(await settlesBefore(stillWaiting)).toBe('pending')
-
-    rig.emit({ sessionNonce })
-    await expect(owner).resolves.toMatchObject({ transcriptPath: TRANSCRIPT })
-  })
-
-  it('rejects when the nonce Orca minted comes back bound to another conversation', async () => {
-    const rig = returnToTerminalHarness()
-    const owner = rig.launch()
-    const settled = owner.catch((error: Error) => error.message)
-    await settlesBefore(settled)
-
-    rig.emit({
-      sessionNonce: rig.writtenNonce(),
-      providerSession: { key: 'session_id', id: 'thread-other' }
+  beforeEach(() => {
+    vi.clearAllMocks()
+    probeAgentSessionProcessIdentity.mockResolvedValue({
+      outcome: 'identity-matched',
+      matchedOn: ['process-start-time']
     })
-    await expect(settled).resolves.toContain('resumed a different Codex session')
   })
 
-  it('says why it cannot confirm the session when agent status hooks are off', async () => {
-    const rig = returnToTerminalHarness({ agentStatusHooksEnabled: false })
-    await expect(rig.launch()).rejects.toThrow('Agent status hooks are off')
-    // Nothing may be typed at the pane when the proof can never arrive.
-    expect(rig.writeAgentSessionProof).not.toHaveBeenCalled()
-  })
-
-  it('never types a screen probe at the pane', async () => {
+  it('returns the TUI owner when Codex resumes the expected thread before its first turn', async () => {
     const rig = returnToTerminalHarness()
-    const owner = rig.launch()
-    const stillWaiting = owner.then(
-      () => 'resolved' as const,
-      () => 'rejected' as const
-    )
-    await settlesBefore(stillWaiting)
-    rig.emit({ sessionNonce: rig.writtenNonce() })
-    await owner
+
+    await expect(rig.launch()).resolves.toMatchObject({ transcriptPath: TRANSCRIPT })
+  })
+
+  it('rejects a Codex child resumed onto another thread', async () => {
+    const rig = returnToTerminalHarness({
+      processCommand: 'node /opt/codex/bin/codex resume thread-other'
+    })
+
+    await expect(rig.launch()).rejects.toThrow('one exact Codex child process')
+  })
+
+  it('rejects a generic Codex child even when the old rollout still exists', async () => {
+    const rig = returnToTerminalHarness({
+      processCommand: 'node /opt/codex/bin/codex --dangerously-bypass-approvals-and-sandbox'
+    })
+
+    await expect(rig.launch()).rejects.toThrow('one exact Codex child process')
+    expect(resolvePinnedCodexRolloutProof).not.toHaveBeenCalled()
+  })
+
+  it('rejects when the exact resumed process exits before the pinned rollout is accepted', async () => {
+    const rig = returnToTerminalHarness()
+    probeAgentSessionProcessIdentity.mockResolvedValueOnce({
+      outcome: 'pid-absent',
+      matchedOn: []
+    })
+
+    await expect(rig.launch()).rejects.toThrow('resumed Codex process could not be re-proved')
+    expect(resolvePinnedCodexRolloutProof).toHaveBeenCalledWith('/tmp/codex-home', THREAD_ID)
+  })
+
+  it('does not depend on agent status hooks for idle resume proof', async () => {
+    const rig = returnToTerminalHarness({ settingsOverrides: { agentStatusHooksEnabled: false } })
+
+    await expect(rig.launch()).resolves.toMatchObject({ transcriptPath: TRANSCRIPT })
+    expect(rig.writeAgentSessionProof).toHaveBeenCalledOnce()
+  })
+
+  it('never types an interactive screen probe at the pane', async () => {
+    const rig = returnToTerminalHarness()
+    await rig.launch()
 
     const written = rig.writeAgentSessionProof.mock.calls.map(
       (call) => (call as unknown as [string, string])[1]
     )
     expect(written).toHaveLength(1)
-    expect(written[0]).toContain('codex')
+    expect(written[0]).toContain(`'resume' '${THREAD_ID}'`)
     expect(written[0]).not.toContain('/status')
-    // Bracketed paste and the bare/kitty submit keys the old proof sent.
-    expect(written[0]).not.toContain('[200~')
-    expect(written[0]).not.toContain('[13u')
+    expect(written[0]).not.toContain('\u001b[200~')
+    expect(written[0]).not.toContain('\u001b[13u')
     expect(proveCodexTuiRollout).not.toHaveBeenCalled()
   })
 })

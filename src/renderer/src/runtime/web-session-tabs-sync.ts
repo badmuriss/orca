@@ -97,6 +97,7 @@ import {
   isWebAgentSessionHandoffPostCreateSnapshotConfirmed,
   resolveWebAgentSessionHandoff
 } from './web-agent-session-handoff'
+import { resolveStructuredTuiHandoffBinding } from './web-structured-tui-handoff'
 import { getRuntimeEnvironmentRevision } from './runtime-environment-revision'
 import { useRuntimeSessionMirrorEnvironmentKey } from './use-runtime-session-mirror-environment-key'
 import {
@@ -150,6 +151,7 @@ type SessionTabsRemovalFence = {
 
 export type WebSessionTabsSnapshotApplyOptions = {
   preserveLocalLayout?: boolean
+  terminalPtyMode?: 'local' | 'remote'
 }
 
 type TrackedWebSessionTabsWorktree = {
@@ -1092,7 +1094,8 @@ function buildMirroredTerminalTabs(
   existingLayoutsByTabId: Readonly<Record<string, TerminalLayoutSnapshot>>,
   sortOffset: number,
   now: number,
-  focusTarget?: { parentTabId: string; leafId: string }
+  focusTarget?: { parentTabId: string; leafId: string },
+  terminalPtyMode: 'local' | 'remote' = 'remote'
 ): MirroredTerminalTab[] {
   const groups = new Map<string, TerminalSurface[]>()
   for (const tab of snapshot.tabs.filter(isTerminalSurfaceTab)) {
@@ -1115,10 +1118,12 @@ function buildMirroredTerminalTabs(
         : undefined) ??
       surfaces.find((surface) => surface.isActive) ??
       surfaces[0]!
+    const ptyIdForSurface = (handle: string): string =>
+      terminalPtyMode === 'local' ? handle : toRemoteRuntimePtyId(handle, environmentId)
     const ptyIdsByLeafId = Object.fromEntries(
       surfaces
         .filter((surface): surface is ReadyTerminalSurface => surface.status === 'ready')
-        .map((surface) => [surface.leafId, toRemoteRuntimePtyId(surface.terminal, environmentId)])
+        .map((surface) => [surface.leafId, ptyIdForSurface(surface.terminal)])
     )
     const layout = normalizeTerminalLayoutPtyOwnership(
       chooseRemoteTerminalLayout(surfaces, ptyIdsByLeafId, existingLayout, requestedActiveLeafId)
@@ -1550,7 +1555,8 @@ function buildTerminalUnifiedTab(
   groupId: string,
   environmentId: string,
   // Why: viewMode is host-tracked but the client's optimistic toggle must win during the echo window; callers pass the reconciled value.
-  viewMode?: Tab['viewMode']
+  viewMode?: Tab['viewMode'],
+  structuredBinding?: { sessionId: string; agent: 'codex' | 'claude' }
 ): Tab {
   return {
     id: tab.id,
@@ -1569,7 +1575,15 @@ function buildTerminalUnifiedTab(
     createdAt: tab.createdAt,
     isPreview: false,
     isPinned: tab.isPinned === true,
-    ...(viewMode ? { viewMode } : {})
+    ...(structuredBinding
+      ? {
+          structuredSessionId: structuredBinding.sessionId,
+          agentSessionAgent: structuredBinding.agent,
+          viewMode: 'terminal' as const
+        }
+      : viewMode
+        ? { viewMode }
+        : {})
   }
 }
 
@@ -2706,7 +2720,8 @@ function applyWebSessionTabsSnapshotWithContext(
           parentTabId: callerFocusIntentTab.parentTabId,
           leafId: callerFocusIntentTab.leafId
         }
-      : undefined
+      : undefined,
+    options?.terminalPtyMode
   )
   const mirroredTerminalTabEntries = mirroredTerminalTabs.map((entry) => entry.tab)
   const retainedTerminalIds = new Set(retainedTerminalTabs.map((tab) => tab.id))
@@ -2865,12 +2880,33 @@ function applyWebSessionTabsSnapshotWithContext(
       .filter((tab) => tab.contentType === 'terminal' && tab.viewMode)
       .map((tab) => [tab.id, tab.viewMode] as const)
   )
+  const existingStructuredBindingByTabId = new Map(
+    currentUnifiedTabs
+      .filter(
+        (tab) =>
+          tab.contentType === 'terminal' &&
+          tab.structuredSessionId &&
+          (tab.agentSessionAgent === 'codex' || tab.agentSessionAgent === 'claude')
+      )
+      .map((tab) => [
+        tab.id,
+        {
+          sessionId: tab.structuredSessionId!,
+          agent: tab.agentSessionAgent === 'claude' ? ('claude' as const) : ('codex' as const)
+        }
+      ])
+  )
   const mirroredTerminalUnifiedTabs = mirroredTerminalTabs.map((entry) =>
     buildTerminalUnifiedTab(
       entry.tab,
       hostGroupIdByTabId.get(entry.hostTabId) ?? targetGroupId,
       environmentId,
-      entry.tab.viewMode ?? existingViewModeByTabId.get(entry.tab.id)
+      entry.tab.viewMode ?? existingViewModeByTabId.get(entry.tab.id),
+      resolveStructuredTuiHandoffBinding({
+        environmentId,
+        worktreeId,
+        hostTabId: entry.hostTabId
+      }) ?? existingStructuredBindingByTabId.get(entry.tab.id)
     )
   )
   const mirroredBrowserUnifiedTabs = mirroredBrowserTabs.map((entry) => entry.unifiedTab)
@@ -3440,12 +3476,13 @@ function applyWebSessionTabsSnapshotWithContext(
     batchContext
   )
   const nextActiveTabIdByWorktree =
-    (state.activeTabIdByWorktree[worktreeId] ?? null) !== nextActiveTerminalId
+    (state.activeTabIdByWorktree[worktreeId] ?? null) !==
+    (intentMirroredAgent?.unifiedTab.id ?? nextActiveTerminalId)
       ? withWorktreeEntry(
           state,
           'activeTabIdByWorktree',
           worktreeId,
-          nextActiveTerminalId,
+          intentMirroredAgent?.unifiedTab.id ?? nextActiveTerminalId,
           (current, next) => (current ?? null) === next,
           batchContext,
           false
@@ -3543,9 +3580,10 @@ function applyWebSessionTabsSnapshotWithContext(
       ? state.activeFileId
       : null
   const nextActiveTabId = isActiveWorktree
-    ? snapshot.activeTabType === 'terminal'
-      ? nextActiveTerminalId
-      : (currentActiveTerminalStillValid ?? nextActiveTerminalId)
+    ? (intentMirroredAgent?.unifiedTab.id ??
+      (snapshot.activeTabType === 'terminal'
+        ? nextActiveTerminalId
+        : (currentActiveTerminalStillValid ?? nextActiveTerminalId)))
     : state.activeTabId
   const nextActiveBrowserTabId = isActiveWorktree
     ? nextActiveBrowserWorkspaceId

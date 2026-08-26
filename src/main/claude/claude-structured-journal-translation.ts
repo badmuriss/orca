@@ -31,6 +31,7 @@ import {
   claudeQuestionItems
 } from './claude-structured-prompt-items'
 import type { ClaudePromptRegistry } from './claude-structured-prompt-replies'
+import { isClaudeToolResultOnlyUserFrame } from './claude-structured-user-frame'
 
 export type ClaudeJournalTranslatorDeps = {
   sink: StructuredAgentSessionEventSink
@@ -195,7 +196,11 @@ export function createClaudeJournalTranslator(
       })
       changed = true
     }
-    if (envelope.role === 'user' && message.parent_tool_use_id === null) {
+    if (
+      envelope.role === 'user' &&
+      message.parent_tool_use_id === null &&
+      !isClaudeToolResultOnlyUserFrame(message)
+    ) {
       if (currentTurn) {
         publishLifecycle(currentTurn.sessionId, currentTurn.turnId, false)
       }

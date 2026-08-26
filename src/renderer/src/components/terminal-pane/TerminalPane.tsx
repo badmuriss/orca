@@ -12,6 +12,7 @@ import {
 import { useShallow } from 'zustand/react/shallow'
 import { createPortal } from 'react-dom'
 import type { CSSProperties } from 'react'
+import type { TuiAgent } from '../../../../shared/tui-agent'
 import type { IDisposable } from '@xterm/xterm'
 import { useAppStore } from '../../store'
 import { useLinkRoutingPreferenceDialog } from '@/components/link-routing-preference-dialog'
@@ -116,6 +117,7 @@ import { canToggleNativeChat } from '../native-chat/native-chat-availability'
 import {
   nativeChatLaunchAgentForLeaf,
   resolveNativeChatLeafRoute,
+  resolveNativeChatToggleLeafId,
   type NativeChatLeafRoute
 } from '../native-chat/native-chat-leaf-routing'
 import { resolvePaneKeyForManager } from '@/lib/pane-manager/pane-key-resolution'
@@ -635,13 +637,18 @@ function TerminalPane(
         contentType: 'terminal',
         launchAgent: detectedAgent ? null : launchAgent,
         detectedAgent,
-        resolvedAgent: detectedAgent ? null : resolveTitleAgentForLeaf(leafId),
+        // A structured handoff keeps the durable provider identity even when the
+        // foreground hook has not republished agent status after returning to TUI.
+        resolvedAgent: detectedAgent
+          ? null
+          : ((structuredSessionAgent as TuiAgent | null) ?? resolveTitleAgentForLeaf(leafId)),
         nativeChatTranscriptIsLocalReadable
       })
     },
     [
       tabAgentTypeByLeaf,
       nativeChatEnabled,
+      structuredSessionAgent,
       nativeChatTranscriptIsLocalReadable,
       terminalTab?.launchAgent,
       getNativeChatLeafIds,
@@ -718,12 +725,17 @@ function TerminalPane(
     [unifiedTabId, effectiveChatViewMode, chatLeafId, toggleTabViewMode]
   )
   const handleToggleNativeChat = useCallback(() => {
-    const activeLeafId = managerRef.current?.getActivePane()?.leafId ?? null
+    // Layout evidence bridges the manager's one-render hydration gap.
+    const activeLeafId = resolveNativeChatToggleLeafId({
+      managerActiveLeafId: managerRef.current?.getActivePane()?.leafId ?? null,
+      layout: restoredLayout,
+      mountedLeafIds: managerRef.current?.getPanes().map((pane) => pane.leafId) ?? []
+    })
     if (!activeLeafId) {
       return
     }
     toggleNativeChatForLeaf(activeLeafId)
-  }, [toggleNativeChatForLeaf])
+  }, [restoredLayout, toggleNativeChatForLeaf])
   // Stable identity: this reaches the session-option surface's useMemo deps, so an
   // inline arrow would rebuild the surface on every TerminalPane render.
   const switchNativeChatToTerminal = useCallback(() => {

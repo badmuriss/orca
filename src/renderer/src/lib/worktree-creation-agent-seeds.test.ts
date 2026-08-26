@@ -42,6 +42,8 @@ function setTabs(
 ): void {
   useAppStore.setState({
     tabsByWorktree: { 'wt-1': tabs },
+    terminalLayoutsByTabId: {},
+    agentStatusByPaneKey: {},
     worktreesByRepo: {
       'repo-1': [
         {
@@ -143,18 +145,76 @@ describe('seedAgentTabStateAfterWorktreeCreate', () => {
     expect(tabViewMode('agent-tab')).toBe('terminal')
   })
 
-  it('opens a backend-spawned mirrorable draft in chat after host reconciliation', () => {
+  it('opens a backend-spawned mirrorable draft in chat after host reconciliation', async () => {
     setTabs([{ id: 'agent-tab', launchAgent: 'claude', viewMode: 'terminal' }])
-
-    seedAgentTabStateAfterWorktreeCreate({
-      request,
-      worktreeId: 'wt-1',
-      primaryTabId: 'agent-tab',
-      startupTerminalTabId: 'agent-tab',
-      backendSpawned: true
+    let handedOff = false
+    const runtimeCall = vi.fn(async ({ method }: { method: string }) => {
+      if (method === 'agentSession.adoptTerminal') {
+        return {
+          id: 'adopt',
+          ok: true,
+          result: { ok: true, fence: 1 },
+          _meta: { runtimeId: 'runtime-1' }
+        }
+      }
+      if (method === 'agentSession.handoff') {
+        handedOff = true
+        return {
+          id: 'handoff',
+          ok: true,
+          result: { ok: true },
+          _meta: { runtimeId: 'runtime-1' }
+        }
+      }
+      if (method === 'agentSession.handoffStatus') {
+        return {
+          id: 'status',
+          ok: true,
+          result: handedOff
+            ? { owner: 'native', direction: null, phase: 'idle' }
+            : { owner: 'tui', direction: null, phase: 'idle' },
+          _meta: { runtimeId: 'runtime-1' }
+        }
+      }
+      throw new Error(`Unexpected runtime method: ${method}`)
+    })
+    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { api: { runtime: { call: runtimeCall } } }
+    })
+    useAppStore.setState({
+      terminalLayoutsByTabId: {
+        'agent-tab': {
+          activeLeafId: 'leaf-1',
+          ptyIdsByLeafId: { 'leaf-1': 'pty-1' }
+        } as never
+      },
+      agentStatusByPaneKey: {
+        'agent-tab:leaf-1': {
+          agentType: 'claude',
+          providerSession: { id: 'claude-session-1' }
+        } as never
+      }
     })
 
-    expect(tabViewMode('agent-tab')).toBe('chat')
+    try {
+      seedAgentTabStateAfterWorktreeCreate({
+        request,
+        worktreeId: 'wt-1',
+        primaryTabId: 'agent-tab',
+        startupTerminalTabId: 'agent-tab',
+        backendSpawned: true
+      })
+
+      await vi.waitFor(() => expect(tabViewMode('agent-tab')).toBe('chat'))
+    } finally {
+      if (previousWindow) {
+        Object.defineProperty(globalThis, 'window', previousWindow)
+      } else {
+        Reflect.deleteProperty(globalThis, 'window')
+      }
+    }
   })
 
   it('still opens a local omp draft in chat, despite the local-transcript gate', () => {

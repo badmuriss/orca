@@ -79,6 +79,7 @@ function fakeCodex(routes: Record<string, Route> = {}): {
       close: async () => {
         connection.closeCount += 1
         connection.closed = true
+        return true
       }
     }
     connections.push(connection)
@@ -774,12 +775,17 @@ describe('CodexStructuredSessionAdapter lifecycle', () => {
     ).rejects.toThrow('no live codex app-server for session session-1')
   })
 
-  it('drops a session whose child died and reports it once', async () => {
+  it('retains ownership until a child exit is proven and reports it once', async () => {
     const codex = fakeCodex()
     const events: CodexStructuredSessionEvent[] = []
     const adapter = await acquired(codex, {}, events)
 
-    codex.connections[0].handlers.onExit?.(new Error('codex app-server connection ended'))
+    const connection = codex.connections[0]
+    connection.close = async () => {
+      connection.closeCount += 1
+      return false
+    }
+    connection.handlers.onExit?.(new Error('codex app-server connection ended'))
 
     expect(events.at(-1)).toEqual({
       type: 'ended',
@@ -794,7 +800,11 @@ describe('CodexStructuredSessionAdapter lifecycle', () => {
         fence: 7
       })
     ).rejects.toThrow('no live codex app-server')
-    expect(await adapter.historyFilePath({ identity: identityFor('session-1') })).toBeNull()
+    expect(await adapter.historyFilePath({ identity: identityFor('session-1') })).toBe(
+      '/rollouts/abc.jsonl'
+    )
+    await expect(adapter.closeSession('session-1')).resolves.toBe(false)
+    expect(events.filter((event) => event.type === 'ended')).toHaveLength(1)
   })
 
   it('keeps the live session when a child it already replaced dies', async () => {

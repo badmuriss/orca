@@ -1,4 +1,5 @@
 import { spawnProcess } from '../../shared/child-process/run-process'
+import { RetryableProcessExitProof } from '../../shared/child-process/retryable-process-exit-proof'
 import { createProviderSpawnSpec } from '../codex/codex-app-server-posix-supervisor'
 import { waitForProcessExitUntil } from '../codex/codex-process-exit-deadline'
 import { killCodexAppServerProcessTree } from '../codex/codex-app-server-session'
@@ -104,7 +105,7 @@ export async function openClaudeStreamJsonConnection(
   let closing = false
   let terminalError: Error | null = null
   let writeChain: Promise<void> = Promise.resolve()
-  let closePromise: Promise<boolean> | null = null
+  const exitProof = new RetryableProcessExitProof()
 
   let settleExit = (): void => {}
   const exitPromise = new Promise<void>((resolve) => {
@@ -246,7 +247,10 @@ export async function openClaudeStreamJsonConnection(
   }
 
   const close = (): Promise<boolean> => {
-    closePromise ??= (async () => {
+    if (exited) {
+      return Promise.resolve(true)
+    }
+    return exitProof.run(async () => {
       closing = true
       try {
         child.stdin.end()
@@ -262,8 +266,7 @@ export async function openClaudeStreamJsonConnection(
       }
       failPending(new Error('claude stream-json connection closed'))
       return exited
-    })()
-    return closePromise
+    })
   }
 
   return {

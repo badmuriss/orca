@@ -104,12 +104,9 @@ describe('Claude structured journal translation', () => {
       ])
     )
     translator.handle(
-      message(
-        'user',
-        'tool-result-1',
-        [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'a.ts\nb.ts' }],
-        'tool-1'
-      )
+      message('user', 'tool-result-1', [
+        { type: 'tool_result', tool_use_id: 'tool-1', content: 'a.ts\nb.ts' }
+      ])
     )
 
     const keyed = new Map(
@@ -126,10 +123,15 @@ describe('Claude structured journal translation', () => {
       output: { head: 'a.ts\nb.ts', truncated: false }
     })
     expect(
-      state.items.some(
+      state.items.filter(
         (item) => item.body.kind === 'status' && item.body.turnLifecycle?.turnId === 'user-1'
       )
-    ).toBe(true)
+    ).toHaveLength(1)
+    expect(
+      state.items.some(
+        (item) => item.body.kind === 'status' && item.body.turnLifecycle?.turnId === 'tool-result-1'
+      )
+    ).toBe(false)
 
     translator.handle({
       type: 'message',

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { RotateCcw } from 'lucide-react'
+import { RotateCcw, SquareTerminal } from 'lucide-react'
 import type { AgentType } from '../../../../shared/agent-status-types'
 import { dispatchStructuredAgentSessionComposerCommand } from '../../../../shared/structured-agent-session-composer'
 import { structuredAgentSessionPaneKey } from '../../../../shared/structured-agent-session-projection'
@@ -122,6 +122,20 @@ export function NativeChatStructuredSession(props: {
       className="flex h-full min-h-0 w-full flex-col bg-background focus:outline-none"
     >
       <NativeChatOrchestrationPausedNotice dispatchStatus={props.orchestrationDispatchStatus} />
+      {props.onSwitchToTerminal && !controller.isWorking ? (
+        <div className="flex shrink-0 justify-end border-b border-border/60 px-3 py-1.5">
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            onClick={props.onSwitchToTerminal}
+            aria-label={translate('components.native-chat.toggle.showTerminal', 'Show terminal')}
+          >
+            <SquareTerminal className="size-3" />
+            {translate('components.native-chat.toggle.showTerminal', 'Show terminal')}
+          </Button>
+        </div>
+      ) : null}
       <div className="flex min-h-0 flex-1 flex-col">
         {viewState.kind === 'loading' ? (
           <NativeChatEmptyState kind="loading" />

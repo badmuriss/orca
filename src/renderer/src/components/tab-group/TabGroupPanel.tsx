@@ -1,4 +1,4 @@
-import { Suspense, useMemo } from 'react'
+import { Suspense, useCallback, useMemo } from 'react'
 import { lazyWithRetry as lazy } from '@/lib/lazy-with-retry'
 import { useDroppable } from '@dnd-kit/core'
 import { Ellipsis, X } from 'lucide-react'
@@ -25,6 +25,9 @@ import {
   getRuntimeEnvironmentIdForWorktree
 } from '@/lib/worktree-runtime-owner'
 import { getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
+import { isAgentSessionHandleProvider } from '../../../../shared/agent-session-provider-handle'
+import { showStructuredAgentSessionTerminal } from '@/runtime/structured-agent-session-tui-handoff'
+import { toast } from 'sonner'
 
 const EditorPanel = lazy(() => import('../editor/EditorPanel'))
 
@@ -72,6 +75,21 @@ export default function TabGroupPanel({
   const structuredRuntimeTarget = useMemo(
     () => getActiveRuntimeTarget({ activeRuntimeEnvironmentId: structuredRuntimeEnvironmentId }),
     [structuredRuntimeEnvironmentId]
+  )
+  const showStructuredTerminal = useCallback(
+    (sessionId: string, agent: string) => {
+      void showStructuredAgentSessionTerminal({
+        worktreeId,
+        sessionId,
+        target: structuredRuntimeTarget
+      }).catch((error) => {
+        toast.error(
+          `Could not return this ${agent === 'claude' ? 'Claude' : agent === 'codex' ? 'Codex' : 'agent'} session to the terminal`,
+          { description: error instanceof Error ? error.message : String(error) }
+        )
+      })
+    },
+    [structuredRuntimeTarget, worktreeId]
   )
 
   const model = useTabGroupWorkspaceModel({ groupId, worktreeId })
@@ -372,17 +390,24 @@ export default function TabGroupPanel({
             </div>
           )}
 
-        {activeTab?.contentType === 'agent-session' ? (
+        {activeTab?.contentType === 'agent-session' &&
+        isAgentSessionHandleProvider(activeTab.agentSessionAgent) ? (
           <div className="native-chat-pane-shell absolute inset-0 z-10 flex min-h-0 min-w-0">
             <NativeChatView
               key={activeTab.entityId}
               mode="structured"
               tabId={activeTab.id}
               sessionId={activeTab.entityId}
-              agent={activeTab.agentSessionAgent ?? 'codex'}
+              agent={activeTab.agentSessionAgent}
               isVisible={isVisible}
               target={structuredRuntimeTarget}
               allowFileUriLinks={structuredFileLinksEnabled}
+              onSwitchToTerminal={() => {
+                const agent = activeTab.agentSessionAgent
+                if (agent) {
+                  showStructuredTerminal(activeTab.entityId, agent)
+                }
+              }}
             />
           </div>
         ) : null}

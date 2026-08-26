@@ -30,6 +30,18 @@ export function resolveNativeChatActiveLayoutLeafId(
   return layout.root?.type === 'leaf' ? layout.root.leafId : null
 }
 
+export function resolveNativeChatToggleLeafId(args: {
+  managerActiveLeafId: string | null
+  layout: TerminalLayoutSnapshot | null | undefined
+  mountedLeafIds: readonly string[]
+}): string | null {
+  return (
+    args.managerActiveLeafId ??
+    resolveNativeChatActiveLayoutLeafId(args.layout) ??
+    (args.mountedLeafIds.length === 1 ? args.mountedLeafIds[0]! : null)
+  )
+}
+
 export function isNativeChatTabWideFallbackSafe(
   layout: TerminalLayoutSnapshot | null | undefined
 ): boolean {

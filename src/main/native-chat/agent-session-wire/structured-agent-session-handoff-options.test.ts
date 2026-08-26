@@ -10,6 +10,7 @@ import type {
 } from '../../../shared/agent-session-wire'
 import { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
 import type { StructuredAgentSessionAdapter } from './structured-agent-session-adapter'
+import { StructuredAgentSessionAdapterRouter } from './structured-agent-session-adapter-router'
 import { AgentSessionOptionRejectedError } from './structured-agent-session-option-error'
 import { StructuredAgentSessionHost } from './structured-agent-session-host'
 import {
@@ -34,11 +35,14 @@ const PICKED_EFFORT = 'medium'
 let root: string
 let store: AgentSessionRecordStore
 let host: StructuredAgentSessionHost
+let router: StructuredAgentSessionAdapterRouter
 let acquire: Mock<StructuredAgentSessionAdapter['acquire']>
+let closeNativeSession: Mock<NonNullable<StructuredAgentSessionAdapter['closeSession']>>
 let activeModel: string
 let activeEffort: string | null
 let transcriptPath: string
 let optionFailure: Error | null
+let tuiLaunchFailure: Error | null
 /** What the adapter's closeSession reports about the child's exit. */
 let closeSessionExit = true
 const dispatchedModels: string[] = []
@@ -87,6 +91,11 @@ function handoffTransport(): StructuredAgentSessionHandoffTransport {
   return {
     hostLabel: 'Test host',
     launchTui: async ({ record, fence, spawnToken }) => {
+      if (tuiLaunchFailure) {
+        const error = tuiLaunchFailure
+        tuiLaunchFailure = null
+        throw error
+      }
       launchedOptions.push(record.options)
       return tuiOwner(fence, spawnToken)
     },
@@ -127,7 +136,12 @@ function adapter(): StructuredAgentSessionAdapter {
       }
     }
   })
+  closeNativeSession = vi.fn(async () => {
+    activeModel = DEFAULT_MODEL
+    return closeSessionExit
+  })
   return {
+    supportsLocation: () => true,
     acquire,
     dispatch: vi.fn<StructuredAgentSessionAdapter['dispatch']>(async () => {
       dispatchedModels.push(activeModel)
@@ -158,10 +172,7 @@ function adapter(): StructuredAgentSessionAdapter {
       current: { model: activeModel, ...(activeEffort ? { effort: activeEffort } : {}) },
       models: []
     })),
-    closeSession: vi.fn(async () => {
-      activeModel = DEFAULT_MODEL
-      return closeSessionExit
-    })
+    closeSession: closeNativeSession
   }
 }
 
@@ -171,6 +182,7 @@ beforeEach(async () => {
   activeModel = DEFAULT_MODEL
   activeEffort = null
   optionFailure = null
+  tuiLaunchFailure = null
   closeSessionExit = true
   dispatchedModels.length = 0
   launchedOptions.length = 0
@@ -189,9 +201,14 @@ beforeEach(async () => {
     'utf8'
   )
   store = await AgentSessionRecordStore.open({ directory: join(root, 'store'), hostId: 'local' })
+  const providerAdapter = adapter()
+  router = new StructuredAgentSessionAdapterRouter(
+    { codex: providerAdapter, claude: providerAdapter },
+    async () => undefined
+  )
   host = new StructuredAgentSessionHost({
     store,
-    adapter: adapter(),
+    adapter: router,
     journalRoot: root,
     claimKeyId: 'key-1',
     mintSpawnToken: () => 'spawn-native',
@@ -206,6 +223,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  await (host as unknown as { handoffs: { drain: () => Promise<void> } }).handoffs.drain()
   await host.flushAllStreamedEvents()
   await rm(root, { recursive: true, force: true })
 })
@@ -303,23 +321,100 @@ describe('structured session handoff options', () => {
   // Closing a chat used to leave its provider child resident for the whole app session: the host's
   // session map had no delete and the only teardown was app quit.
   it('stops the provider child and forgets the session when the chat closes', async () => {
-    const adapterCloseSession = (host as unknown as { deps: { adapter: { closeSession: Mock } } })
-      .deps.adapter.closeSession
     expect(host.hasSession(SESSION)).toBe(true)
 
     await host.close(SESSION)
 
-    expect(adapterCloseSession).toHaveBeenCalledWith(SESSION)
+    expect(closeNativeSession).toHaveBeenCalledWith(SESSION)
+    expect(store.getRecord(SESSION)?.lease).toMatchObject({
+      claimStatus: 'released',
+      ownerProcess: null,
+      deathEvidence: { kind: 'exit-observed' }
+    })
+    expect(host.hasSession(SESSION)).toBe(false)
+
+    await expect(host.close(SESSION)).resolves.toBeUndefined()
+    expect(closeNativeSession).toHaveBeenCalledOnce()
+  })
+
+  it('reconciles provider-child ownership after a forward handoff before close', async () => {
+    expect(await host.requestHandoff(CALLER, handoff('to-tui'))).toMatchObject({ ok: true })
+    await vi.waitFor(async () =>
+      expect(await host.handoffStatus(SESSION)).toMatchObject({ owner: 'tui' })
+    )
+    expect(() =>
+      router.dispatch({
+        sessionId: SESSION,
+        clientMessageId: 'post-handoff-owner-check',
+        body: hostTestMessage('must not route'),
+        fence: store.getRecord(SESSION)?.lease.runtimeFence ?? 1
+      })
+    ).toThrow(`no live structured adapter owns ${SESSION}`)
+    const session = (
+      host as unknown as { sessions: Map<string, { hasProviderChild: boolean }> }
+    ).sessions.get(SESSION)
+
+    expect(session?.hasProviderChild).toBe(false)
+    await expect(host.close(SESSION)).resolves.toBeUndefined()
+    // Closing the structured surface must stop a TUI owner too. The TUI is not
+    // the adapter child, so an adapter-only eviction silently leaks its PTY.
+    expect(closedTuiOwners).toHaveLength(1)
+    expect(host.hasSession(SESSION)).toBe(false)
+  })
+
+  it('restores provider-child ownership after TUI-to-native acquisition before close', async () => {
+    expect(await host.requestHandoff(CALLER, handoff('to-tui'))).toMatchObject({ ok: true })
+    await vi.waitFor(async () =>
+      expect(await host.handoffStatus(SESSION)).toMatchObject({ owner: 'tui' })
+    )
+    expect(await host.requestHandoff(CALLER, handoff('to-native'))).toMatchObject({ ok: true })
+    await vi.waitFor(async () =>
+      expect(await host.handoffStatus(SESSION)).toMatchObject({ owner: 'native' })
+    )
+
+    const session = (
+      host as unknown as { sessions: Map<string, { hasProviderChild: boolean }> }
+    ).sessions.get(SESSION)
+    expect(session?.hasProviderChild).toBe(true)
+
+    await host.close(SESSION)
+    expect(closeNativeSession).toHaveBeenCalledTimes(2)
+    expect(store.getRecord(SESSION)?.lease).toMatchObject({
+      claimStatus: 'released',
+      ownerProcess: null
+    })
+    expect(host.hasSession(SESSION)).toBe(false)
+  })
+
+  it('restores provider-child ownership after failed forward handoff recovery before close', async () => {
+    tuiLaunchFailure = new Error('TUI launch failed')
+    expect(await host.requestHandoff(CALLER, handoff('to-tui'))).toMatchObject({ ok: true })
+    await vi.waitFor(async () =>
+      expect(await host.handoffStatus(SESSION)).toMatchObject({
+        owner: 'native',
+        phase: 'failed'
+      })
+    )
+
+    const session = (
+      host as unknown as { sessions: Map<string, { hasProviderChild: boolean }> }
+    ).sessions.get(SESSION)
+    expect(session?.hasProviderChild).toBe(true)
+
+    await host.close(SESSION)
+    expect(closeNativeSession).toHaveBeenCalledTimes(2)
+    expect(store.getRecord(SESSION)?.lease).toMatchObject({
+      claimStatus: 'released',
+      ownerProcess: null
+    })
     expect(host.hasSession(SESSION)).toBe(false)
   })
 
   it('is a no-op for a session it does not hold', async () => {
     await host.close(SESSION)
-    const adapterCloseSession = (host as unknown as { deps: { adapter: { closeSession: Mock } } })
-      .deps.adapter.closeSession
-    adapterCloseSession.mockClear()
+    closeNativeSession.mockClear()
 
     await expect(host.close(SESSION)).resolves.toBeUndefined()
-    expect(adapterCloseSession).not.toHaveBeenCalled()
+    expect(closeNativeSession).not.toHaveBeenCalled()
   })
 })

@@ -1,4 +1,5 @@
 import type { AgentSessionJournalIdentity } from '../../shared/agent-session-journal-types'
+import { cancelProcessAcquisition } from '../../shared/child-process/cancel-process-acquisition'
 import type {
   CodexAppServerConnection,
   openCodexAppServerConnection
@@ -51,6 +52,7 @@ export type CodexStructuredSessionAdapterDeps = {
 
 export type CodexSession = {
   connection: CodexAppServerConnection
+  ended: boolean
   threadId: string
   historyPath: string | null
   prompts: CodexAcquisitionWindow['prompts']
@@ -63,6 +65,7 @@ export type CodexSession = {
 export type CodexAcquisitionAttempt = {
   window: CodexAcquisitionWindow
   cancelled: boolean
+  exitProven: boolean
   finished: Promise<void>
   finish: () => void
 }
@@ -72,7 +75,13 @@ export function createCodexAcquisitionAttempt(): CodexAcquisitionAttempt {
   const finished = new Promise<void>((resolve) => {
     finish = resolve
   })
-  return { window: new CodexAcquisitionWindow(), cancelled: false, finished, finish }
+  return {
+    window: new CodexAcquisitionWindow(),
+    cancelled: false,
+    exitProven: false,
+    finished,
+    finish
+  }
 }
 
 export class CodexAcquisitionRegistry {
@@ -112,6 +121,25 @@ export class CodexAcquisitionRegistry {
     }
   }
 
+  restoreIfCurrent(
+    sessionId: string,
+    replacement: CodexAcquisitionAttempt,
+    previous: CodexAcquisitionAttempt
+  ): void {
+    if (this.attempts.get(sessionId) === replacement) {
+      this.attempts.set(sessionId, previous)
+    }
+  }
+
+  async closeFailedAttempt(sessionId: string, attempt: CodexAcquisitionAttempt): Promise<boolean> {
+    const stopped = (await attempt.window.connection?.close()) ?? true
+    if (stopped) {
+      attempt.exitProven = true
+      this.deleteIfCurrent(sessionId, attempt)
+    }
+    return stopped
+  }
+
   sessionIds(): IterableIterator<string> {
     return this.attempts.keys()
   }
@@ -127,24 +155,12 @@ export async function cancelCodexAcquisitionAttempt(
   if (!attempt) {
     return true
   }
-  attempt.cancelled = true
-  const stopped = (await attempt.window.connection?.close()) ?? true
-  if (!stopped) {
-    return false
-  }
-  await attempt.finished
-  return true
-}
-
-export async function closeCodexSessionsUntilStopped(
-  hasSessions: () => boolean,
-  sessionIds: () => Iterable<string>,
-  close: (sessionId: string) => Promise<boolean>
-): Promise<void> {
-  for (let attempt = 0; attempt < 3 && hasSessions(); attempt += 1) {
-    await Promise.all([...sessionIds()].map((sessionId) => close(sessionId)))
-  }
-  if (hasSessions()) {
-    throw new Error('codex structured session shutdown could not prove every child stopped')
-  }
+  return cancelProcessAcquisition({
+    cancel: () => {
+      attempt.cancelled = true
+    },
+    connection: () => attempt.window.connection,
+    exitProven: () => attempt.exitProven,
+    finished: attempt.finished
+  })
 }

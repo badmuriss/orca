@@ -4,6 +4,7 @@ import type { AgentSessionRecord } from '../../../shared/agent-session-record'
 import type { LegacyImportOptions } from '../agent-session-journal/journal-legacy-import'
 import { importLegacyTranscriptIntoJournal } from '../agent-session-journal/journal-legacy-import'
 import { journalIdentityFor } from './structured-agent-session-attach'
+import { rethrowAfterAgentSessionAcquisitionCleanup } from './structured-agent-session-adapter'
 import { canRestoreLiveTuiOwner } from './structured-agent-session-handoff-restart'
 import type { DeferredStructuredAgentSessionEventSink } from './structured-agent-session-event-sink'
 import type { StructuredAgentSessionHostDeps } from './structured-agent-session-host'
@@ -69,16 +70,21 @@ export function createStructuredAgentSessionHostHandoff(
     session: host.session,
     suspendNative: async (sessionId) => {
       if (!deps.adapter.closeSession) {
-        return false
+        return { state: 'live' }
       }
       const exited = await deps.adapter.closeSession(sessionId)
       if (exited !== true) {
         // Report the unproven exit; the forward handoff refuses on it.
-        return false
+        return { state: 'live' }
       }
-      await host.flush(sessionId)
-      host.eventSink(sessionId).unbind()
-      return true
+      host.session(sessionId).hasProviderChild = false
+      try {
+        await host.flush(sessionId)
+        host.eventSink(sessionId).unbind()
+        return { state: 'stopped' }
+      } catch (error) {
+        return { state: 'stopped-cleanup-failed', error }
+      }
     },
     acquireNative: (input) => acquireNativeHandoffOwner(deps, host, input),
     acquireNativeStop: async (sessionId, turnId, fence) =>
@@ -205,9 +211,9 @@ async function acquireNativeHandoffOwner(
       ...(options ? { options } : {})
     })
   } catch (error) {
-    await deps.adapter.releaseAcquisition?.({ sessionId: input.sessionId })
-    throw error
+    return rethrowAfterAgentSessionAcquisitionCleanup(deps.adapter, input.sessionId, error)
   }
+  session.hasProviderChild = true
   session.fence = proved.lease.runtimeFence
   eventSink.bind({
     journal: session.journal,

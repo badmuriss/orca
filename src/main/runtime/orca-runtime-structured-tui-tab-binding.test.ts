@@ -9,18 +9,21 @@ import { OrcaRuntimeService } from './orca-runtime'
 const {
   probeAgentSessionProcessIdentity,
   proveCodexTuiRollout,
+  readCodexResumeProcessIdentity,
   readStructuredTuiProcessIdentity,
   resolveLiveCodexTuiRollout,
   resolvePinnedCodexRolloutProof
 } = vi.hoisted(() => ({
   probeAgentSessionProcessIdentity: vi.fn(),
   proveCodexTuiRollout: vi.fn(),
+  readCodexResumeProcessIdentity: vi.fn(),
   readStructuredTuiProcessIdentity: vi.fn(),
   resolveLiveCodexTuiRollout: vi.fn(),
   resolvePinnedCodexRolloutProof: vi.fn()
 }))
 
 vi.mock('./structured-tui-process-identity', () => ({ readStructuredTuiProcessIdentity }))
+vi.mock('../codex/codex-resume-process-proof', () => ({ readCodexResumeProcessIdentity }))
 vi.mock('../codex/codex-tui-rollout-proof', () => ({
   proveCodexTuiRollout,
   resolveLiveCodexTuiRollout,
@@ -600,6 +603,8 @@ describe('structured TUI launch tab binding', () => {
   )
 
   it('proves the published launch tab before returning its revealed renderer binding', async () => {
+    proveCodexTuiRollout.mockClear()
+    readCodexResumeProcessIdentity.mockClear()
     let explicitStatus: {
       state: 'working' | 'done'
       prompt: string
@@ -648,7 +653,11 @@ describe('structured TUI launch tab binding', () => {
       }>
       markLocalWorkspaceTrustedForAgent(): void
       waitForTerminal(): Promise<unknown>
-      waitForStructuredTuiProof(): Promise<{ transcriptPath?: string }>
+      waitForAdoptedStructuredTuiProof(input: {
+        owner: unknown
+        threadId: string
+        codexHome: string
+      }): Promise<{ transcriptPath: string }>
       waitForStructuredTuiPtyExit(): Promise<void>
       closeTerminal(handle: string): Promise<unknown>
       handles: Map<
@@ -671,7 +680,8 @@ describe('structured TUI launch tab binding', () => {
     internal.markLocalWorkspaceTrustedForAgent = vi.fn()
     const waitForTerminal = vi.fn(async () => ({}))
     internal.waitForTerminal = waitForTerminal
-    const waitForStructuredTuiProof = vi.fn(async () => {
+    const provePinnedCodexRollout = internal.waitForAdoptedStructuredTuiProof.bind(runtime)
+    const waitForAdoptedStructuredTuiProof = vi.fn(async () => {
       const snapshot = await runtime.listMobileSessionTabs(`id:${WORKTREE_ID}`)
       expect(snapshot.tabs).toContainEqual(
         expect.objectContaining({
@@ -685,12 +695,12 @@ describe('structured TUI launch tab binding', () => {
       expect(revealTerminalSession).not.toHaveBeenCalled()
       return { transcriptPath: '/tmp/rollout.jsonl' }
     })
-    internal.waitForStructuredTuiProof = waitForStructuredTuiProof
+    internal.waitForAdoptedStructuredTuiProof = waitForAdoptedStructuredTuiProof
     const waitForStructuredTuiPtyExit = vi.fn(async () => {})
     internal.waitForStructuredTuiPtyExit = waitForStructuredTuiPtyExit
     const closeTerminal = vi.fn(async () => undefined)
     internal.closeTerminal = closeTerminal
-    readStructuredTuiProcessIdentity.mockResolvedValue({
+    readCodexResumeProcessIdentity.mockResolvedValue({
       hostId: 'local',
       pid: 4243,
       processStartTimeMs: 10,
@@ -729,15 +739,45 @@ describe('structured TUI launch tab binding', () => {
       expect.any(String),
       expect.objectContaining({ condition: 'tui-idle' })
     )
-    expect(waitForStructuredTuiProof).toHaveBeenCalledOnce()
-    expect(waitForStructuredTuiProof.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(readCodexResumeProcessIdentity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rootPid: 4242,
+        spawnToken: 'spawn-token',
+        threadId: 'thread-1'
+      })
+    )
+    expect(waitForAdoptedStructuredTuiProof).toHaveBeenCalledOnce()
+    expect(waitForAdoptedStructuredTuiProof.mock.invocationCallOrder[0]).toBeLessThan(
       revealTerminalSession.mock.invocationCallOrder[0]!
     )
+    expect(proveCodexTuiRollout).not.toHaveBeenCalled()
     const launchCommand = spawn.mock.calls[0]?.[0]?.command
     expect(launchCommand).toContain("'-m' 'gpt-5.6-terra'")
     expect(launchCommand).toContain("'-c' 'model_reasoning_effort=medium'")
     expect(launchCommand).not.toContain('gpt-5.6-sol')
     expect(launchCommand).not.toContain('model_reasoning_effort=high')
+
+    resolvePinnedCodexRolloutProof.mockResolvedValueOnce(null)
+    await expect(
+      provePinnedCodexRollout({
+        owner,
+        threadId: 'thread-1',
+        codexHome: '/tmp/codex-home'
+      })
+    ).rejects.toThrow('did not prove the expected Codex rollout')
+
+    resolvePinnedCodexRolloutProof.mockResolvedValueOnce('/tmp/codex-home/rollout.jsonl')
+    probeAgentSessionProcessIdentity.mockResolvedValueOnce({
+      outcome: 'pid-absent',
+      matchedOn: []
+    })
+    await expect(
+      provePinnedCodexRollout({
+        owner,
+        threadId: 'thread-1',
+        codexHome: '/tmp/codex-home'
+      })
+    ).rejects.toThrow('could not be re-proved')
 
     Object.assign(internal.handles.get(owner.terminal.handle)!, {
       rendererGraphEpoch: -1,
@@ -826,7 +866,7 @@ describe('structured TUI launch tab binding', () => {
     expect(rebound.terminal.handle).not.toBe(owner.terminal.handle)
     await transport.waitForTuiExit(rebound)
     expect(waitForStructuredTuiPtyExit).toHaveBeenCalledWith('pty-structured')
-    expect(waitForStructuredTuiProof).toHaveBeenCalledOnce()
+    expect(waitForAdoptedStructuredTuiProof).toHaveBeenCalledOnce()
 
     await expect(transport.closeTuiOwner?.(rebound)).resolves.toEqual({
       transcriptPath: '/tmp/rollout.jsonl'

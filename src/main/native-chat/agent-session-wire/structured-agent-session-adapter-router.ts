@@ -27,26 +27,45 @@ export class StructuredAgentSessionAdapterRouter implements StructuredAgentSessi
     return acquired
   }
 
-  async releaseAcquisition(input: { sessionId: string }): Promise<void> {
+  async releaseAcquisition(input: { sessionId: string }): Promise<boolean> {
     const adapter = this.owners.get(input.sessionId)
     if (adapter) {
-      await adapter.releaseAcquisition?.(input)
-      this.owners.delete(input.sessionId)
-      return
+      const stopped = await adapter.releaseAcquisition?.(input)
+      if (stopped === true) {
+        this.owners.delete(input.sessionId)
+      }
+      return stopped === true
     }
+    let stopped = true
     for (const candidate of Object.values(this.adapters)) {
-      await candidate.releaseAcquisition?.(input)
+      if (candidate.releaseAcquisition) {
+        stopped = (await candidate.releaseAcquisition(input)) === true && stopped
+      }
     }
+    return stopped
   }
 
   async closeSession(sessionId: string): Promise<boolean> {
+    return this.stopSession(sessionId, 'closeSession')
+  }
+
+  async disposeSession(sessionId: string): Promise<boolean> {
+    return this.stopSession(sessionId, 'disposeSession')
+  }
+
+  private async stopSession(
+    sessionId: string,
+    method: 'closeSession' | 'disposeSession'
+  ): Promise<boolean> {
     const adapter = this.owners.get(sessionId)
-    if (!adapter?.closeSession) {
+    const stop =
+      adapter?.[method] ?? (method === 'disposeSession' ? adapter?.closeSession : undefined)
+    if (!stop) {
       // Handoff must not launch another provider writer when this router cannot
       // prove that the current owner stopped.
       return false
     }
-    const stopped = await adapter.closeSession(sessionId)
+    const stopped = await stop.call(adapter, sessionId)
     if (stopped === true) {
       this.owners.delete(sessionId)
     }
@@ -77,8 +96,8 @@ export class StructuredAgentSessionAdapterRouter implements StructuredAgentSessi
     this.requireAgent(input.identity).historyFilePath?.(input) ?? Promise.resolve(null)
 
   async closeAll(): Promise<void> {
-    this.owners.clear()
     await this.closeAdapters()
+    this.owners.clear()
   }
 
   private owner(sessionId: string): StructuredAgentSessionAdapter {

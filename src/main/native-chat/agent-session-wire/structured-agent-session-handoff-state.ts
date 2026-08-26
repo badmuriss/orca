@@ -16,8 +16,10 @@ export class StructuredAgentSessionHandoffState {
     }
   ) {}
 
-  status = (sessionId: string): AgentSessionHandoffStatus =>
-    this.statuses.get(sessionId) ?? idleStructuredHandoffStatus(this.deps.requireRecord(sessionId))
+  status = (sessionId: string): AgentSessionHandoffStatus => {
+    const value = this.statuses.get(sessionId)
+    return value ?? idleStructuredHandoffStatus(this.deps.requireRecord(sessionId))
+  }
 
   cachedStatus = (sessionId: string): AgentSessionHandoffStatus | undefined =>
     this.statuses.get(sessionId)

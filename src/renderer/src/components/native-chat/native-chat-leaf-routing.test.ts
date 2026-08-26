@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   nativeChatLaunchAgentForLeaf,
-  resolveNativeChatLeafRoute
+  resolveNativeChatLeafRoute,
+  resolveNativeChatToggleLeafId
 } from './native-chat-leaf-routing'
 
 describe('nativeChatLaunchAgentForLeaf', () => {
@@ -62,6 +63,23 @@ describe('nativeChatLaunchAgentForLeaf', () => {
         leafIds: ['remaining-shell-leaf']
       })
     ).toBeNull()
+  })
+})
+
+describe('resolveNativeChatToggleLeafId', () => {
+  it('uses the durable layout leaf while the manager active pane is hydrating', () => {
+    expect(
+      resolveNativeChatToggleLeafId({
+        managerActiveLeafId: null,
+        layout: {
+          root: { type: 'leaf', leafId: 'claude-leaf' },
+          activeLeafId: 'claude-leaf',
+          expandedLeafId: null,
+          ptyIdsByLeafId: { 'claude-leaf': 'pty-claude' }
+        },
+        mountedLeafIds: ['claude-leaf']
+      })
+    ).toBe('claude-leaf')
   })
 })
 

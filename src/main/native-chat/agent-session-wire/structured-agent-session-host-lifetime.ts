@@ -45,6 +45,7 @@ export async function evictHeldStructuredAgentSession(
   }
   const eviction: StructuredAgentSessionEvictionContext = {
     sessionId,
+    hasProviderChild: hasProviderChild(context, sessionId),
     eventSink: context.runtimeState.eventSinkFor(sessionId),
     adapter: context.deps.adapter,
     forget: () => context.sessions.delete(sessionId),

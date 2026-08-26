@@ -1,28 +1,46 @@
+import { closeProcessRegistry } from '../../shared/child-process/close-process-registry'
 import { closeClaudePublishedSession } from './claude-structured-session-close'
 import {
   cancelClaudeAcquisitionAttempt,
-  closeClaudeSessionsUntilStopped,
   type ClaudeAcquisitionRegistry,
   type ClaudeSession,
   type ClaudeStructuredSessionAdapterDeps,
   type ClaudeStructuredSessionEvent
 } from './claude-structured-session-state'
 
-export async function closeClaudeSession(input: {
-  sessionId: string
-  sessions: Map<string, ClaudeSession>
-  acquisitions: ClaudeAcquisitionRegistry
+export async function closeClaudeSession(
+  sessionId: string,
+  sessions: Map<string, ClaudeSession>,
+  acquisitions: ClaudeAcquisitionRegistry,
   deps?: Pick<ClaudeStructuredSessionAdapterDeps, 'persistHandle' | 'onEvent'>
-}): Promise<boolean> {
-  if (!(await cancelClaudeAcquisitionAttempt(input.acquisitions.get(input.sessionId)))) {
+): Promise<boolean> {
+  const attempt = acquisitions.get(sessionId)
+  if (!(await cancelClaudeAcquisitionAttempt(attempt))) {
     return false
   }
+  if (attempt) {
+    acquisitions.deleteIfCurrent(sessionId, attempt)
+  }
   return closeClaudePublishedSession({
-    sessions: input.sessions,
-    sessionId: input.sessionId,
-    ...(input.deps?.persistHandle ? { persistHandle: input.deps.persistHandle } : {}),
-    ...(input.deps?.onEvent ? { onEvent: input.deps.onEvent } : {})
+    sessions,
+    sessionId,
+    ...(deps?.persistHandle ? { persistHandle: deps.persistHandle } : {}),
+    ...(deps?.onEvent ? { onEvent: deps.onEvent } : {})
   })
+}
+
+export function releaseClaudeAcquisition(
+  sessionId: string,
+  sessions: Map<string, ClaudeSession>,
+  acquisitions: ClaudeAcquisitionRegistry,
+  deps: Pick<ClaudeStructuredSessionAdapterDeps, 'onEvent'>
+): Promise<boolean> {
+  return closeClaudeSession(
+    sessionId,
+    sessions,
+    acquisitions,
+    deps.onEvent ? { onEvent: deps.onEvent } : undefined
+  )
 }
 
 export function closePublishedClaudeSession(input: {
@@ -31,23 +49,24 @@ export function closePublishedClaudeSession(input: {
   persistHandle?: (handle: {
     sessionId: string
     providerSessionId: string
-    leafUuid: string | null
     fence: number
-  }) => Promise<void>
+  }) => Promise<string>
   onEvent?: (event: ClaudeStructuredSessionEvent) => void
 }): Promise<boolean> {
   return closeClaudePublishedSession(input)
 }
 
-export async function closeAllClaudeSessions(input: {
-  sessions: Map<string, ClaudeSession>
-  acquisitions: ClaudeAcquisitionRegistry
+export async function closeAllClaudeSessions(
+  sessions: Map<string, ClaudeSession>,
+  acquisitions: ClaudeAcquisitionRegistry,
   close: (sessionId: string) => Promise<boolean>
-}): Promise<void> {
-  input.acquisitions.close()
-  await closeClaudeSessionsUntilStopped(
-    () => input.sessions.size > 0 || input.acquisitions.size > 0,
-    () => new Set([...input.sessions.keys(), ...input.acquisitions.sessionIds()]),
-    input.close
-  )
+): Promise<void> {
+  acquisitions.close()
+  await closeProcessRegistry({
+    attempts: 3,
+    hasEntries: () => sessions.size > 0 || acquisitions.size > 0,
+    entryIds: () => new Set([...sessions.keys(), ...acquisitions.sessionIds()]),
+    closeEntry: close,
+    failureMessage: 'claude structured session shutdown could not prove every child stopped'
+  })
 }

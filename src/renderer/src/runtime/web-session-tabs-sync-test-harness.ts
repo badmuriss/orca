@@ -4,6 +4,7 @@ import { resetWebSessionFocusIntentForTests } from './web-session-focus-intent'
 import { resetWebSessionCloseIntentForTests } from './web-session-close-intent'
 import { resetWebSessionReorderIntentForTests } from './web-session-reorder-intent'
 import { resetWebAgentSessionHandoffsForTests } from './web-agent-session-handoff'
+import { resetStructuredTuiHandoffBindingsForTests } from './web-structured-tui-handoff'
 import {
   resetWebSessionTabsSnapshotFreshnessForTests,
   type WebSessionTabsSyncState
@@ -24,6 +25,7 @@ export function resetWebSessionTabsSyncTestState(): void {
   resetWebSessionCloseIntentForTests()
   resetWebSessionReorderIntentForTests()
   resetWebAgentSessionHandoffsForTests()
+  resetStructuredTuiHandoffBindingsForTests()
 }
 
 export function layoutHasGroup(layout: TabGroupLayoutNode | undefined, groupId: string): boolean {

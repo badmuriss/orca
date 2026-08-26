@@ -127,7 +127,8 @@ describe('processless structured session reservation', () => {
             mintedAtFence: 1,
             observedAt: NOW
           }
-        })
+        }),
+      releaseAcquisition: vi.fn(async () => true)
     } as unknown as StructuredAgentSessionAdapter
     const input = {
       store,
@@ -150,6 +151,7 @@ describe('processless structured session reservation', () => {
     vi.spyOn(store, 'commitProcessIdentity').mockRejectedValueOnce(new Error('simulated crash'))
 
     await expect(performAttach(input)).rejects.toThrow('simulated crash')
+    expect(adapter.releaseAcquisition).toHaveBeenCalledWith({ sessionId: SESSION })
 
     const reopened = await AgentSessionRecordStore.open({ directory: storeDir, hostId: 'local' })
     expect(reopened.getRecord(SESSION)?.lease.processlessAt).toBeNull()

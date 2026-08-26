@@ -55,6 +55,20 @@ describe('structured agent session eviction', () => {
     ])
   })
 
+  it('uses disposal rather than handoff close when the chat is removed', async () => {
+    const ctx = context()
+    const closeSession = vi.fn(async () => {
+      throw new Error('resume cursor unavailable')
+    })
+    const disposeSession = vi.fn(async () => true)
+    ctx.adapter = { ...ctx.adapter, closeSession, disposeSession }
+
+    await evictStructuredAgentSession(ctx)
+
+    expect(disposeSession).toHaveBeenCalledWith('session-1')
+    expect(closeSession).not.toHaveBeenCalled()
+  })
+
   it('names every step, so a half-finished eviction says which one failed', () => {
     expect(STRUCTURED_AGENT_SESSION_EVICTION_STEPS.map((step) => step.name)).toEqual([
       'stop-provider-child',

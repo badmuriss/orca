@@ -58,6 +58,7 @@ function activeTerminalFacts(state: AppState, tab: Tab) {
   const agent =
     status?.agentType ??
     foregroundAgent ??
+    tab.agentSessionAgent ??
     terminal?.launchAgent ??
     resolveCommittedTitleAgentType(tab.label) ??
     resolveCommittedTitleAgentType(terminal?.title ?? '')

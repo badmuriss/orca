@@ -11,7 +11,7 @@ function retryInBackground(release: () => Promise<void>, onReleased: () => void)
 export async function releaseStructuredTuiAdoptionReservation(
   release: () => Promise<void>,
   onReleased: () => void
-): Promise<unknown | null> {
+): Promise<unknown> {
   let failure: unknown = null
   for (let attempt = 0; attempt < RELEASE_ATTEMPTS; attempt += 1) {
     try {

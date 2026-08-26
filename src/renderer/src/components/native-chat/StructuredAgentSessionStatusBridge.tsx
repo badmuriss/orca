@@ -13,6 +13,7 @@ import {
   type StructuredAgentSessionState
 } from '../../../../shared/structured-agent-session-reducer'
 import type { Tab } from '../../../../shared/tab-types'
+import { isAgentSessionHandleProvider } from '../../../../shared/agent-session-provider-handle'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { useAppStore } from '@/store'
 import { getActiveRuntimeTarget, type RuntimeClientTarget } from '@/runtime/runtime-rpc-client'
@@ -45,7 +46,7 @@ function projectStatus(
     {
       state: projection === 'working' ? 'working' : projection === 'attention' ? 'blocked' : 'done',
       prompt: latestPrompt(state),
-      agentType: tab.agentSessionAgent ?? 'codex',
+      agentType: tab.agentSessionAgent,
       sessionBoundary: projection === 'idle'
     },
     tab.label,
@@ -190,7 +191,11 @@ export function StructuredAgentSessionStatusBridge(): React.JSX.Element {
     useShallow((state) =>
       Object.values(state.unifiedTabsByWorktree)
         .flat()
-        .filter((tab): tab is StructuredTab => tab.contentType === 'agent-session')
+        .filter(
+          (tab): tab is StructuredTab =>
+            tab.contentType === 'agent-session' &&
+            isAgentSessionHandleProvider(tab.agentSessionAgent)
+        )
     )
   )
   return (

@@ -1,12 +1,22 @@
 import { createHash } from 'node:crypto'
+import { mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { AgentSessionJournalIdentity } from '../../shared/agent-session-journal-types'
 import { agentSessionProviderHandleChainHead } from '../../shared/agent-session-provider-handle'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import { resolveClaudeCommand } from '../codex-cli/command'
+import { writeFileAtomically } from '../codex-accounts/fs-utils'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
 import { getSpawnArgsForWindows } from '../win32-utils'
 
 export const CLAUDE_DEFAULT_SETTING_SOURCES = ['user', 'project', 'local'] as const
+
+const CLAUDE_SESSION_START_PROOF_SETTINGS = JSON.stringify({
+  hooks: {
+    SessionStart: [{ hooks: [{ type: 'command', command: 'exit 0' }] }]
+  }
+})
+const CLAUDE_SESSION_START_PROOF_SETTINGS_FILE = 'claude-session-start-proof.json'
 
 export const CLAUDE_STRUCTURED_BASE_ARGS = [
   '-p',
@@ -37,8 +47,18 @@ export type ClaudeStructuredLaunch = {
 export type ClaudeStructuredLaunchResolverDeps = {
   store: AgentSessionRecordStore
   resolveWorkspacePath: (workspaceId: string) => Promise<string>
+  settingsDirectory: string
   resolveCommand?: () => string
   resolveEnv?: () => Record<string, string>
+}
+
+export async function prepareClaudeSessionStartProofSettings(
+  settingsDirectory: string
+): Promise<string> {
+  await mkdir(settingsDirectory, { recursive: true, mode: 0o700 })
+  const settingsPath = join(settingsDirectory, CLAUDE_SESSION_START_PROOF_SETTINGS_FILE)
+  writeFileAtomically(settingsPath, CLAUDE_SESSION_START_PROOF_SETTINGS, { mode: 0o600 })
+  return settingsPath
 }
 
 export function claudeSessionIdForOrcaSession(sessionId: string): string {
@@ -81,9 +101,12 @@ export function createClaudeStructuredLaunchResolver(
         ? ['--resume', providerSessionId]
         : ['--session-id', providerSessionId]
     const command = (deps.resolveCommand ?? resolveClaudeCommand)()
+    const proofSettingsPath = await prepareClaudeSessionStartProofSettings(deps.settingsDirectory)
     const { spawnCmd, spawnArgs } = getSpawnArgsForWindows(command, [
       ...(record.launchArgs ?? []),
       ...CLAUDE_STRUCTURED_BASE_ARGS,
+      '--settings',
+      proofSettingsPath,
       ...providerArgs
     ])
     return {

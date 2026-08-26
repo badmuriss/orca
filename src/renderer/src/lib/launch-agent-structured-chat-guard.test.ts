@@ -17,6 +17,7 @@ const store = {
     agentDefaultEnv: {},
     activeRuntimeEnvironmentId: null,
     experimentalNativeChat: true,
+    experimentalStructuredNativeChat: true,
     openAgentTabsInChatByDefault: true
   },
   projects: [{ id: 'repo-1', localWindowsRuntimePreference: { kind: 'inherit-global' as const } }],
@@ -83,11 +84,17 @@ describe('structured chat adoption guard on the launch path', () => {
   })
 
   it('honors the persisted chat default by launching Codex directly as a structured session', async () => {
-    const { launchAgentInNewTab } = await import('./launch-agent-in-new-tab')
+    const { launchAgentInNewTab, shouldQueueTerminalFocusAfterMenuClose } =
+      await import('./launch-agent-in-new-tab')
 
     const result = launchAgentInNewTab({ agent: 'codex', worktreeId: 'wt-1' })
 
-    expect(result).toMatchObject({ tabId: null, pasteDraftAfterLaunch: false })
+    expect(result).toMatchObject({
+      tabId: null,
+      pasteDraftAfterLaunch: false,
+      focusAfterMenuClose: 'structured-session'
+    })
+    expect(shouldQueueTerminalFocusAfterMenuClose(result!)).toBe(false)
     expect(mockLaunchStructuredCodexSession).toHaveBeenCalledWith('wt-1')
     expect(mockCreateTab).not.toHaveBeenCalled()
     expect(mockWaitForAgentReady).not.toHaveBeenCalled()

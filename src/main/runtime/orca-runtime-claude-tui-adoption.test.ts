@@ -4,9 +4,11 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createStructuredAgentSessionOperationId } from '../../shared/structured-agent-session-mutation'
+import type * as SessionFileResolver from '../native-chat/session-file-resolver'
 import { StructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-host'
 import { setStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
 import type { AgentStatusIpcPayload } from '../../shared/agent-status-types'
+import { ClaudeTranscriptTailIncompleteError } from '../claude/claude-transcript-branch-proof'
 import { AgentSessionRecordStore } from './agent-session-record-store'
 import { agentSessionPtyWriteGate } from './agent-session-pty-write-gate'
 import { createStructuredAgentSessionOwnerProbe } from './structured-agent-session-runtime'
@@ -15,7 +17,23 @@ import { OrcaRuntimeService } from './orca-runtime'
 const { readStructuredTuiProcessIdentity } = vi.hoisted(() => ({
   readStructuredTuiProcessIdentity: vi.fn()
 }))
+const { readClaudeTranscriptLeafUuid, resolveSessionFilePath } = vi.hoisted(() => ({
+  readClaudeTranscriptLeafUuid:
+    vi.fn<
+      (
+        transcriptPath: string,
+        providerSessionId: string,
+        previousLeafUuid?: string | null
+      ) => Promise<string>
+    >(),
+  resolveSessionFilePath: vi.fn<typeof SessionFileResolver.resolveSessionFilePath>()
+}))
 vi.mock('./structured-tui-process-identity', () => ({ readStructuredTuiProcessIdentity }))
+vi.mock('../native-chat/session-file-resolver', async (importOriginal) => ({
+  ...(await importOriginal<typeof SessionFileResolver>()),
+  readClaudeTranscriptLeafUuid,
+  resolveSessionFilePath
+}))
 
 const WORKTREE_ID = 'repo-claude::/tmp/claude-adoption'
 const PTY_ID = 'pty-claude-adopt'
@@ -34,7 +52,22 @@ let host: StructuredAgentSessionHost
 
 async function writeTranscript(leafUuid = LEAF_UUID): Promise<void> {
   await mkdir(join(accountHome, 'projects', 'repo'), { recursive: true })
-  await writeFile(transcriptPath, `${JSON.stringify({ type: 'last-prompt', leafUuid })}\n`, 'utf8')
+  const records = leafUuid
+    ? [
+        {
+          type: 'assistant',
+          uuid: leafUuid,
+          parentUuid: null,
+          sessionId: PROVIDER_SESSION_ID
+        },
+        { type: 'last-prompt', leafUuid, sessionId: PROVIDER_SESSION_ID }
+      ]
+    : [{ type: 'last-prompt', leafUuid, sessionId: PROVIDER_SESSION_ID }]
+  await writeFile(
+    transcriptPath,
+    `${records.map((record) => JSON.stringify(record)).join('\n')}\n`,
+    'utf8'
+  )
 }
 
 function providerRow(overrides: Partial<AgentStatusIpcPayload> = {}): AgentStatusIpcPayload {
@@ -76,6 +109,15 @@ function adoptInput(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(async () => {
+  const actualSessionFileResolver = await vi.importActual<typeof SessionFileResolver>(
+    '../native-chat/session-file-resolver'
+  )
+  readClaudeTranscriptLeafUuid.mockReset()
+  readClaudeTranscriptLeafUuid.mockImplementation(
+    actualSessionFileResolver.readClaudeTranscriptLeafUuid
+  )
+  resolveSessionFilePath.mockReset()
+  resolveSessionFilePath.mockImplementation(actualSessionFileResolver.resolveSessionFilePath)
   root = await mkdtemp(join(tmpdir(), 'orca-claude-adoption-'))
   accountHome = join(root, 'claude-account')
   transcriptPath = join(accountHome, 'projects', 'repo', `${PROVIDER_SESSION_ID}.jsonl`)
@@ -196,7 +238,42 @@ describe('structured Claude legacy adoption', () => {
       ],
       lease: { runtimeKind: 'tui', claimStatus: 'live' }
     })
+    const processProof = readStructuredTuiProcessIdentity.mock.calls[0]?.[0] as {
+      processCommandMatches?: (command: string) => boolean
+    }
+    expect(processProof.processCommandMatches?.(`claude --resume ${PROVIDER_SESSION_ID}`)).toBe(
+      true
+    )
+    expect(processProof.processCommandMatches?.('claude --resume stale-session')).toBe(false)
   }, 20_000)
+
+  it('retries only a torn Claude transcript tail and preserves a completed diagnostic', async () => {
+    readClaudeTranscriptLeafUuid
+      .mockRejectedValueOnce(new ClaudeTranscriptTailIncompleteError())
+      .mockRejectedValueOnce(new Error('Claude transcript branch proof failed: malformed JSONL'))
+
+    await expect(
+      runtime.adoptStructuredAgentSessionTerminal(adoptInput(), {
+        callerKey: 'renderer-claude'
+      })
+    ).rejects.toThrow('malformed JSONL')
+    expect(readClaudeTranscriptLeafUuid).toHaveBeenCalledTimes(2)
+    expect(agentSessionPtyWriteGate.boundSessionId(PTY_ID)).toBeNull()
+  })
+
+  it('surfaces Claude ancestry errors immediately without retrying the transcript read', async () => {
+    readClaudeTranscriptLeafUuid.mockRejectedValue(
+      new Error('Claude transcript branch proof failed: latest marker is on a sibling branch')
+    )
+
+    await expect(
+      runtime.adoptStructuredAgentSessionTerminal(adoptInput(), {
+        callerKey: 'renderer-claude'
+      })
+    ).rejects.toThrow('sibling branch')
+    expect(readClaudeTranscriptLeafUuid).toHaveBeenCalledTimes(1)
+    expect(agentSessionPtyWriteGate.boundSessionId(PTY_ID)).toBeNull()
+  })
 
   it('rejects a provider row from a prior launch before ownership is attached', async () => {
     rows = [providerRow({ launchToken: 'old-launch' })]
@@ -216,7 +293,7 @@ describe('structured Claude legacy adoption', () => {
       runtime.adoptStructuredAgentSessionTerminal(adoptInput(), {
         callerKey: 'renderer-claude'
       })
-    ).rejects.toThrow('did not prove its transcript leaf')
+    ).rejects.toThrow('invalid last-prompt marker')
     expect(agentSessionPtyWriteGate.boundSessionId(PTY_ID)).toBeNull()
 
     const outsidePath = join(root, 'outside.jsonl')
@@ -271,6 +348,7 @@ describe('structured Claude legacy adoption', () => {
         handle: string
         paneKey: string
         sessionId: string
+        previousLeafUuid: string | null
         projectsDir: string
         spawnToken: string
         minimumProviderSessionReceivedAt: number
@@ -285,6 +363,7 @@ describe('structured Claude legacy adoption', () => {
       handle: 'term-claude-adopt',
       paneKey: PANE_KEY,
       sessionId: PROVIDER_SESSION_ID,
+      previousLeafUuid: null,
       projectsDir: join(accountHome, 'projects'),
       spawnToken: 'new-launch',
       minimumProviderSessionReceivedAt: Date.now()
@@ -293,4 +372,71 @@ describe('structured Claude legacy adoption', () => {
     rows = [providerRow({ launchToken: 'new-launch', receivedAt: Date.now() })]
     await expect(proof).resolves.toMatchObject({ leafUuid: 'leaf-advanced' })
   }, 5_000)
+
+  it('retries a transient torn final transcript line during launch proof', async () => {
+    const internal = runtime as unknown as {
+      getLivePtyForHandle(): { pty: { connected: boolean; paneKey: string; launchAgent: string } }
+      waitForStructuredClaudeTuiProof(input: {
+        handle: string
+        paneKey: string
+        sessionId: string
+        previousLeafUuid: string | null
+        projectsDir: string
+      }): Promise<{ leafUuid: string }>
+    }
+    internal.getLivePtyForHandle = vi.fn(() => ({
+      pty: { connected: true, paneKey: PANE_KEY, launchAgent: 'claude' }
+    }))
+    resolveSessionFilePath.mockResolvedValue(transcriptPath)
+    readClaudeTranscriptLeafUuid
+      .mockRejectedValueOnce(new ClaudeTranscriptTailIncompleteError())
+      .mockResolvedValueOnce('leaf-after-retry')
+
+    await expect(
+      internal.waitForStructuredClaudeTuiProof({
+        handle: 'term-claude-adopt',
+        paneKey: PANE_KEY,
+        sessionId: PROVIDER_SESSION_ID,
+        previousLeafUuid: null,
+        projectsDir: join(accountHome, 'projects')
+      })
+    ).resolves.toMatchObject({ leafUuid: 'leaf-after-retry' })
+    expect(readClaudeTranscriptLeafUuid).toHaveBeenCalledTimes(2)
+  })
+
+  it('fails closed with the malformed transcript diagnostic after the proof deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(1_800_000_000_000)
+      const internal = runtime as unknown as {
+        getLivePtyForHandle(): { pty: { connected: boolean; paneKey: string; launchAgent: string } }
+        waitForStructuredClaudeTuiProof(input: {
+          handle: string
+          paneKey: string
+          sessionId: string
+          previousLeafUuid: string | null
+          projectsDir: string
+        }): Promise<{ leafUuid: string }>
+      }
+      internal.getLivePtyForHandle = vi.fn(() => ({
+        pty: { connected: true, paneKey: PANE_KEY, launchAgent: 'claude' }
+      }))
+      resolveSessionFilePath.mockResolvedValue(transcriptPath)
+      readClaudeTranscriptLeafUuid.mockRejectedValue(new ClaudeTranscriptTailIncompleteError())
+      const proof = internal.waitForStructuredClaudeTuiProof({
+        handle: 'term-claude-adopt',
+        paneKey: PANE_KEY,
+        sessionId: PROVIDER_SESSION_ID,
+        previousLeafUuid: null,
+        projectsDir: join(accountHome, 'projects')
+      })
+      const rejection = expect(proof).rejects.toThrow('malformed JSONL')
+
+      await vi.advanceTimersByTimeAsync(15_100)
+      await rejection
+      expect(readClaudeTranscriptLeafUuid.mock.calls.length).toBeGreaterThan(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

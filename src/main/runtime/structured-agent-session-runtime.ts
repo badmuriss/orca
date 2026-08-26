@@ -35,6 +35,11 @@ import { readEchoedAgentSessionSpawnToken } from './agent-session-spawn-token-re
 import { agentSessionPtyWriteGate } from './agent-session-pty-write-gate'
 import { resolveLoginShellEnvironment } from '../startup/login-shell-environment'
 import { recordAgentSessionProviderHandle } from './agent-session-provider-handle-transition'
+import {
+  readClaudeTranscriptLeafUuid,
+  resolveSessionFilePath
+} from '../native-chat/session-file-resolver'
+import { retryClaudeTranscriptTailRead } from '../claude/claude-transcript-branch-proof'
 
 /** Sibling of the journal tree rather than inside it: one file adjudicates every
  *  session's lease, while a journal is per session. */
@@ -120,6 +125,26 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
   })
   agentSessionPtyWriteGate.attachRecordLookup((sessionId) => store.getRecord(sessionId))
   try {
+    const proveClaudeTranscriptCursor = async (input: {
+      providerSessionId: string
+      previousLeafUuid: string | null
+      record: AgentSessionRecord
+    }): Promise<string> => {
+      const projectsDir = join(input.record.accountHome.path, 'projects')
+      const transcriptPath = await resolveSessionFilePath('claude', input.providerSessionId, {
+        claudeProjectsDir: projectsDir
+      })
+      if (!transcriptPath) {
+        throw new Error('Claude did not publish its durable transcript.')
+      }
+      return retryClaudeTranscriptTailRead(() =>
+        readClaudeTranscriptLeafUuid(
+          transcriptPath,
+          input.providerSessionId,
+          input.previousLeafUuid
+        )
+      )
+    }
     const codex = new CodexStructuredSessionAdapter({
       resolveLaunch: createCodexStructuredLaunchResolver({
         store,
@@ -134,6 +159,7 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
       resolveLaunch: createClaudeStructuredLaunchResolver({
         store,
         resolveWorkspacePath: deps.resolveWorkspacePath,
+        settingsDirectory: join(deps.stateDirectory, 'agent-session-launch-settings'),
         ...(deps.resolveClaudeCommand ? { resolveCommand: deps.resolveClaudeCommand } : {}),
         ...(deps.resolveClaudeLaunchEnv ? { resolveEnv: deps.resolveClaudeLaunchEnv } : {})
       }),
@@ -141,11 +167,25 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
       ...(deps.readClaudeProcessStartTime
         ? { readProcessStartTime: deps.readClaudeProcessStartTime }
         : {}),
-      persistHandle: async ({ sessionId, providerSessionId, leafUuid }) => {
+      proveTranscriptCursor: async ({ sessionId, providerSessionId, previousLeafUuid }) => {
+        const record = store.getRecord(sessionId)
+        if (!record) {
+          throw new Error(`no durable agent-session record for ${sessionId}`)
+        }
+        return proveClaudeTranscriptCursor({ providerSessionId, previousLeafUuid, record })
+      },
+      persistHandle: async ({ sessionId, providerSessionId }) => {
         const current = store.getRecord(sessionId)
         if (!current) {
-          return
+          throw new Error(`no durable agent-session record for ${sessionId}`)
         }
+        const head = current.providerHandleChain.at(-1)
+        const previousLeafUuid = head?.handle.provider === 'claude' ? head.handle.leafUuid : null
+        const leafUuid = await proveClaudeTranscriptCursor({
+          providerSessionId,
+          previousLeafUuid,
+          record: current
+        })
         const effectiveFence = current.lease.runtimeFence
         const link = {
           linkId: `claude-${effectiveFence}-${providerSessionId}-${leafUuid ?? 'empty'}`.slice(
@@ -165,6 +205,7 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
             now: Date.now()
           })
         )
+        return leafUuid
       }
     })
     const adapter = new StructuredAgentSessionAdapterRouter({ codex, claude }, async () => {

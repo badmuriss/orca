@@ -12,6 +12,7 @@ import { closeTerminalTab } from '../terminal/terminal-tab-actions'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { browserWorkspaceHasRemoteOwner } from '@/runtime/remote-browser-tab-ownership'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
+import { closeStructuredAgentSession } from '@/runtime/structured-agent-session-close'
 import { toRuntimeWorktreeSelector } from '@/runtime/runtime-worktree-selector'
 import { translate } from '@/i18n/i18n'
 
@@ -33,7 +34,6 @@ export function useTabGroupTabCloseCommands({
   groupTabs: Tab[]
 }) {
   const closeUnifiedTab = useAppStore((state) => state.closeUnifiedTab)
-  const closeTab = useAppStore((state) => state.closeTab)
   const closeFile = useAppStore((state) => state.closeFile)
   const closeBrowserTab = useAppStore((state) => state.closeBrowserTab)
   const setActiveWorktree = useAppStore((state) => state.setActiveWorktree)
@@ -94,11 +94,14 @@ export function useTabGroupTabCloseCommands({
         const target = getActiveRuntimeTarget({
           activeRuntimeEnvironmentId: runtimeEnvironmentId
         })
-        void callRuntimeRpc(target, 'session.tabs.close', {
-          worktree: toRuntimeWorktreeSelector(worktreeId),
-          tabId: `agent-session:${item.entityId}`,
-          reason: 'user'
-        })
+        void closeStructuredAgentSession(target, item.entityId)
+          .then(() =>
+            callRuntimeRpc(target, 'session.tabs.close', {
+              worktree: toRuntimeWorktreeSelector(worktreeId),
+              tabId: `agent-session:${item.entityId}`,
+              reason: 'user'
+            })
+          )
           .then(() => {
             closeUnifiedTab(item.id)
             if (!opts?.skipEmptyCheck) {
@@ -174,11 +177,14 @@ export function useTabGroupTabCloseCommands({
           const target = getActiveRuntimeTarget({
             activeRuntimeEnvironmentId: runtimeEnvironmentId
           })
-          void callRuntimeRpc(target, 'session.tabs.close', {
-            worktree: toRuntimeWorktreeSelector(worktreeId),
-            tabId: `agent-session:${item.entityId}`,
-            reason: 'user'
-          })
+          void closeStructuredAgentSession(target, item.entityId)
+            .then(() =>
+              callRuntimeRpc(target, 'session.tabs.close', {
+                worktree: toRuntimeWorktreeSelector(worktreeId),
+                tabId: `agent-session:${item.entityId}`,
+                reason: 'user'
+              })
+            )
             .then(() => closeUnifiedTab(item.id))
             .catch(reportStructuredSessionCloseError)
           continue
@@ -210,7 +216,7 @@ export function useTabGroupTabCloseCommands({
           closeBrowserTab(item.entityId)
           closeUnifiedTab(item.id)
         } else if (item.contentType === 'terminal') {
-          closeTab(item.entityId)
+          closeTerminalTab(item.entityId, { skipRunningProcessConfirm: true })
         } else if (item.contentType === 'simulator') {
           closeUnifiedTab(item.id)
         } else {
@@ -221,7 +227,7 @@ export function useTabGroupTabCloseCommands({
         }
       }
     },
-    [closeBrowserTab, closeEditorIfUnreferenced, closeTab, closeUnifiedTab, groupTabs, worktreeId]
+    [closeBrowserTab, closeEditorIfUnreferenced, closeUnifiedTab, groupTabs, worktreeId]
   )
 
   return { closeItem, closeMany, leaveWorktreeIfEmpty }

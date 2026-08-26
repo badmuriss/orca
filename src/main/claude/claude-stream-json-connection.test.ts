@@ -181,6 +181,8 @@ describe('Claude stream-json connection', () => {
     await vi.advanceTimersByTimeAsync(3_000)
 
     await expect(closing).resolves.toBe(false)
+    process.child.emit('close')
+    await expect(connection.close()).resolves.toBe(true)
   })
 
   it('settles concurrent and repeated closes after spawn failure exit proof', async () => {

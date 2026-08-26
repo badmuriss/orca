@@ -134,4 +134,16 @@ describe('StructuredAgentSessionStatusBridge', () => {
       terminalResumeEligible: false
     })
   })
+
+  it('does not project an unknown provider as Codex', async () => {
+    mocks.store?.setState({
+      unifiedTabsByWorktree: {
+        'wt-1': [{ ...structuredTab, agentSessionAgent: 'gemini' }]
+      }
+    })
+    render(<StructuredAgentSessionStatusBridge />)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(mocks.call).not.toHaveBeenCalled()
+    expect(mocks.setAgentStatus).not.toHaveBeenCalled()
+  })
 })

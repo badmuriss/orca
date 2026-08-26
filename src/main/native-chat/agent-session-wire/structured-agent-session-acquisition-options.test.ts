@@ -168,7 +168,7 @@ describe('structured session acquisition options', () => {
       directory: join(root, 'store'),
       hostId: 'local'
     })
-    const releaseAcquisition = vi.fn(async () => undefined)
+    const releaseAcquisition = vi.fn(async () => true)
     const failingAdapter: StructuredAgentSessionAdapter = {
       ...adapter({ origin: 'created' }),
       readOptions: vi.fn(async () => {

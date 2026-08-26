@@ -9,6 +9,8 @@ import type { ClaudeSession } from './claude-structured-session-state'
 function sessionFor(send = vi.fn().mockResolvedValue(undefined)): ClaudeSession {
   return {
     connection: { send } as unknown as ClaudeSession['connection'],
+    ended: false,
+    closePromise: null,
     providerSessionId: 'provider-session',
     leafUuid: null,
     fence: 1,

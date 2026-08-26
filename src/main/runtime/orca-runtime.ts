@@ -107,12 +107,7 @@ import {
 import { codexProviderHandleLink } from '../codex/codex-structured-owner-identity'
 import { claudeProviderHandleLink } from '../claude/claude-structured-owner-identity'
 import { resolveClaudeCommand } from '../codex-cli/command'
-import {
-  beginAdoptedCodexReadinessWatch,
-  type AdoptedCodexReadinessEvent,
-  type AdoptedCodexReadinessWatch
-} from '../codex/adopted-codex-tui-readiness'
-import { AGENT_HOOK_SESSION_NONCE_ENV_VAR } from '../../shared/agent-hook-session-nonce'
+import { readCodexResumeProcessIdentity } from '../codex/codex-resume-process-proof'
 import { withInlineEnvAssignments } from '../../shared/inline-env-command-prefix'
 import {
   proveCodexTuiRollout,
@@ -130,6 +125,10 @@ import {
   readClaudeTranscriptLeafUuid,
   resolveSessionFilePath
 } from '../native-chat/session-file-resolver'
+import {
+  ClaudeTranscriptTailIncompleteError,
+  retryClaudeTranscriptTailRead
+} from '../claude/claude-transcript-branch-proof'
 import { StructuredTuiAdoptionInflight } from './structured-tui-adoption-inflight'
 import { releaseStructuredTuiAdoptionReservation } from './structured-tui-adoption-reservation-release'
 import { hasStructuredTuiIdleEvidence } from './structured-tui-idle-evidence'
@@ -3722,9 +3721,6 @@ export class OrcaRuntimeService {
       }) => AgentHookAuthorityAttestation | null)
     | null
   private readonly retireAgentHookCompatibilityAuthorityFn: ((paneKey: string) => void) | null
-  private readonly subscribeAgentHookEventsFn:
-    | ((listener: (event: AdoptedCodexReadinessEvent) => void) => () => void)
-    | null
   private readonly canRecoverPersistentLocalPtysFn: () => boolean
   private readonly buildAgentHookPtyEnv: (() => Record<string, string>) | null
   private readonly getDesktopWindowStatusFn: () => RuntimeDesktopWindowStatus
@@ -3809,12 +3805,6 @@ export class OrcaRuntimeService {
         terminalProvenance: 'current_runtime' | 'restored'
       }) => AgentHookAuthorityAttestation | null
       retireAgentHookCompatibilityAuthority?: (paneKey: string) => void
-      /** Live tap on accepted agent hook events. The adopted-Codex return path uses
-       *  it to take the resumed CLI's own SessionStart as its readiness proof
-       *  instead of scraping the pane. */
-      subscribeAgentHookEvents?: (
-        listener: (event: AdoptedCodexReadinessEvent) => void
-      ) => () => void
       canRecoverPersistentLocalPtys?: () => boolean
       // Why: codex-home paths for the Agent Session History scan must be sourced
       // here, not via the window-only registerCoreHandlers path — that path never
@@ -3861,7 +3851,6 @@ export class OrcaRuntimeService {
       deps?.attestAgentHookCompatibilityAuthority ?? null
     this.retireAgentHookCompatibilityAuthorityFn =
       deps?.retireAgentHookCompatibilityAuthority ?? null
-    this.subscribeAgentHookEventsFn = deps?.subscribeAgentHookEvents ?? null
     this.canRecoverPersistentLocalPtysFn = deps?.canRecoverPersistentLocalPtys ?? (() => true)
     // Why: configure the shared AiVault scan cache from a serve-mode-reachable
     // seam so the aiVault.listSessions RPC includes managed-Codex + WSL sessions
@@ -10755,12 +10744,20 @@ export class OrcaRuntimeService {
               paneKey: terminal.paneKey,
               ptyId: terminal.ptyId
             },
-            process: await readStructuredTuiProcessIdentity({
-              hostId: record.location.executionHostId,
-              rootPid: terminal.processId,
-              spawnToken,
-              agent: provider
-            }),
+            process:
+              provider === 'codex'
+                ? await readCodexResumeProcessIdentity({
+                    hostId: record.location.executionHostId,
+                    rootPid: terminal.processId,
+                    spawnToken,
+                    threadId: head.handle.threadId
+                  })
+                : await readStructuredTuiProcessIdentity({
+                    hostId: record.location.executionHostId,
+                    rootPid: terminal.processId,
+                    spawnToken,
+                    agent: provider
+                  }),
             link:
               provider === 'codex'
                 ? codexProviderHandleLink({
@@ -10784,18 +10781,16 @@ export class OrcaRuntimeService {
           })
           const proof =
             provider === 'codex'
-              ? await this.waitForStructuredTuiProof({
-                  handle: terminal.handle,
-                  paneKey: terminal.paneKey,
+              ? await this.waitForAdoptedStructuredTuiProof({
+                  owner: spawnedOwner,
                   threadId: head.handle.threadId,
-                  spawnToken,
-                  codexHome: record.accountHome.path,
-                  sessionId: record.sessionId
+                  codexHome: record.accountHome.path
                 })
               : await this.waitForStructuredClaudeTuiProof({
                   handle: terminal.handle,
                   paneKey: terminal.paneKey,
                   sessionId: head.handle.sessionId,
+                  previousLeafUuid: head.handle.leafUuid,
                   projectsDir: join(record.accountHome.path, 'projects'),
                   spawnToken,
                   minimumProviderSessionReceivedAt: launchStartedAt
@@ -10897,6 +10892,7 @@ export class OrcaRuntimeService {
             handle: current.terminal.handle,
             paneKey: current.terminal.paneKey,
             sessionId: head.handle.sessionId,
+            previousLeafUuid: head.handle.leafUuid,
             projectsDir: join(record.accountHome.path, 'projects')
           })
           return {
@@ -11081,6 +11077,7 @@ export class OrcaRuntimeService {
                 handle,
                 paneKey: candidate.paneKey,
                 sessionId: head.handle.sessionId,
+                previousLeafUuid: head.handle.leafUuid,
                 projectsDir: join(record.accountHome.path, 'projects')
               })
         return {
@@ -11279,153 +11276,133 @@ export class OrcaRuntimeService {
     if (!startup || !pty.paneKey) {
       throw new Error(`The adopted terminal could not resume ${provider}.`)
     }
-    // A Codex resume needs its SessionStart listener; Claude uses the provider-row proof below.
-    const subscribeAgentHookEvents = this.subscribeAgentHookEventsFn
+    const proofStartedAt = Date.now()
+    const resumeCommand = withInlineEnvAssignments({
+      command: startup.launchCommand,
+      env: {
+        ORCA_AGENT_LAUNCH_TOKEN: input.spawnToken
+      },
+      platform,
+      shell
+    })
     if (
-      provider === 'codex' &&
-      (!subscribeAgentHookEvents ||
-        settings.agentStatusHooksEnabled === false ||
-        settings.disabledTuiAgents?.includes(provider) === true)
+      !this.ptyController?.writeAgentSessionProof?.(pty.ptyId, `${resumeCommand}\r`, {
+        sessionId: input.record.sessionId,
+        spawnToken: input.spawnToken
+      })
     ) {
-      throw new Error(
-        `Agent status hooks are off, so ${provider} cannot confirm the resumed session.`
-      )
+      throw new Error(`The adopted terminal could not resume ${provider}.`)
     }
-    // Open the Codex watch before writing: a warm process can post SessionStart immediately.
-    const sessionNonce = provider === 'codex' ? randomUUID() : null
-    const readiness =
+    const listing = (await this.ptyController.listProcesses?.())?.find(
+      (candidate) =>
+        candidate.id === pty.ptyId &&
+        (!pty.incarnationId || candidate.incarnationId === pty.incarnationId)
+    )
+    if (!listing?.rootProcessId) {
+      throw new Error('The adopted terminal did not publish a process identity.')
+    }
+    const process =
       provider === 'codex'
-        ? beginAdoptedCodexReadinessWatch({
-            subscribe: subscribeAgentHookEvents!,
-            target: {
-              paneKey: pty.paneKey,
-              threadId: head.handle.threadId,
-              sessionNonce: sessionNonce!
-            }
+        ? await readCodexResumeProcessIdentity({
+            hostId: input.record.location.executionHostId,
+            rootPid: listing.rootProcessId,
+            spawnToken: input.spawnToken,
+            threadId: head.handle.threadId,
+            excludedProcessTreeRootIdentities: [
+              {
+                pid: input.owner.process.pid,
+                processStartTimeMs: input.owner.process.processStartTimeMs
+              }
+            ]
           })
-        : null
-    // Why: a throw between here and the await would otherwise leave the watch's
-    // timeout rejection unhandled.
-    void readiness?.settled.catch(() => {})
-    let proved = false
-    try {
-      const proofStartedAt = Date.now()
-      const resumeCommand = withInlineEnvAssignments({
-        command: startup.launchCommand,
-        env: {
-          ORCA_AGENT_LAUNCH_TOKEN: input.spawnToken,
-          ...(sessionNonce ? { [AGENT_HOOK_SESSION_NONCE_ENV_VAR]: sessionNonce } : {})
-        },
-        platform,
-        shell
-      })
-      if (
-        !this.ptyController?.writeAgentSessionProof?.(pty.ptyId, `${resumeCommand}\r`, {
-          sessionId: input.record.sessionId,
-          spawnToken: input.spawnToken
-        })
-      ) {
-        throw new Error(`The adopted terminal could not resume ${provider}.`)
-      }
-      const listing = (await this.ptyController.listProcesses?.())?.find(
-        (candidate) =>
-          candidate.id === pty.ptyId &&
-          (!pty.incarnationId || candidate.incarnationId === pty.incarnationId)
-      )
-      if (!listing?.rootProcessId) {
-        throw new Error('The adopted terminal did not publish a process identity.')
-      }
-      const process = await readStructuredTuiProcessIdentity({
-        hostId: input.record.location.executionHostId,
-        rootPid: listing.rootProcessId,
-        spawnToken: input.spawnToken,
-        agent: provider
-      })
-      const owner: StructuredTuiOwner = {
-        ...input.owner,
-        process,
-        link:
-          provider === 'claude'
-            ? claudeProviderHandleLink({
-                sessionId: head.handle.sessionId,
-                leafUuid: head.handle.leafUuid,
-                resumed: true,
-                fence: input.fence,
-                observedAt: Date.now()
-              })
-            : codexProviderHandleLink({
-                threadId: head.handle.threadId,
-                resumed: true,
-                fence: input.fence,
-                observedAt: Date.now()
-              })
-      }
-      await input.onSpawned?.(owner)
-      const proof =
+        : await readStructuredTuiProcessIdentity({
+            hostId: input.record.location.executionHostId,
+            rootPid: listing.rootProcessId,
+            spawnToken: input.spawnToken,
+            agent: provider
+          })
+    const owner: StructuredTuiOwner = {
+      ...input.owner,
+      process,
+      link:
         provider === 'claude'
-          ? await this.waitForStructuredClaudeTuiProof({
-              handle: owner.terminal.handle,
-              paneKey: owner.terminal.paneKey,
+          ? claudeProviderHandleLink({
               sessionId: head.handle.sessionId,
-              projectsDir: join(input.record.accountHome.path, 'projects'),
-              spawnToken: input.spawnToken,
-              minimumProviderSessionReceivedAt: proofStartedAt
+              leafUuid: head.handle.leafUuid,
+              resumed: true,
+              fence: input.fence,
+              observedAt: Date.now()
             })
-          : await this.waitForAdoptedStructuredTuiProof({
-              owner,
-              readiness: readiness!,
+          : codexProviderHandleLink({
               threadId: head.handle.threadId,
-              codexHome: input.record.accountHome.path
+              resumed: true,
+              fence: input.fence,
+              observedAt: Date.now()
             })
-      // The resumed child now owns this pane under the handoff token; future hook rows and
-      // adoption attempts must bind to this incarnation rather than the stopped process.
-      pty.launchToken = input.spawnToken
-      pty.launchIncarnationId = pty.incarnationId
-      pty.launchAgent = provider
-      proved = true
-      const provenOwner = {
-        ...owner,
-        ...(provider === 'claude'
-          ? {
-              link: claudeProviderHandleLink({
-                sessionId: head.handle.sessionId,
-                leafUuid: proof.leafUuid ?? null,
-                resumed: true,
-                fence: input.fence,
-                observedAt: Date.now()
-              })
-            }
-          : {}),
-        transcriptPath: proof.transcriptPath
-      }
-      this.adoptedStructuredTuiOwners.set(input.record.sessionId, provenOwner)
-      return provenOwner
-    } finally {
-      if (!proved) {
-        readiness?.dispose()
-      }
     }
+    await input.onSpawned?.(owner)
+    const proof =
+      provider === 'claude'
+        ? await this.waitForStructuredClaudeTuiProof({
+            handle: owner.terminal.handle,
+            paneKey: owner.terminal.paneKey,
+            sessionId: head.handle.sessionId,
+            previousLeafUuid: head.handle.leafUuid,
+            projectsDir: join(input.record.accountHome.path, 'projects'),
+            spawnToken: input.spawnToken,
+            minimumProviderSessionReceivedAt: proofStartedAt
+          })
+        : await this.waitForAdoptedStructuredTuiProof({
+            owner,
+            threadId: head.handle.threadId,
+            codexHome: input.record.accountHome.path
+          })
+    // The resumed child now owns this pane under the handoff token; future hook rows and
+    // adoption attempts must bind to this incarnation rather than the stopped process.
+    pty.launchToken = input.spawnToken
+    pty.launchIncarnationId = pty.incarnationId
+    pty.launchAgent = provider
+    const provenOwner = {
+      ...owner,
+      ...(provider === 'claude'
+        ? {
+            link: claudeProviderHandleLink({
+              sessionId: head.handle.sessionId,
+              leafUuid: proof.leafUuid ?? null,
+              resumed: true,
+              fence: input.fence,
+              observedAt: Date.now()
+            })
+          }
+        : {}),
+      transcriptPath: proof.transcriptPath
+    }
+    this.adoptedStructuredTuiOwners.set(input.record.sessionId, provenOwner)
+    return provenOwner
   }
 
-  // Why nothing is typed at the pane here: the old proof pasted `/status` and
-  // scraped the tail for a session id, which cannot run until Codex is already up
-  // and cannot tell a ready shell from a ready Codex. The CLI's own SessionStart
-  // hook answers both questions off-screen, so this only has to wait for it and
-  // then name the rollout the thread already owns on disk.
+  // The new exact `codex resume <thread>` child proves the resumed owner without
+  // a first turn; the pinned rollout then binds its durable transcript.
   private async waitForAdoptedStructuredTuiProof(input: {
     owner: StructuredTuiOwner
-    readiness: AdoptedCodexReadinessWatch
     threadId: string
     codexHome: string
   }): Promise<{ transcriptPath: string; leafUuid?: never }> {
-    await input.readiness.settled
-    const pty = this.ptysById.get(input.owner.terminal.ptyId)
-    if (!pty?.connected || pty.paneKey !== input.owner.terminal.paneKey) {
-      throw new Error('The adopted terminal lost its pane identity.')
+    const assertPaneIdentity = (): void => {
+      const pty = this.ptysById.get(input.owner.terminal.ptyId)
+      if (!pty?.connected || pty.paneKey !== input.owner.terminal.paneKey) {
+        throw new Error('The adopted terminal lost its pane identity.')
+      }
     }
+    assertPaneIdentity()
     const transcriptPath = await resolvePinnedCodexRolloutProof(input.codexHome, input.threadId)
     if (!transcriptPath) {
       throw new Error('The agent terminal did not prove the expected Codex rollout.')
+    }
+    assertPaneIdentity()
+    const processProof = await probeAgentSessionProcessIdentity({ identity: input.owner.process })
+    if (processProof.outcome !== 'identity-matched' || processProof.matchedOn.length === 0) {
+      throw new Error('The resumed Codex process could not be re-proved.')
     }
     return { transcriptPath }
   }
@@ -11633,12 +11610,14 @@ export class OrcaRuntimeService {
     handle: string
     paneKey: string
     sessionId: string
+    previousLeafUuid: string | null
     projectsDir: string
     /** Set when this call launched a new Claude process; a cached transcript marker is not enough. */
     spawnToken?: string
     minimumProviderSessionReceivedAt?: number
   }): Promise<{ transcriptPath: string; leafUuid: string }> {
     const deadline = Date.now() + 15_000
+    let incompleteTail: ClaudeTranscriptTailIncompleteError | null = null
     while (Date.now() < deadline) {
       const pty = this.getLivePtyForHandle(input.handle)?.pty
       if (!pty?.connected || pty.paneKey !== input.paneKey || pty.launchAgent !== 'claude') {
@@ -11670,13 +11649,24 @@ export class OrcaRuntimeService {
         if (!isPathWithinDirectory(input.projectsDir, transcriptPath)) {
           throw new Error('The Claude terminal reported a transcript outside its account root.')
         }
-        const leafUuid = await readClaudeTranscriptLeafUuid(transcriptPath)
-        if (!leafUuid) {
-          throw new Error('The Claude terminal did not prove its transcript leaf.')
+        try {
+          const leafUuid = await readClaudeTranscriptLeafUuid(
+            transcriptPath,
+            input.sessionId,
+            input.previousLeafUuid
+          )
+          return { transcriptPath, leafUuid }
+        } catch (error) {
+          if (!(error instanceof ClaudeTranscriptTailIncompleteError)) {
+            throw error
+          }
+          incompleteTail = error
         }
-        return { transcriptPath, leafUuid }
       }
       await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    if (incompleteTail) {
+      throw incompleteTail
     }
     throw new Error('The agent terminal did not prove the expected Claude session.')
   }
@@ -11931,7 +11921,14 @@ export class OrcaRuntimeService {
         hostId: intent.location.executionHostId,
         rootPid: rootProcessId,
         spawnToken,
-        agent: provider
+        agent: provider,
+        ...(provider === 'claude' && providerSessionId
+          ? {
+              // Claude can leave an older child under the same shell. The fresh
+              // session id is the only provider-qualified argv proof available here.
+              processCommandMatches: (command: string) => command.includes(providerSessionId)
+            }
+          : {})
       })
     const process = await readProcess()
     let threadId = input.threadId ?? input.providerSessionId
@@ -11980,10 +11977,9 @@ export class OrcaRuntimeService {
       if (!isPathWithinDirectory(join(intent.accountHome.path, 'projects'), transcriptPath)) {
         throw new Error('The Claude terminal reported a transcript outside its account root.')
       }
-      leafUuid = await readClaudeTranscriptLeafUuid(transcriptPath)
-      if (!leafUuid) {
-        throw new Error('The Claude terminal did not prove its transcript leaf.')
-      }
+      leafUuid = await retryClaudeTranscriptTailRead(() =>
+        readClaudeTranscriptLeafUuid(transcriptPath!, providerSessionId!, null)
+      )
     } else if (threadId) {
       const proof = await proveCodexTuiRollout({ ...proofInput, threadId })
       transcriptPath = proof.transcriptPath
@@ -35156,16 +35152,28 @@ export class OrcaRuntimeService {
     if (preservedTabs.length === 0) {
       return snapshot
     }
+    const preservedActiveTab = preservedTabs.find(
+      (tab) => tab.id === existing.activeTabId && tab.isActive
+    )
     const hasIncomingActiveTab = snapshot.tabs.some((tab) => tab.isActive)
     const normalizedPreservedTabs = preservedTabs.map((tab) =>
-      hasIncomingActiveTab ? { ...tab, isActive: false } : tab
+      hasIncomingActiveTab && !preservedActiveTab ? { ...tab, isActive: false } : tab
     )
-    const tabs = this.mergeMobileSessionSnapshotTabs(snapshot.tabs, normalizedPreservedTabs)
+    // Why: an omitting renderer frame predates the runtime-owned structured
+    // publication, so it cannot revoke that publication's focus intent.
+    const normalizedIncomingTabs = preservedActiveTab
+      ? snapshot.tabs.map((tab) => (tab.isActive ? { ...tab, isActive: false } : tab))
+      : snapshot.tabs
+    const tabs = this.mergeMobileSessionSnapshotTabs(
+      normalizedIncomingTabs,
+      normalizedPreservedTabs
+    )
     if (tabs.length === snapshot.tabs.length) {
       return snapshot
     }
     const activeTab =
-      snapshot.tabs.find((tab) => tab.id === snapshot.activeTabId) ??
+      preservedActiveTab ??
+      normalizedIncomingTabs.find((tab) => tab.id === snapshot.activeTabId) ??
       tabs.find((tab) => tab.id === existing.activeTabId) ??
       tabs.find((tab) => tab.isActive) ??
       tabs[0] ??

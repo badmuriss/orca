@@ -8,11 +8,19 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import type { AgentSessionOwnerProbe } from '../../../shared/agent-session-lease-adjudication'
-import type { AgentSessionSubscribeEvent } from '../../../shared/agent-session-wire'
+import { computeAgentSessionPayloadFingerprint } from '../../../shared/agent-session-mutation-envelope'
+import type {
+  AgentSessionHandoffRequest,
+  AgentSessionSubscribeEvent
+} from '../../../shared/agent-session-wire'
 import { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
 import type { StructuredAgentSessionAdapter } from './structured-agent-session-adapter'
 import type { StructuredAgentSessionEventSink } from './structured-agent-session-event-sink'
 import { StructuredAgentSessionHost } from './structured-agent-session-host'
+import type {
+  StructuredAgentSessionHandoffTransport,
+  StructuredTuiOwner
+} from './structured-agent-session-handoff-types'
 import {
   HOST_TEST_NOW as NOW,
   HOST_TEST_SESSION as SESSION,
@@ -33,12 +41,13 @@ let acquire: Mock<StructuredAgentSessionAdapter['acquire']>
 let closeSession: Mock<NonNullable<StructuredAgentSessionAdapter['closeSession']>>
 let sink: StructuredAgentSessionEventSink | null
 let hostErrors: unknown[]
+let closeTuiOwner: Mock<NonNullable<StructuredAgentSessionHandoffTransport['closeTuiOwner']>>
 
 function adapter(): StructuredAgentSessionAdapter {
   return {
     acquire,
     closeSession,
-    releaseAcquisition: vi.fn(async () => undefined),
+    releaseAcquisition: vi.fn(async () => true),
     dispatch: vi.fn(async () => ({ state: 'rejected' as const, reason: 'unused' })),
     cancelTurn: vi.fn(async () => ({ cancelled: false })),
     answerPrompt: vi.fn(async () => undefined),
@@ -46,7 +55,10 @@ function adapter(): StructuredAgentSessionAdapter {
   }
 }
 
-function openHost(probeOwner?: (record: never) => Promise<AgentSessionOwnerProbe>): void {
+function openHost(
+  probeOwner?: (record: never) => Promise<AgentSessionOwnerProbe>,
+  handoffTransport?: StructuredAgentSessionHandoffTransport
+): void {
   host = new StructuredAgentSessionHost({
     store,
     adapter: adapter(),
@@ -56,7 +68,8 @@ function openHost(probeOwner?: (record: never) => Promise<AgentSessionOwnerProbe
     releaseGraceMs: GRACE_MS,
     now: () => NOW,
     onEventSinkError: ({ error }) => hostErrors.push(error),
-    ...(probeOwner ? { probeOwner: probeOwner as never } : {})
+    ...(probeOwner ? { probeOwner: probeOwner as never } : {}),
+    ...(handoffTransport ? { handoffTransport } : {})
   })
 }
 
@@ -184,6 +197,97 @@ describe('a session with a turn in flight', () => {
     await host.flushStreamedEvents(SESSION)
 
     await waitForEviction()
+  })
+})
+
+describe('a structured session whose TUI surface is not published', () => {
+  function handoffRequest(): AgentSessionHandoffRequest {
+    const fields = { direction: 'to-tui' as const, mode: 'now' as const, action: 'start' as const }
+    return {
+      envelope: {
+        sessionId: SESSION,
+        clientOperationId: `${NOW}-${'a'.repeat(32)}`,
+        expectedRuntimeFence: store.getRecord(SESSION)?.lease.runtimeFence ?? 1,
+        payloadFingerprint: computeAgentSessionPayloadFingerprint({
+          method: 'agentSession.requestHandoff',
+          sessionId: SESSION,
+          fields
+        })
+      },
+      ...fields
+    }
+  }
+
+  function tuiOwner(spawnToken: string): StructuredTuiOwner {
+    return {
+      terminal: {
+        handle: 'tui-handle-1',
+        tabId: 'tui-tab-1',
+        paneKey: 'tui-tab-1:tui-pane-1',
+        ptyId: 'tui-pty-1'
+      },
+      process: {
+        hostId: 'local',
+        pid: 4343,
+        processStartTimeMs: NOW,
+        spawnToken
+      },
+      link: {
+        linkId: 'tui-link-1',
+        handle: { provider: 'codex', threadId: THREAD },
+        origin: 'resumed',
+        mintedAtFence: store.getRecord(SESSION)?.lease.runtimeFence ?? 1,
+        observedAt: NOW
+      }
+    }
+  }
+
+  async function openTuiOwnedHost(): Promise<void> {
+    closeTuiOwner = vi.fn(async () => ({}))
+    const transport: StructuredAgentSessionHandoffTransport = {
+      hostLabel: 'test',
+      launchTui: async ({ spawnToken }) => tuiOwner(spawnToken),
+      reproveTuiOwner: async ({ owner }) => owner,
+      recoverTuiOwner: async () => tuiOwner('recovered'),
+      stopRecoveredOwner: async () => undefined,
+      closeTuiOwner,
+      waitForTuiExit: async () => ({}),
+      waitForTuiIdleOrExit: async () => 'idle',
+      tuiStatus: () => 'idle'
+    }
+    await host.flushAllStreamedEvents()
+    openHost(undefined, transport)
+    await attach()
+    expect(await host.requestHandoff(CALLER, handoffRequest())).toMatchObject({ ok: true })
+    await vi.waitFor(async () => expect((await host.handoffStatus(SESSION)).owner).toBe('tui'))
+  }
+
+  it('stops the retained TUI owner before forgetting the closed session', async () => {
+    await openTuiOwnedHost()
+
+    await host.close(SESSION)
+
+    expect(closeTuiOwner).toHaveBeenCalledOnce()
+    expect(host.hasSession(SESSION)).toBe(false)
+    expect(store.getRecord(SESSION)?.lease).toMatchObject({
+      runtimeKind: 'tui',
+      claimStatus: 'released',
+      ownerProcess: null
+    })
+  })
+
+  it('retains the owner and session when TUI exit proof fails', async () => {
+    await openTuiOwnedHost()
+    closeTuiOwner.mockRejectedValueOnce(new Error('terminal_exit_unproven'))
+
+    await expect(host.close(SESSION)).rejects.toThrow('terminal_exit_unproven')
+
+    expect(host.hasSession(SESSION)).toBe(true)
+    expect((await host.handoffStatus(SESSION)).owner).toBe('tui')
+    expect(store.getRecord(SESSION)?.lease.claimStatus).toBe('live')
+
+    closeTuiOwner.mockResolvedValueOnce({})
+    await host.close(SESSION)
   })
 })
 

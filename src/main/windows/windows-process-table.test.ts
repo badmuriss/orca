@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   __setWindowsProcessTreeLoaderForTests,
   isWindowsProcessTableAvailable,
+  isWindowsProcessStartTimeAvailable,
   readWindowsProcessTable,
   readWindowsProcessTableFresh,
   resetWindowsProcessTableForTests
@@ -64,6 +65,15 @@ describe('windows process table', () => {
   it('requests memory and command line together', async () => {
     await readWindowsProcessTableFresh()
     expect(getAllProcesses.mock.calls[0]?.[1]).toBe(7)
+  })
+
+  it('only advertises PID-safe ownership when the native creation-time field exists', () => {
+    expect(isWindowsProcessStartTimeAvailable()).toBe(true)
+    __setWindowsProcessTreeLoaderForTests(() => ({
+      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2 },
+      getAllProcesses
+    }))
+    expect(isWindowsProcessStartTimeAvailable()).toBe(false)
   })
 
   it('serves repeat reads from the shared snapshot', async () => {

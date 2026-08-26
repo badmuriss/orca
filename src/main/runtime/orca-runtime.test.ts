@@ -1218,6 +1218,10 @@ class InMemoryOrchestrationMessages {
     return [...this.runs.values()].find((run) => run.coordinator_pane_key === paneKey)
   }
 
+  listWorkerTerminalReleaseBacklog(): never[] {
+    return []
+  }
+
   hasUndeliveredDirectMessageForRun(runId: string, directHandle: string): boolean {
     return this.messages.some(
       (message) =>

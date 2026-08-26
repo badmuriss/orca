@@ -6,6 +6,8 @@ import {
   rollbackStoredAgentSessionHandoffPreparation,
   stopStoredAgentSessionOwnerForHandoff
 } from '../../runtime/agent-session-handoff-record-transitions'
+import { AgentSessionAcquisitionExitUnprovenError } from './structured-agent-session-adapter'
+import { markStructuredHandoffManualRecovery } from './structured-agent-session-handoff-flow-context'
 import type { StructuredAgentSessionHandoffFlowContext } from './structured-agent-session-handoff-types'
 
 export async function handoffStructuredSessionToNative(
@@ -111,6 +113,10 @@ export async function handoffStructuredSessionToNative(
       spawnToken
     })
   } catch (error) {
+    if (error instanceof AgentSessionAcquisitionExitUnprovenError) {
+      await markStructuredHandoffManualRecovery(context, sessionId, operationId)
+      throw error
+    }
     const current = context.requireRecord(sessionId)
     if (current.lease.handoffStage === 'new-owner-proving') {
       await abandonStoredAgentSessionHandoffAttempt(deps.store, {

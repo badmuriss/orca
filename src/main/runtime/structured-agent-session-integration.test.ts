@@ -124,6 +124,7 @@ function fakeCodex(): CodexScript {
       respondWithError: (id, code) => connection.replies.push({ id, code }),
       close: async () => {
         connection.closed = true
+        return true
       }
     }
     connections.push(connection)

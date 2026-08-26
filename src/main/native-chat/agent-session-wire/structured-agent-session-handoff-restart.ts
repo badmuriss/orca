@@ -15,6 +15,7 @@ import {
   recoverUnavailableTuiAsNative,
   type StructuredAgentSessionRestartAccess
 } from './structured-agent-session-handoff-restart-tui'
+import { structuredTuiRecoveryProofIsAdmissible } from './structured-agent-session-handoff-status'
 
 type RestartAccess = StructuredAgentSessionRestartAccess
 
@@ -65,7 +66,11 @@ export async function restoreStructuredAgentSessionHandoff(
     sessionId,
     fence: current.lease.runtimeFence,
     stage: 'manual-recovery',
-    handoffOperationId: current.lease.handoffOperationId,
+    // Keep a live TUI retryable after restart; other records retain the failed operation.
+    handoffOperationId:
+      current.lease.runtimeKind === 'tui' && current.lease.claimStatus === 'live'
+        ? null
+        : operationId,
     now: input.deps.now()
   })
   const status = idleStructuredHandoffStatus(failed)
@@ -132,14 +137,7 @@ async function restoreOnce(input: RestartAccess, record: AgentSessionRecord): Pr
 }
 
 export function canRestoreLiveTuiOwner(record: AgentSessionRecord): boolean {
-  return (
-    (record.lease.handoffStage === 'recovering' ||
-      record.lease.handoffStage === 'manual-recovery') &&
-    record.lease.runtimeKind === 'tui' &&
-    record.lease.claimStatus === 'live' &&
-    record.lease.ownerProcess !== null &&
-    record.lease.handoffOperationId === null
-  )
+  return structuredTuiRecoveryProofIsAdmissible(record)
 }
 
 async function restoreRecoverableLiveTui(
@@ -162,13 +160,30 @@ async function restoreRecoverableLiveTui(
     await recoverUnavailableTuiAsNative(input, record, continueHandoff)
     return
   }
-  await setStoredAgentSessionHandoffStage(input.deps.store, {
-    sessionId: record.sessionId,
-    fence: record.lease.runtimeFence,
-    stage: null,
-    handoffOperationId: null,
-    now: input.deps.now()
-  })
+  let settled = input.deps.store.getRecord(record.sessionId) ?? record
+  if (settled.lease.claimStatus === 'reserved') {
+    settled = await setStoredAgentSessionHandoffStage(input.deps.store, {
+      sessionId: record.sessionId,
+      fence: record.lease.runtimeFence,
+      stage: 'new-owner-proving',
+      handoffOperationId: null,
+      now: input.deps.now()
+    })
+    settled = await input.deps.store.proveOwner({
+      sessionId: settled.sessionId,
+      fence: settled.lease.runtimeFence,
+      link: owner.link,
+      now: input.deps.now()
+    })
+  } else {
+    settled = await setStoredAgentSessionHandoffStage(input.deps.store, {
+      sessionId: record.sessionId,
+      fence: record.lease.runtimeFence,
+      stage: null,
+      handoffOperationId: null,
+      now: input.deps.now()
+    })
+  }
   input.retainOwner(record.sessionId, owner)
   await startRecoveredTuiCatchup(input, record)
   input.setStatus(record.sessionId, {

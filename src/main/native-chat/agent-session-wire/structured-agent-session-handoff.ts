@@ -14,6 +14,7 @@ import {
   structuredHandoffRetryIsAdmissible,
   structuredHandoffRetryResumesStoppedOwner
 } from './structured-agent-session-handoff-admission'
+import { evictAgentSessionOwner } from '../../runtime/agent-session-lease-transitions'
 import {
   createStructuredHandoffFlowContext,
   requireStructuredHandoffRecord
@@ -65,6 +66,34 @@ export class StructuredAgentSessionHandoffCoordinator {
   }
 
   status = (sessionId: string) => this.state.status(sessionId)
+
+  /**
+   * Closes a retained TUI owner without starting a native replacement. Surface
+   * teardown can race a failed renderer reveal, so the host must stop the
+   * provider terminal before forgetting the readable session.
+   */
+  async closeRetainedTuiOwner(sessionId: string): Promise<boolean> {
+    const owner = this.state.owner(sessionId)
+    if (!owner) {
+      return false
+    }
+    const close = this.deps.transport?.closeTuiOwner ?? this.deps.transport?.waitForTuiExit
+    if (!close) {
+      throw new Error('The owning agent terminal could not be stopped.')
+    }
+    await close(owner)
+    const record = this.requireRecord(sessionId)
+    await this.deps.store.transitionHandoff(sessionId, (current) =>
+      evictAgentSessionOwner({
+        record: current,
+        expectedFence: record.lease.runtimeFence,
+        probe: { outcome: 'exit-observed' },
+        now: this.deps.now()
+      })
+    )
+    this.state.releaseOwner(sessionId)
+    return true
+  }
 
   adoptTuiOwner = (sessionId: string, owner: StructuredTuiOwner): void =>
     this.state.adoptTuiOwner(sessionId, owner)

@@ -1,4 +1,5 @@
 import type { AgentSessionJournalIdentity } from '../../shared/agent-session-journal-types'
+import { cancelProcessAcquisition } from '../../shared/child-process/cancel-process-acquisition'
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
 import type {
   ClaudeStreamJsonConnection,
@@ -43,12 +44,16 @@ export type ClaudeStructuredSessionAdapterDeps = {
   requestTimeoutMs?: number
   initTimeoutMs?: number
   dispatchAckTimeoutMs?: number
+  proveTranscriptCursor: (input: {
+    sessionId: string
+    providerSessionId: string
+    previousLeafUuid: string | null
+  }) => Promise<string>
   persistHandle?: (input: {
     sessionId: string
     providerSessionId: string
-    leafUuid: string | null
     fence: number
-  }) => Promise<void>
+  }) => Promise<string>
 }
 
 export type ClaudeDispatchWaiter = {
@@ -60,6 +65,8 @@ export type ClaudeDispatchWaiter = {
 
 export type ClaudeSession = {
   connection: ClaudeStreamJsonConnection
+  ended: boolean
+  closePromise: Promise<boolean> | null
   providerSessionId: string
   leafUuid: string | null
   fence: number
@@ -77,6 +84,7 @@ export type ClaudeAcquisitionAttempt = {
   buffered: (() => void)[]
   published: boolean
   cancelled: boolean
+  exitProven: boolean
   finished: Promise<void>
   finish: () => void
 }
@@ -94,6 +102,7 @@ export function createClaudeAcquisitionAttempt(
     buffered: [],
     published: false,
     cancelled: false,
+    exitProven: false,
     finished,
     finish
   }
@@ -139,6 +148,25 @@ export class ClaudeAcquisitionRegistry {
     }
   }
 
+  restoreIfCurrent(
+    sessionId: string,
+    replacement: ClaudeAcquisitionAttempt,
+    previous: ClaudeAcquisitionAttempt
+  ): void {
+    if (this.attempts.get(sessionId) === replacement) {
+      this.attempts.set(sessionId, previous)
+    }
+  }
+
+  async closeFailedAttempt(sessionId: string, attempt: ClaudeAcquisitionAttempt): Promise<boolean> {
+    const stopped = (await attempt.connection?.close()) ?? true
+    if (stopped) {
+      attempt.exitProven = true
+      this.deleteIfCurrent(sessionId, attempt)
+    }
+    return stopped
+  }
+
   sessionIds(): IterableIterator<string> {
     return this.attempts.keys()
   }
@@ -154,24 +182,12 @@ export async function cancelClaudeAcquisitionAttempt(
   if (!attempt) {
     return true
   }
-  attempt.cancelled = true
-  const stopped = (await attempt.connection?.close()) ?? true
-  if (!stopped) {
-    return false
-  }
-  await attempt.finished
-  return true
-}
-
-export async function closeClaudeSessionsUntilStopped(
-  hasSessions: () => boolean,
-  sessionIds: () => Iterable<string>,
-  close: (sessionId: string) => Promise<boolean>
-): Promise<void> {
-  for (let attempt = 0; attempt < 3 && hasSessions(); attempt += 1) {
-    await Promise.all([...sessionIds()].map((sessionId) => close(sessionId)))
-  }
-  if (hasSessions()) {
-    throw new Error('claude structured session shutdown could not prove every child stopped')
-  }
+  return cancelProcessAcquisition({
+    cancel: () => {
+      attempt.cancelled = true
+    },
+    connection: () => attempt.connection,
+    exitProven: () => attempt.exitProven,
+    finished: attempt.finished
+  })
 }

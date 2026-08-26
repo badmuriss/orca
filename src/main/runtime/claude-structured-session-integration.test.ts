@@ -1,10 +1,11 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { computeAgentSessionPayloadFingerprint } from '../../shared/agent-session-mutation-envelope'
 import type { AgentJournalRenderItem } from '../../shared/agent-session-journal-types'
 import type { AgentSessionSubscribeEvent } from '../../shared/agent-session-wire'
+import { ClaudeTranscriptTailIncompleteError } from '../claude/claude-transcript-branch-proof'
 import { STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY } from '../../shared/protocol-version'
 import type {
   ClaudeStreamJsonConnection,
@@ -24,6 +25,15 @@ import {
   ensureStructuredAgentSessionHost,
   stopStructuredAgentSessionRuntime
 } from './structured-agent-session-runtime'
+import type * as SessionFileResolver from '../native-chat/session-file-resolver'
+
+const { readClaudeTranscriptLeafUuid } = vi.hoisted(() => ({
+  readClaudeTranscriptLeafUuid: vi.fn<typeof SessionFileResolver.readClaudeTranscriptLeafUuid>()
+}))
+vi.mock('../native-chat/session-file-resolver', async (importOriginal) => ({
+  ...(await importOriginal<typeof SessionFileResolver>()),
+  readClaudeTranscriptLeafUuid
+}))
 
 const SESSION = 'claude-integration-1'
 const PROVIDER_SESSION = claudeSessionIdForOrcaSession(SESSION)
@@ -31,6 +41,16 @@ const WORKSPACE = 'workspace-claude'
 const CLIENT = {
   clientKind: 'mobile' as const,
   clientCapabilities: [STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY]
+}
+
+async function writeClaudeTranscript(rows: Record<string, unknown>[]): Promise<void> {
+  const projectsDir = join(root, 'claude-account', 'projects', 'workspace-claude')
+  await mkdir(projectsDir, { recursive: true })
+  await writeFile(
+    join(projectsDir, `${PROVIDER_SESSION}.jsonl`),
+    `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`,
+    'utf8'
+  )
 }
 
 type FakeClaudeConnection = Omit<ClaudeStreamJsonConnection, 'closed'> & {
@@ -76,6 +96,25 @@ function fakeClaude() {
         connection.sent.push(message)
         if (message.type === 'user') {
           handlers.onMessage?.({ ...message, uuid: 'user-1' })
+          await writeClaudeTranscript([
+            {
+              type: 'user',
+              uuid: 'user-1',
+              parentUuid: null,
+              sessionId: PROVIDER_SESSION
+            },
+            {
+              type: 'assistant',
+              uuid: 'assistant-leaf',
+              parentUuid: 'user-1',
+              sessionId: PROVIDER_SESSION
+            },
+            {
+              type: 'last-prompt',
+              sessionId: PROVIDER_SESSION,
+              leafUuid: 'assistant-leaf'
+            }
+          ])
         }
       },
       respond: async (requestId, response) => {
@@ -143,7 +182,10 @@ function ensureParams(fence: number) {
     },
     provider: 'claude' as const,
     agent: 'claude',
-    accountHome: { variable: 'CLAUDE_CONFIG_DIR' as const, path: '/accounts/claude' },
+    accountHome: {
+      variable: 'CLAUDE_CONFIG_DIR' as const,
+      path: join(root, 'claude-account')
+    },
     runtimeKind: 'native' as const,
     providerHandle: {
       kind: 'claude' as const,
@@ -236,6 +278,13 @@ function textOf(item: AgentJournalRenderItem): string {
 }
 
 beforeEach(async () => {
+  const actualSessionFileResolver = await vi.importActual<typeof SessionFileResolver>(
+    '../native-chat/session-file-resolver'
+  )
+  readClaudeTranscriptLeafUuid.mockReset()
+  readClaudeTranscriptLeafUuid.mockImplementation(
+    actualSessionFileResolver.readClaudeTranscriptLeafUuid
+  )
   operations = 0
   root = await mkdtemp(join(tmpdir(), 'orca-claude-structured-integration-'))
   claude = fakeClaude()
@@ -282,6 +331,14 @@ afterEach(async () => {
 })
 
 describe('a structured Claude session over agentSession.*', () => {
+  it('stops a newly created markerless provider during runtime shutdown', async () => {
+    await ok<{ fence: number }>('agentSession.create', createIntentParams())
+    const connection = claude.live()
+
+    await expect(stopStructuredAgentSessionRuntime()).resolves.toBeUndefined()
+    expect(connection.closed).toBe(true)
+  })
+
   it('durably returns actionable sign-in guidance when initialization has no credentials', async () => {
     claude.setInitializeAccount({ apiProvider: 'firstParty', tokenSource: 'none' })
     const params = createIntentParams()
@@ -312,7 +369,7 @@ describe('a structured Claude session over agentSession.*', () => {
     expect(claude.live().launch.env).toEqual({
       ANTHROPIC_AUTH_TOKEN: 'configured-token',
       ANTHROPIC_BASE_URL: 'https://gateway.example.test',
-      CLAUDE_CONFIG_DIR: '/accounts/claude',
+      CLAUDE_CONFIG_DIR: join(root, 'claude-account'),
       [CLAUDE_SPAWN_TOKEN_ENV]: expect.any(String)
     })
     const stream = await subscribe()
@@ -399,9 +456,113 @@ describe('a structured Claude session over agentSession.*', () => {
       handle: {
         provider: 'claude',
         sessionId: PROVIDER_SESSION,
-        leafUuid: 'user-1'
+        leafUuid: 'assistant-leaf'
       },
       origin: 'resumed'
     })
+  })
+
+  it('refuses a sibling transcript cursor before closing the current owner', async () => {
+    const created = await ok<{ fence: number }>('agentSession.create', createIntentParams())
+    const body = { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'Start' }] }
+    await ok('agentSession.send', {
+      envelope: envelope('agentSession.send', { body }, created.fence),
+      body
+    })
+    const resumed = await ok<{ fence: number }>('agentSession.ensure', ensureParams(created.fence))
+    const current = claude.live()
+    await writeClaudeTranscript([
+      {
+        type: 'user',
+        uuid: 'user-1',
+        parentUuid: null,
+        sessionId: PROVIDER_SESSION
+      },
+      {
+        type: 'assistant',
+        uuid: 'assistant-leaf',
+        parentUuid: 'user-1',
+        sessionId: PROVIDER_SESSION
+      },
+      {
+        type: 'assistant',
+        uuid: 'sibling-leaf',
+        parentUuid: 'user-1',
+        sessionId: PROVIDER_SESSION
+      },
+      {
+        type: 'last-prompt',
+        sessionId: PROVIDER_SESSION,
+        leafUuid: 'sibling-leaf'
+      }
+    ])
+
+    const refused = await call('agentSession.ensure', ensureParams(resumed.fence))
+
+    expect(refused).toMatchObject({
+      ok: false,
+      error: { message: expect.stringContaining('sibling branch') }
+    })
+    expect(current.closed).toBe(false)
+    await writeClaudeTranscript([
+      {
+        type: 'user',
+        uuid: 'user-1',
+        parentUuid: null,
+        sessionId: PROVIDER_SESSION
+      },
+      {
+        type: 'assistant',
+        uuid: 'assistant-leaf',
+        parentUuid: 'user-1',
+        sessionId: PROVIDER_SESSION
+      },
+      {
+        type: 'last-prompt',
+        sessionId: PROVIDER_SESSION,
+        leafUuid: 'assistant-leaf'
+      }
+    ])
+  })
+
+  it('retries a torn transcript tail during structured restore and keeps the owner on final failure', async () => {
+    const created = await ok<{ fence: number }>('agentSession.create', createIntentParams())
+    const body = { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'Start' }] }
+    await ok('agentSession.send', {
+      envelope: envelope('agentSession.send', { body }, created.fence),
+      body
+    })
+    const old = claude.live()
+    readClaudeTranscriptLeafUuid
+      .mockRejectedValueOnce(new ClaudeTranscriptTailIncompleteError())
+      .mockResolvedValue('assistant-leaf')
+
+    const resumed = await ok<{ fence: number }>('agentSession.ensure', ensureParams(created.fence))
+
+    expect(resumed.fence).toBe(created.fence + 1)
+    expect(readClaudeTranscriptLeafUuid.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(old.closed).toBe(true)
+  })
+
+  it('does not retry completed malformed transcript data during structured restore', async () => {
+    const created = await ok<{ fence: number }>('agentSession.create', createIntentParams())
+    const body = { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'Start' }] }
+    await ok('agentSession.send', {
+      envelope: envelope('agentSession.send', { body }, created.fence),
+      body
+    })
+    const current = claude.live()
+    readClaudeTranscriptLeafUuid.mockRejectedValue(
+      new Error('Claude transcript branch proof failed: malformed JSONL')
+    )
+
+    const refused = await call('agentSession.ensure', ensureParams(created.fence))
+
+    expect(refused).toMatchObject({
+      ok: false,
+      error: { message: expect.stringContaining('malformed JSONL') }
+    })
+    expect(readClaudeTranscriptLeafUuid).toHaveBeenCalledTimes(1)
+    expect(current.closed).toBe(false)
   })
 })

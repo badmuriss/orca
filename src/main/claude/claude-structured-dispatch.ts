@@ -4,7 +4,7 @@ import type { AgentJournalMessageItem } from '../../shared/agent-session-journal
 import type { NativeChatBlock } from '../../shared/native-chat-types'
 import type { AgentSessionDispatchOutcome } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type { ClaudeSession } from './claude-structured-session-state'
-import { readClaudeRootUserFrameUuid } from './claude-structured-init-proof'
+import { readClaudeReplayedUserFrameUuid } from './claude-structured-user-frame'
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_IMAGE_COUNT = 20
@@ -54,7 +54,7 @@ export function resolveClaudeReplayWaiter(
   session: ClaudeSession,
   message: Record<string, unknown>
 ): void {
-  const uuid = readClaudeRootUserFrameUuid(message, session.providerSessionId)
+  const uuid = readClaudeReplayedUserFrameUuid(message, session.providerSessionId)
   if (!uuid) {
     return
   }

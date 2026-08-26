@@ -1,6 +1,9 @@
 import { spawnProcess } from '../../shared/child-process/run-process'
+import { RetryableProcessExitProof } from '../../shared/child-process/retryable-process-exit-proof'
 import { createProviderSpawnSpec } from './codex-app-server-posix-supervisor'
 import { buildCodexAppServerExitError } from './codex-app-server-exit-error'
+import { initializeCodexAppServerConnection } from './codex-app-server-handshake'
+import { CodexAppServerHandshakeExitUnprovenError } from './codex-app-server-handshake-exit-proof'
 import { isAppServerRecord, parseCodexAppServerJsonLine } from './codex-app-server-jsonl'
 import { terminateCodexAppServerProcessTree } from './codex-app-server-process-teardown'
 import { CodexAppServerRequestError } from './codex-app-server-request-error'
@@ -41,7 +44,6 @@ export type CodexAppServerLaunch = {
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
-const HANDSHAKE_TIMEOUT_MS = 15_000
 const GRACEFUL_EXIT_MS = 1_500
 const FORCED_EXIT_MS = 1_000
 const STDERR_TAIL_MAX_BYTES = 8192
@@ -77,18 +79,24 @@ export async function openCodexAppServerConnection(
   let exited = false
   let exitObserved = false
   let closing = false
+  const exitProof = new RetryableProcessExitProof()
   /** First terminal cause, or null while the transport is still usable. Set once:
    *  a child that dies reaches us through several listeners, and the specific
    *  first cause is the one worth reporting. */
   let terminalError: Error | null = null
 
+  let resolveExit = (): void => undefined
   const exitPromise = new Promise<void>((resolve) => {
-    child.on('exit', () => {
-      exited = true
-      exitObserved = true
-      resolve()
-    })
+    resolveExit = resolve
   })
+
+  function observeExit(): void {
+    exited = true
+    exitObserved = true
+    resolveExit()
+  }
+
+  child.on('exit', observeExit)
 
   function buildExitError(cause?: Error): Error {
     return buildCodexAppServerExitError(stderrTail, cause)
@@ -121,6 +129,7 @@ export async function openCodexAppServerConnection(
     handleUnexpectedEnd(error)
   })
   child.on('close', () => {
+    observeExit()
     handleUnexpectedEnd()
   })
   child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
@@ -277,29 +286,31 @@ export async function openCodexAppServerConnection(
     }
   }
 
-  async function close(): Promise<boolean> {
-    if (closing) {
-      return exitObserved
+  function close(): Promise<boolean> {
+    if (exitObserved) {
+      return Promise.resolve(true)
     }
     closing = true
-    try {
-      child.stdin.end()
-    } catch {
-      // Already destroyed; the reap below still runs.
-    }
-    if (!exited) {
-      await waitForProcessExitUntil(exitPromise, GRACEFUL_EXIT_MS)
-      if (!exited) {
-        const treeExited = await terminateCodexAppServerProcessTree(child, spawnToken)
-        if (!treeExited) {
-          failPending(new Error('codex app-server process-tree exit was not proven'))
-          return false
-        }
-        await waitForProcessExitUntil(exitPromise, FORCED_EXIT_MS)
+    return exitProof.run(async () => {
+      try {
+        child.stdin.end()
+      } catch {
+        // Already destroyed; the reap below still runs.
       }
-    }
-    failPending(new Error('codex app-server connection closed'))
-    return exitObserved
+      if (!exited) {
+        await waitForProcessExitUntil(exitPromise, GRACEFUL_EXIT_MS)
+        if (!exited) {
+          const treeExited = await terminateCodexAppServerProcessTree(child, spawnToken)
+          if (!treeExited) {
+            failPending(new Error('codex app-server process-tree exit was not proven'))
+            return false
+          }
+          await waitForProcessExitUntil(exitPromise, FORCED_EXIT_MS)
+        }
+      }
+      failPending(new Error('codex app-server connection closed'))
+      return exitObserved
+    })
   }
 
   const connection: CodexAppServerConnection = {
@@ -317,22 +328,11 @@ export async function openCodexAppServerConnection(
   }
 
   try {
-    await request(
-      'initialize',
-      {
-        clientInfo: { name: 'orca_desktop', title: 'Orca', version: '0.0.0' },
-        capabilities: {
-          experimentalApi: true,
-          requestAttestation: false,
-          mcpServerOpenaiFormElicitation: false,
-          extensions: {}
-        }
-      },
-      { timeoutMs: HANDSHAKE_TIMEOUT_MS }
-    )
-    notify('initialized')
+    await initializeCodexAppServerConnection(connection)
   } catch (error) {
-    await close()
+    if ((await close()) !== true) {
+      throw new CodexAppServerHandshakeExitUnprovenError(connection, error)
+    }
     throw error instanceof CodexAppServerUnsupportedError ||
       error instanceof CodexAppServerTimeoutError
       ? error

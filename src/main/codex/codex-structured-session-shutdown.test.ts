@@ -41,7 +41,7 @@ describe('CodexStructuredSessionAdapter shutdown', () => {
         notify: () => {},
         respond: () => {},
         respondWithError: () => {},
-        close: async () => {}
+        close: async () => true
       } satisfies CodexAppServerConnection
       connections.push(connection)
       return connection

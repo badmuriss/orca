@@ -18,6 +18,7 @@ export function NativeChatExperimentalSetting({
   updateSettings
 }: NativeChatExperimentalSettingProps): React.JSX.Element {
   const nativeChatEnabled = settings.experimentalNativeChat === true
+  const structuredNativeChatEnabled = settings.experimentalStructuredNativeChat === true
   const openByDefault = settings.openAgentTabsInChatByDefault === true
   const defaultView: NativeChatDefaultView = openByDefault ? 'native-chat' : 'terminal-chat'
 
@@ -59,6 +60,40 @@ export function NativeChatExperimentalSetting({
       </div>
       {nativeChatEnabled ? (
         <div className="ml-4 border-l border-border pl-4">
+          <div className="mb-4 flex items-start justify-between gap-4">
+            <div className="min-w-0 shrink space-y-0.5">
+              <Label>
+                {translate(
+                  'auto.components.settings.ExperimentalPane.nativeChat.structuredTitle',
+                  'Use updated structured native chat'
+                )}
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                {translate(
+                  'auto.components.settings.ExperimentalPane.nativeChat.structuredCopy',
+                  'Opt in to the host-owned structured Codex runtime. Off keeps the existing terminal-backed chat path.'
+                )}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {translate(
+                  'auto.components.settings.ExperimentalPane.nativeChat.structuredScope',
+                  'Local sessions only. Remote and SSH sessions continue to use terminal chat.'
+                )}
+              </p>
+            </div>
+            <SettingsSwitch
+              checked={structuredNativeChatEnabled}
+              ariaLabel={translate(
+                'auto.components.settings.ExperimentalPane.nativeChat.structuredToggleLabel',
+                'Toggle updated structured native chat'
+              )}
+              onChange={() =>
+                updateSettings({
+                  experimentalStructuredNativeChat: !structuredNativeChatEnabled
+                })
+              }
+            />
+          </div>
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0 shrink space-y-0.5">
               <Label>

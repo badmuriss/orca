@@ -22,6 +22,7 @@ import type { DeferredStructuredAgentSessionEventSink } from './structured-agent
 
 export type StructuredAgentSessionEvictionContext = {
   sessionId: string
+  hasProviderChild?: boolean
   eventSink: DeferredStructuredAgentSessionEventSink
   adapter: StructuredAgentSessionAdapter
   forget: () => void
@@ -42,9 +43,13 @@ export const STRUCTURED_AGENT_SESSION_EVICTION_STEPS: readonly StructuredAgentSe
     {
       name: 'stop-provider-child',
       run: async (context) => {
+        if (context.hasProviderChild === false) {
+          return
+        }
         // An adapter with no close has nothing to stop; anything else must PROVE the exit.
-        if (context.adapter.closeSession) {
-          const stopped = await context.adapter.closeSession(context.sessionId)
+        const stop = context.adapter.disposeSession ?? context.adapter.closeSession
+        if (stop) {
+          const stopped = await stop.call(context.adapter, context.sessionId)
           if (stopped !== true) {
             throw new Error('provider child exit was not proven')
           }

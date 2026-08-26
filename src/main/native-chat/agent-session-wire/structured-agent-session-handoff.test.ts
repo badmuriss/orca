@@ -212,7 +212,7 @@ function createCoordinator(): StructuredAgentSessionHandoffCoordinator {
       journal,
       fence: store.getRecord(SESSION)?.lease.runtimeFence ?? 1
     }),
-    suspendNative: vi.fn(async () => undefined),
+    suspendNative: vi.fn(async () => ({ state: 'stopped' as const })),
     acquireNative,
     acquireNativeStop: (_sessionId, turnId) => acquireNativeStop(turnId),
     importTuiHistory: async ({ fence }) => {

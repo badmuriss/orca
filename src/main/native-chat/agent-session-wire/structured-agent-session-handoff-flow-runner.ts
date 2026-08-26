@@ -28,7 +28,10 @@ export class StructuredAgentSessionHandoffFlowRunner {
 
   track(task: Promise<void>): void {
     this.active.add(task)
-    void task.finally(() => this.active.delete(task))
+    void task.then(
+      () => this.active.delete(task),
+      () => this.active.delete(task)
+    )
   }
 
   begin(input: {

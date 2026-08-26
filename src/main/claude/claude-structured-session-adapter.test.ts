@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type {
   AgentJournalMessageItem,
   AgentSessionJournalIdentity
@@ -166,6 +166,7 @@ function adapterFor(
     }),
     onEvent: (event) => events.push(event),
     openConnection: claude.openConnection,
+    proveTranscriptCursor: async ({ previousLeafUuid }) => previousLeafUuid ?? 'transcript-leaf',
     readProcessStartTime: async () => 1_700_000_000_000,
     now: () => 1_700_000_000_500,
     ...(initTimeoutMs === undefined ? {} : { initTimeoutMs }),
@@ -175,6 +176,7 @@ function adapterFor(
       if (persistError) {
         throw persistError
       }
+      return 'transcript-leaf'
     }
   })
 }
@@ -645,7 +647,7 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
     })
   })
 
-  it('persists the latest root prompt leaf before graceful close', async () => {
+  it('persists the authoritative transcript cursor before graceful close', async () => {
     const claude = fakeClaude()
     const events: ClaudeStructuredSessionEvent[] = []
     const persistedHandles: unknown[] = []
@@ -675,7 +677,6 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
       {
         sessionId: 'session-1',
         providerSessionId: PROVIDER_SESSION_ID,
-        leafUuid: 'prompt-leaf',
         fence: 7
       }
     ])
@@ -683,7 +684,7 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
       type: 'handle',
       sessionId: 'session-1',
       providerSessionId: PROVIDER_SESSION_ID,
-      leafUuid: 'prompt-leaf',
+      leafUuid: 'transcript-leaf',
       fence: 7
     })
     expect(claude.connections[0].closeCount).toBe(1)
@@ -702,6 +703,49 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
     await expect(adapter.closeSession('session-1')).rejects.toThrow('journal unavailable')
   })
 
+  it('disposes a markerless session during provider shutdown', async () => {
+    const claude = fakeClaude()
+    const adapter = adapterFor(claude, {}, [], [], undefined, new Error('no transcript marker'))
+    await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+
+    await expect(adapter.closeAll()).resolves.toBeUndefined()
+    expect(claude.connections[0].closeCount).toBe(1)
+  })
+
+  it('classifies launch resolution failures before any provider spawn', async () => {
+    const claude = fakeClaude()
+    const adapter = new ClaudeStructuredSessionAdapter({
+      resolveLaunch: async () => {
+        throw new Error('workspace no longer exists')
+      },
+      openConnection: claude.openConnection,
+      proveTranscriptCursor: async () => 'transcript-leaf'
+    })
+
+    await expect(
+      adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+    ).rejects.toMatchObject({ name: 'AgentSessionPreSpawnError' })
+    expect(claude.connections).toHaveLength(0)
+  })
+
+  it('reaps an uncommitted acquisition without requiring transcript persistence', async () => {
+    const claude = fakeClaude()
+    const persistedHandles: unknown[] = []
+    const adapter = adapterFor(
+      claude,
+      {},
+      [],
+      persistedHandles,
+      undefined,
+      new Error('no transcript marker')
+    )
+    await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+
+    await expect(adapter.releaseAcquisition({ sessionId: 'session-1' })).resolves.toBe(true)
+    expect(persistedHandles).toEqual([])
+    expect(claude.connections[0].closeCount).toBe(1)
+  })
+
   it('keeps the provider owner indexed when child exit is unproven', async () => {
     const claude = fakeClaude({ closeResult: false })
     const events: ClaudeStructuredSessionEvent[] = []
@@ -714,6 +758,45 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
 
     await expect(adapter.closeSession('session-1')).resolves.toBe(false)
     expect(claude.connections[0].closeCount).toBe(2)
+  })
+
+  it('finalizes one handle and ended event across concurrent closes', async () => {
+    const claude = fakeClaude()
+    const events: ClaudeStructuredSessionEvent[] = []
+    const adapter = await acquired(claude, {}, events)
+    let proveExit: (stopped: boolean) => void = () => undefined
+    const exitProof = new Promise<boolean>((resolve) => {
+      proveExit = resolve
+    })
+    claude.connections[0].close = vi.fn(async () => exitProof)
+
+    const first = adapter.closeSession('session-1')
+    const second = adapter.closeSession('session-1')
+    proveExit(true)
+
+    await expect(Promise.all([first, second])).resolves.toEqual([true, true])
+    expect(claude.connections[0].close).toHaveBeenCalledTimes(1)
+    expect(events.filter((event) => event.type === 'handle')).toHaveLength(1)
+    expect(events.filter((event) => event.type === 'ended')).toHaveLength(1)
+  })
+
+  it('retains ownership after a transport error until child exit is proven', async () => {
+    const claude = fakeClaude({ closeResult: false })
+    const events: ClaudeStructuredSessionEvent[] = []
+    const adapter = await acquired(claude, {}, events)
+
+    claude.connections[0].handlers.onExit?.(new Error('claude transport ended'))
+
+    expect(() =>
+      adapter.dispatch({
+        sessionId: 'session-1',
+        clientMessageId: 'client-1',
+        body: USER_MESSAGE,
+        fence: 7
+      })
+    ).toThrow('no live claude stream-json')
+    await expect(adapter.closeSession('session-1')).resolves.toBe(false)
+    expect(events.filter((event) => event.type === 'ended')).toHaveLength(1)
   })
 
   it('bounds shutdown when a provider child never proves exit', async () => {

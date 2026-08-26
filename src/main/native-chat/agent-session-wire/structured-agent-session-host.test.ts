@@ -144,7 +144,7 @@ beforeEach(async () => {
       observedAt: NOW
     }
   }))
-  releaseAcquisition = vi.fn(async () => undefined)
+  releaseAcquisition = vi.fn(async () => true)
   dispatch = vi.fn(async () => accepted())
   cancelTurn = vi.fn(async () => ({ cancelled: true }))
   answerPrompt = vi.fn(async () => undefined)

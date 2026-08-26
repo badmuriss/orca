@@ -6,7 +6,10 @@ import {
 } from './structured-native-chat-toggle'
 import { callStructuredAgentSession } from '@/runtime/structured-agent-session-client'
 
-const { mockToastError } = vi.hoisted(() => ({ mockToastError: vi.fn() }))
+const { mockToastError, rendererPlatform } = vi.hoisted(() => ({
+  mockToastError: vi.fn(),
+  rendererPlatform: { value: 'darwin' as NodeJS.Platform }
+}))
 
 vi.mock('@/runtime/structured-agent-session-client', () => ({
   callStructuredAgentSession: vi.fn()
@@ -15,7 +18,7 @@ vi.mock('@/runtime/structured-agent-session-client', () => ({
 vi.mock('sonner', () => ({ toast: { error: mockToastError } }))
 
 vi.mock('@/lib/renderer-app-platform', () => ({
-  getRendererAppPlatform: () => 'win32'
+  getRendererAppPlatform: () => rendererPlatform.value
 }))
 
 function terminalState(input: {
@@ -49,7 +52,7 @@ function terminalState(input: {
         }
       ],
       repos: [{ id: 'repo-1', connectionId: input.connectionId ?? null, path: 'C:\\repo' }],
-      settings: {},
+      settings: { experimentalStructuredNativeChat: true },
       worktreesByRepo: {
         'repo-1': [
           {
@@ -85,6 +88,7 @@ function terminalState(input: {
 beforeEach(() => {
   vi.mocked(callStructuredAgentSession).mockReset()
   mockToastError.mockReset()
+  rendererPlatform.value = 'darwin'
 })
 
 describe('native chat routing', () => {
@@ -117,6 +121,9 @@ describe('native chat routing', () => {
     ['paired runtime', { executionHostId: 'runtime:paired-1' as const }],
     ['WSL', { windowsRuntime: 'wsl' as const }]
   ])('keeps %s Codex panes on the transcript bridge', async (_label, overrides) => {
+    if (_label === 'WSL') {
+      rendererPlatform.value = 'win32'
+    }
     const { tab, state } = terminalState(overrides)
     const patch = vi.fn()
 
@@ -339,6 +346,7 @@ describe('native chat routing', () => {
         }
       },
       agentStatusByPaneKey: {},
+      settings: { experimentalStructuredNativeChat: true },
       paneForegroundAgentByPaneKey: {
         [paneKey]: { agent: 'codex', shellForeground: false, routingTrusted: true }
       }

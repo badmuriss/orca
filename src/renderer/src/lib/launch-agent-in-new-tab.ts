@@ -64,8 +64,16 @@ export type LaunchAgentInNewTabResult = {
   tabId: string | null
   startupPlan: AgentStartupPlan
   pasteDraftAfterLaunch: boolean
+  /** The host will publish and focus a structured tab asynchronously. */
+  focusAfterMenuClose?: 'structured-session'
   promptDeliveryResult?: Promise<{ delivered: boolean; failureNotified: boolean }>
 } | null
+
+export function shouldQueueTerminalFocusAfterMenuClose(
+  result: NonNullable<LaunchAgentInNewTabResult>
+): boolean {
+  return result.tabId === null && result.focusAfterMenuClose !== 'structured-session'
+}
 
 /**
  * Create a new terminal tab and queue the agent's launch command, optionally
@@ -201,7 +209,12 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
         }
       )
     })
-    return { tabId: null, startupPlan, pasteDraftAfterLaunch: false }
+    return {
+      tabId: null,
+      startupPlan,
+      pasteDraftAfterLaunch: false,
+      focusAfterMenuClose: 'structured-session'
+    }
   }
 
   // Why: queue startup BEFORE TerminalPane mounts — it snapshots pendingStartupByTabId in useState on first render.

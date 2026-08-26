@@ -1,6 +1,5 @@
 import { homedir } from 'node:os'
 import { basename, extname, join } from 'node:path'
-import { readFile } from 'node:fs/promises'
 import type { AgentType } from '../../shared/native-chat-types'
 import {
   resolveNativeChatTranscriptAgent,
@@ -18,6 +17,7 @@ import {
 import { toHostReadableTranscriptPath, wslCodexSessionsDirs } from './host-readable-transcript-path'
 import { findWslCodexSessionPath } from './wsl-codex-session-path-scan'
 import { wslTranscriptFsRefusal, type WslTranscriptFsError } from './wsl-transcript-fs-gate'
+import { proveClaudeTranscriptBranch } from '../claude/claude-transcript-branch-proof'
 
 // Why: these mirror the path constants in ai-vault/session-scanner.ts. Reads
 // run in the main process against the runtime's own home directory; over SSH
@@ -124,32 +124,19 @@ export async function resolveSessionFilePath(
   return resolved
 }
 
-/** Read Claude's durable branch marker from the transcript metadata. */
-export async function readClaudeTranscriptLeafUuid(transcriptPath: string): Promise<string | null> {
-  const contents = await readFile(transcriptPath, 'utf8')
-  let leafUuid: string | null = null
-  for (const line of contents.split('\n')) {
-    if (!line.trim()) {
-      continue
-    }
-    let record: unknown
-    try {
-      record = JSON.parse(line)
-    } catch {
-      continue
-    }
-    if (
-      typeof record === 'object' &&
-      record !== null &&
-      !Array.isArray(record) &&
-      (record as { type?: unknown }).type === 'last-prompt' &&
-      typeof (record as { leafUuid?: unknown }).leafUuid === 'string' &&
-      (record as { leafUuid: string }).leafUuid.trim().length > 0
-    ) {
-      leafUuid = (record as { leafUuid: string }).leafUuid.trim()
-    }
-  }
-  return leafUuid
+/** Read and validate Claude's authoritative transcript branch marker. */
+export async function readClaudeTranscriptLeafUuid(
+  transcriptPath: string,
+  providerSessionId: string,
+  previousLeafUuid: string | null = null
+): Promise<string> {
+  return (
+    await proveClaudeTranscriptBranch({
+      transcriptPath,
+      providerSessionId,
+      previousLeafUuid
+    })
+  ).leafUuid
 }
 
 async function resolveSessionFileById(

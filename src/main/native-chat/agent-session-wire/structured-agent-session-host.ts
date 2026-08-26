@@ -182,6 +182,7 @@ export class StructuredAgentSessionHost {
    *  on disk, so the same session can be attached again. */
   close(sessionId: string): Promise<void> {
     return this.serialize(sessionId, async () => {
+      await this.handoffs.closeRetainedTuiOwner(sessionId)
       await evictHeldStructuredAgentSession(this.lifetimeContext(), sessionId)
       // Whoever asked for the close, the surfaces that were holding this session are looking at a
       // session that no longer exists. A failed eviction throws above and keeps them.

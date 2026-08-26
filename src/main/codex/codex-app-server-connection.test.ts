@@ -301,6 +301,27 @@ describe('openCodexAppServerConnection', () => {
     expect(isCodexAppServerUnsupportedError(await opening)).toBe(true)
   })
 
+  it('exposes an unproven handshake child for later cleanup', async () => {
+    vi.useFakeTimers()
+    const { child, spawnImpl } = stubChild({ exitOnStdinEnd: false })
+    child.stdin.once('data', () => {
+      child.stdout.write(
+        `${JSON.stringify({ id: 1, error: { code: -32602, message: 'initialize failed' } })}\n`
+      )
+    })
+    const opening = rejection(
+      openCodexAppServerConnection({ command: 'codex', args: ['app-server'] }, {}, spawnImpl)
+    )
+
+    await vi.advanceTimersByTimeAsync(5_000)
+    const error = (await opening) as Error & { connection?: CodexAppServerConnection }
+
+    expect(error.name).toBe('CodexAppServerHandshakeExitUnprovenError')
+    expect(error.connection).toBeDefined()
+    child.emit('close', 1, null)
+    await expect(error.connection?.close()).resolves.toBe(true)
+  })
+
   it('times out one request without ending the connection', async () => {
     vi.useFakeTimers()
     const { child, spawnImpl } = stubChild()
@@ -351,6 +372,46 @@ describe('openCodexAppServerConnection', () => {
 
     await expect(connection.close()).resolves.toBe(false)
   }, 10_000)
+
+  it('shares one eventual exit proof across concurrent close callers', async () => {
+    vi.useFakeTimers()
+    const { child, spawnImpl } = stubChild({ exitOnStdinEnd: false })
+    answerInitialize(child)
+    const connection = await openCodexAppServerConnection(
+      { command: 'codex', args: ['app-server'] },
+      {},
+      spawnImpl
+    )
+    child.kill.mockImplementation(() => {
+      setTimeout(() => child.emit('exit', null, 'SIGKILL'), 10)
+      return true
+    })
+
+    const first = connection.close()
+    const second = connection.close()
+    await vi.advanceTimersByTimeAsync(4_100)
+
+    await expect(Promise.all([first, second])).resolves.toEqual([true, true])
+    expect(child.kill.mock.calls.map(([signal]) => signal)).toEqual(['SIGSTOP', 'SIGKILL'])
+  })
+
+  it('allows a later close to observe exit after an unproven attempt', async () => {
+    vi.useFakeTimers()
+    const { child, spawnImpl } = stubChild({ exitOnStdinEnd: false })
+    answerInitialize(child)
+    const connection = await openCodexAppServerConnection(
+      { command: 'codex', args: ['app-server'] },
+      {},
+      spawnImpl
+    )
+
+    const first = connection.close()
+    await vi.advanceTimersByTimeAsync(5_000)
+    await expect(first).resolves.toBe(false)
+    child.emit('exit', 0, null)
+
+    await expect(connection.close()).resolves.toBe(true)
+  })
 
   it('ends the connection rather than buffering an oversized line', async () => {
     const { child, spawnImpl } = stubChild({ exitOnStdinEnd: false })

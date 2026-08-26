@@ -26,7 +26,8 @@ import type { AgentSessionRecordStore } from '../../runtime/agent-session-record
 import type { StructuredAgentSessionAdapter } from './structured-agent-session-adapter'
 import {
   AgentSessionAcquisitionRefusal,
-  isAgentSessionPreSpawnError
+  isAgentSessionPreSpawnError,
+  rethrowAfterAgentSessionAcquisitionCleanup
 } from './structured-agent-session-adapter'
 import type { StructuredAgentSessionEventSink } from './structured-agent-session-event-sink'
 import { readNativeHandoffSessionOptions } from './structured-agent-session-handoff-options'
@@ -212,11 +213,6 @@ async function acquireOwner(
       ...(options ? { options } : {})
     })
   } catch (error) {
-    try {
-      await input.adapter.releaseAcquisition?.({ sessionId: record.sessionId })
-    } catch {
-      // Preserve the lease failure; cleanup is best-effort and idempotent.
-    }
-    throw error
+    return rethrowAfterAgentSessionAcquisitionCleanup(input.adapter, record.sessionId, error)
   }
 }

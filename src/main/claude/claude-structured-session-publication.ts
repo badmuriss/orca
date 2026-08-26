@@ -34,6 +34,8 @@ export function createClaudeSessionPublication(input: {
     },
     session: {
       connection: input.connection,
+      ended: false,
+      closePromise: null,
       providerSessionId: input.init.providerSessionId,
       leafUuid: input.leafUuid,
       fence: input.fence,

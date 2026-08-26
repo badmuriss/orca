@@ -28,7 +28,7 @@ function stateFor(input: {
       }
     ],
     repos: [{ id: 'repo-1', connectionId: input.connectionId ?? null, path: 'C:\\repo' }],
-    settings: {},
+    settings: { experimentalStructuredNativeChat: true },
     worktreesByRepo: {
       'repo-1': [
         {
@@ -52,6 +52,15 @@ describe('canUseStructuredNativeChat', () => {
     expect(canUseStructuredNativeChat(stateFor({}), 'wt-1')).toBe(true)
   })
 
+  it('keeps the legacy bridge when the updated runtime is opted out', () => {
+    expect(
+      canUseStructuredNativeChat(
+        { ...stateFor({}), settings: { experimentalStructuredNativeChat: false } } as AppState,
+        'wt-1'
+      )
+    ).toBe(false)
+  })
+
   it('refuses an SSH worktree so the pane stays on the bridge', () => {
     expect(canUseStructuredNativeChat(stateFor({ connectionId: 'ssh-a' }), 'wt-1')).toBe(false)
   })
@@ -67,10 +76,10 @@ describe('canUseStructuredNativeChat', () => {
     expect(canUseStructuredNativeChat(stateFor({ windowsRuntime: 'wsl' }), 'wt-1')).toBe(false)
   })
 
-  it('allows a Windows-host project on Windows', () => {
+  it('keeps Windows-host projects on the terminal path until native start-time proof is advertised', () => {
     mockGetRendererAppPlatform.mockReturnValue('win32')
     expect(canUseStructuredNativeChat(stateFor({ windowsRuntime: 'windows-host' }), 'wt-1')).toBe(
-      true
+      false
     )
   })
 })
