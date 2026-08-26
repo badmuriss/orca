@@ -1,4 +1,4 @@
-// Why: centralizing the launcher keeps window suppression consistent across installers (#14815).
+// Why: centralizing the launcher keeps every installer on one command shape; #14815 and #16003 both turned on which shape it is.
 
 // Why: an absolute forward-slash path avoids PATH hijacking and survives cmd.exe and Git Bash.
 export function getWindowsSystem32Path(relativePath: string): string {
@@ -11,20 +11,31 @@ export function getWindowsPowerShellExecutablePath(): string {
 }
 
 /**
- * Switches for the hidden PowerShell that relays hook output and exit status
+ * Switches for the PowerShell that relays hook output and exit status
  * (#14818 — conhost does neither).
  *
- * `-ExecutionPolicy Bypass` is deliberately absent. Spelled on the command line
- * it completes `-ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand`,
- * the textbook "hidden encoded PowerShell" malware shape, and endpoint security
- * denies that combination at process creation whatever the payload decodes to —
- * even `exit 0`. Users saw every hook fail with `powershell.exe: Permission
- * denied` (exit 126 from bash's execve, i.e. EACCES) on every turn, with no
- * exclusion that re-enabled it (#16003). Dropping any one of the three flags
- * clears the signature, so the bypass moves into the encoded payload below,
- * where it is the same process-scope setting with the same power.
+ * Only `-NoProfile` survives on the command line, because `-NoProfile
+ * -EncodedCommand <b64>` is the one encoded shape the #16003 reporter actually
+ * ran on the affected machine (Kaspersky Premium, Windows 11) and saw exit 0.
+ * The four measured rows there were:
+ *
+ *   -NoProfile -WindowStyle Hidden -Command 'exit 0'                     -> 0
+ *   -NoProfile -EncodedCommand <b64>                                     -> 0
+ *   -NoProfile -ExecutionPolicy Bypass -Command 'exit 0'                 -> 0
+ *   -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand -> 126
+ *
+ * Every passing row drops two of the three flags; none drops exactly one, so
+ * "drop any one flag" is extrapolation, not measurement. `-WindowStyle Hidden
+ * -EncodedCommand` is itself the "hidden encoded PowerShell" shape the denial
+ * is named for, so keeping it would be a guess. Dropping it costs at most a
+ * console flash where the parent has no console to inherit; keeping
+ * `-Command` instead of `-EncodedCommand` would cost path and switch integrity
+ * across cmd.exe and MSYS (#6078, #14815), which is a correctness loss.
+ *
+ * `-ExecutionPolicy Bypass` moves into the encoded payload below, where it is
+ * the same process-scope setting with the same power.
  */
-export const WINDOWS_POWERSHELL_HOOK_SWITCHES = '-NoProfile -WindowStyle Hidden'
+export const WINDOWS_POWERSHELL_HOOK_SWITCHES = '-NoProfile'
 
 // Why: redirected PowerShell progress becomes CLIXML that can corrupt merged JSON output.
 const HOOK_PROGRESS_SILENCER = "$ProgressPreference='SilentlyContinue'; "
@@ -35,11 +46,18 @@ const HOOK_PROGRESS_SILENCER = "$ProgressPreference='SilentlyContinue'; "
  * Equivalent by construction: the switch sets the Process scope too, and both
  * lose to a Group Policy scope. `-EncodedCommand` itself is never policy-gated,
  * so this always gets to run; it is what lets the managed `.ps1` hooks (Copilot)
- * execute under a Restricted or AllSigned machine policy. Failures are swallowed
- * because a hook must still answer its agent when the policy is locked down.
+ * execute under a Restricted or AllSigned machine policy.
+ *
+ * try/catch as well as `-ErrorAction SilentlyContinue`: under a MachinePolicy or
+ * UserPolicy GPO the cmdlet reports that the process scope did not take, and
+ * `-ErrorAction` only governs the non-terminating half of that. The switch this
+ * replaces printed nothing at all in the same situation, and an ErrorRecord on
+ * stderr is a live corruption risk for the consumers that merge our streams into
+ * JSON stdout (see the progress silencer above). A hook must still answer its
+ * agent when the policy is locked down.
  */
 const HOOK_EXECUTION_POLICY_BYPASS =
-  'Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction SilentlyContinue; '
+  'try { Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction SilentlyContinue } catch {}; '
 
 // Why: encoding shields paths and switches from cmd.exe and MSYS rewriting (#6078, #14815).
 export function encodeWindowsPowerShellHookCommand(command: string): string {
