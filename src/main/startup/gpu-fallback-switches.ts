@@ -5,10 +5,9 @@ export type GpuFallbackCommandLine = {
 
 export type GpuFallbackSwitchOptions = {
   /**
-   * Why: Linux dev hosts (NVIDIA/hybrid drivers, missing render nodes) can fail every
-   * GPU child launch with error_code=1002 until Chromium fatal-exits. Dev sessions get
-   * the same post-crash software fallback Windows uses; packaged Linux is untouched
-   * because no packaged telemetry supports a global hardware-acceleration cut.
+   * Why: Linux dev hosts (NVIDIA/hybrid drivers, missing render nodes) fail every GPU
+   * child launch with error_code=1002 until Chromium fatal-exits; packaged Linux stays
+   * untouched because no packaged telemetry supports a global hardware-acceleration cut.
    */
   linuxDevFallback?: boolean
 }

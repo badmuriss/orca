@@ -26,12 +26,10 @@ type LinuxDevGpuWatchDependencies = {
 }
 
 /**
- * Why: on Linux dev hosts the GPU child can fail every launch (error_code=1002 burst) until
- * Chromium fatal-exits with "GPU process isn't usable", taking `pnpm dev` down into a
- * resubscribe/zombie loop. The shared child-process-gone handler registers only after window
- * creation and is win32-gated, so dev needs its own pre-window listener. Engagement persists the
- * build-scoped gpu-fallback marker, so the next launch boots software-rendered automatically;
- * packaged Linux never reaches this path (isLinuxDevGpuFallbackSession).
+ * Why: on Linux dev hosts every GPU child launch fails (error_code=1002 burst) until Chromium
+ * fatal-exits with "GPU process isn't usable", dragging `pnpm dev` into a resubscribe/zombie loop.
+ * The shared child-process-gone handler registers only post-window and is win32-gated, so this
+ * pre-window listener persists the build-scoped marker that software-renders the next launch.
  */
 export function installLinuxDevGpuFailureWatch(dependencies: LinuxDevGpuWatchDependencies): void {
   const now = dependencies.nowMs ?? (() => performance.now())
@@ -66,9 +64,8 @@ export function installLinuxDevGpuFailureWatch(dependencies: LinuxDevGpuWatchDep
       )
       return
     }
-    // Why: exiting instead of relaunching here — electron-vite owns the dev server URL, so a
-    // relaunched Electron would load a dead Vite origin. The persisted marker makes the next
-    // `pnpm dev` software-rendered; quitting also stops parcel-watcher resubscribe churn.
+    // Why: exit instead of relaunch — electron-vite owns the dev URL, so a relaunched Electron
+    // would load a dead Vite origin; quitting also stops parcel-watcher resubscribe churn.
     log(
       '[gpu-fallback] GPU child launches keep failing in this Linux dev session; hardware acceleration is disabled for the next launch. Rerun `pnpm dev`.'
     )
