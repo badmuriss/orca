@@ -17,8 +17,10 @@ vi.mock('../observability/instrumentation', () => ({
 }))
 vi.mock('../diagnostics/main-thread-churn-probe', () => ({ recordSubprocessSpawn: vi.fn() }))
 
+import { pendingWslDirectGitReadEnvironment } from './command-runner/git-command-resolution'
 import { gitExecFileAsync, gitSpawn, gitStreamStdout } from './runner'
 import {
+  disableWslGitReadEnvironment,
   getWslGitReadEnvironment,
   resetWslGitReadEnvironmentForTests,
   seedWslGitReadEnvironmentForTests,
@@ -434,6 +436,57 @@ describe('WSL direct Git reads', () => {
         const resolved = execFileMock.mock.calls.at(-1)?.[1] ?? []
         expect(resolved.slice(3, 5)).toEqual(['bash', '-c'])
         expect(resolved).not.toContain('/usr/bin/env')
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+  })
+
+  // Once the route is disabled the answer is already known, so paying for a timer and two
+  // extra microtask hops on every later read is pure overhead on the host this PR targets.
+  it('stops deferring reads once the direct route is disabled for the distro', async () => {
+    await withPlatform('win32', async () => {
+      seedWslGitReadEnvironmentForTests(DISTRO, LOGIN_ENVIRONMENT)
+      disableWslGitReadEnvironment(DISTRO)
+
+      expect(
+        pendingWslDirectGitReadEnvironment(['show', ':src/file.ts'], {
+          cwd: String.raw`\\wsl.localhost\Ubuntu\repo`
+        })
+      ).toBeNull()
+    })
+  })
+
+  it('never waits on the probe for an already-aborted read', async () => {
+    await withPlatform('win32', async () => {
+      const controller = new AbortController()
+      controller.abort()
+
+      expect(
+        pendingWslDirectGitReadEnvironment(['show', ':src/file.ts'], {
+          cwd: String.raw`\\wsl.localhost\Ubuntu\repo`,
+          signal: controller.signal
+        })
+      ).toBeNull()
+      expect(execFileMock).not.toHaveBeenCalled()
+    })
+  })
+
+  it('stops waiting for a cold probe as soon as the read aborts', async () => {
+    await withPlatform('win32', async () => {
+      vi.useFakeTimers()
+      try {
+        // The probe never answers, so only the abort can end the wait.
+        execFileMock.mockImplementation(() => createMockChild())
+        const controller = new AbortController()
+
+        const pending = pendingWslDirectGitReadEnvironment(['show', ':src/file.ts'], {
+          cwd: String.raw`\\wsl.localhost\Ubuntu\repo`,
+          signal: controller.signal
+        })
+        controller.abort()
+
+        await expect(pending).resolves.toBeNull()
       } finally {
         vi.useRealTimers()
       }

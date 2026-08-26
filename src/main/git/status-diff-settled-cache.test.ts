@@ -208,6 +208,32 @@ describe('settled diff cache', () => {
     expect(second).toMatchObject({ originalContent: 'post-mutation\n' })
   })
 
+  // The stamp is itself several awaited stats, so a mutation can begin and end entirely
+  // inside it — leaving a stamp torn across the mutation that no later stamp can match.
+  it('refuses to store a result for a mutation that landed inside the stamp read', async () => {
+    const baseStat = statMock.getMockImplementation()
+    if (!baseStat) {
+      throw new Error('the fake filesystem lost its stat implementation')
+    }
+    let invalidated = false
+    statMock.mockImplementation(async (target: string) => {
+      if (!invalidated && target === INDEX_PATH) {
+        invalidated = true
+        invalidateGitReadCaches()
+      }
+      return baseStat(target)
+    })
+    try {
+      await getDiff(REPO, FILE, false)
+    } finally {
+      statMock.mockImplementation(baseStat)
+    }
+
+    expect(invalidated).toBe(true)
+    expect(settledDiffCache.stats().invalidatedDuringRead).toBe(1)
+    expect(settledDiffCache.stats().entries).toBe(0)
+  })
+
   // A write inside the mtime granularity window could be overwritten again without
   // moving the timestamp, so that read is not allowed to become a cache entry.
   it('refuses to store a diff of a file written moments ago', async () => {

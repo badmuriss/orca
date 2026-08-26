@@ -1,3 +1,4 @@
+import { BoundedMap } from '../../../shared/bounded-map'
 import type { GitDiffResult } from '../../../shared/git-diff-compare-types'
 import { canProveUnchangedByStamp, type WorktreeDiffStamp } from './worktree-diff-stamp'
 
@@ -38,8 +39,12 @@ export type SettledDiffCacheStats = {
 type CacheEntry = { stamp: string; result: GitDiffResult; characters: number }
 
 export class SettledDiffCache {
-  private readonly entries = new Map<string, CacheEntry>()
-  private retainedCharacters = 0
+  private readonly entries = new BoundedMap<string, CacheEntry>({
+    maxEntries: MAX_SETTLED_DIFF_CACHE_ENTRIES,
+    maxBytes: MAX_SETTLED_DIFF_CACHE_TOTAL_CHARACTERS,
+    maxEntryBytes: MAX_SETTLED_DIFF_CACHE_RESULT_CHARACTERS,
+    sizeOf: (entry) => entry.characters
+  })
   private generation = 0
   private hits = 0
   private misses = 0
@@ -62,14 +67,12 @@ export class SettledDiffCache {
       this.unprovable += 1
       return undefined
     }
+    // BoundedMap.get() already refreshes the LRU position.
     const entry = this.entries.get(key)
     if (!entry || entry.stamp !== stamp.value) {
       this.misses += 1
       return undefined
     }
-    // Refresh LRU position.
-    this.entries.delete(key)
-    this.entries.set(key, entry)
     this.hits += 1
     return entry.result
   }
@@ -92,36 +95,13 @@ export class SettledDiffCache {
       return
     }
     const characters = resultCharacterCount(result)
-    if (characters > MAX_SETTLED_DIFF_CACHE_RESULT_CHARACTERS) {
-      return
-    }
-    this.evict(key)
-    this.entries.set(key, { stamp: stamp.value, result, characters })
-    this.retainedCharacters += characters
-    this.stores += 1
-    while (
-      this.entries.size > MAX_SETTLED_DIFF_CACHE_ENTRIES ||
-      this.retainedCharacters > MAX_SETTLED_DIFF_CACHE_TOTAL_CHARACTERS
-    ) {
-      const oldestKey = this.entries.keys().next().value
-      if (oldestKey === undefined || oldestKey === key) {
-        break
-      }
-      this.evict(oldestKey)
-    }
-  }
-
-  private evict(key: string): void {
-    const existing = this.entries.get(key)
-    if (existing) {
-      this.retainedCharacters -= existing.characters
-      this.entries.delete(key)
+    if (this.entries.set(key, { stamp: stamp.value, result, characters })) {
+      this.stores += 1
     }
   }
 
   clear(): void {
     this.entries.clear()
-    this.retainedCharacters = 0
     // Why: bump so a read that started pre-mutation can't repopulate the invalidated cache.
     this.generation += 1
   }
@@ -140,7 +120,7 @@ export class SettledDiffCache {
       racyWrites: this.racyWrites,
       invalidatedDuringRead: this.invalidatedDuringRead,
       entries: this.entries.size,
-      retainedCharacters: this.retainedCharacters
+      retainedCharacters: this.entries.retainedBytes
     }
   }
 

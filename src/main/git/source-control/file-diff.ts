@@ -72,13 +72,15 @@ async function loadDiffThroughSettledCache(
   compareAgainstHead: boolean,
   options: GitRuntimeOptions
 ): Promise<GitDiffResult> {
+  // Why before the stamp read: the stamp is itself several awaited stats, and a mutation that
+  // lands entirely inside that window would otherwise leave the fence covering only the git read.
+  const readGeneration = settledDiffCache.beginRead()
   // A staged diff compares HEAD to the index, so the working tree is not one of its inputs.
   const stamp = await readWorktreeDiffStamp(worktreePath, filePath, !staged)
   const cached = settledDiffCache.get(readKey, stamp)
   if (cached) {
     return cached
   }
-  const readGeneration = settledDiffCache.beginRead()
   const loaded = await loadDiff(worktreePath, filePath, staged, compareAgainstHead, options)
   if (loaded.reusable) {
     settledDiffCache.set(readKey, stamp, loaded.result, readGeneration)

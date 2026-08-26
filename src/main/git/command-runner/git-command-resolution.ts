@@ -1,9 +1,12 @@
+import { waitForPromiseWithSignal } from '../../../shared/abort-signal-reason'
+import { withTimeout } from '../../../shared/promise-timeout-fallback'
 import { parseWslPath } from '../../wsl'
 import { isWslDirectGitReadCommand } from '../wsl-direct-git-read-commands'
 import {
   disableWslGitReadEnvironment,
   getWslGitReadEnvironment,
   invalidateWslGitReadEnvironment,
+  isWslGitReadEnvironmentSettled,
   peekWslGitReadEnvironment,
   WSL_GIT_READ_ENVIRONMENT_WAIT_MS
 } from '../wsl-git-read-environment'
@@ -91,21 +94,18 @@ export function pendingWslDirectGitReadEnvironment(
 ): Promise<unknown> | null {
   // Why null rather than a resolved promise: every non-WSL git call goes through here, and
   // awaiting even an already-settled promise would push the spawn into a later microtask.
+  // A settled probe — including a distro whose direct route was permanently disabled — has
+  // nothing left to wait for, and neither does a read that is already aborted.
   const distro = directWslGitReadDistro(args, options, false)
-  if (!distro || peekWslGitReadEnvironment(distro)) {
+  if (!distro || isWslGitReadEnvironmentSettled(distro) || options.signal?.aborted) {
     return null
   }
-  let timer: ReturnType<typeof setTimeout> | undefined
-  return Promise.race([
-    getWslGitReadEnvironment(distro),
-    new Promise((resolve) => {
-      timer = setTimeout(resolve, WSL_GIT_READ_ENVIRONMENT_WAIT_MS)
-    })
-  ]).finally(() => {
-    if (timer) {
-      clearTimeout(timer)
-    }
-  })
+  // withTimeout also absorbs rejection, so a probe failure can never become a read failure.
+  return withTimeout(
+    waitForPromiseWithSignal(getWslGitReadEnvironment(distro), options.signal),
+    WSL_GIT_READ_ENVIRONMENT_WAIT_MS,
+    null
+  )
 }
 
 export function resolveGitCommandWithoutProbe(
