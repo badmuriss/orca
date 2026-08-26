@@ -21,7 +21,8 @@ import { gitExecFileAsync, gitSpawn, gitStreamStdout } from './runner'
 import {
   getWslGitReadEnvironment,
   resetWslGitReadEnvironmentForTests,
-  seedWslGitReadEnvironmentForTests
+  seedWslGitReadEnvironmentForTests,
+  WSL_GIT_READ_ENVIRONMENT_WAIT_MS
 } from './wsl-git-read-environment'
 import {
   prepareWslLinkedWorktreeGitRouting,
@@ -349,7 +350,9 @@ describe('WSL direct Git reads', () => {
     })
   })
 
-  it('leaves override-less WSL UNC routing on its existing non-login shell', async () => {
+  // A UNC worktree names its distro in the path, so a read there needs no resolved WSL project
+  // runtime to skip the shell -- requiring one is what kept every diff read on the login shell.
+  it('takes the direct read route for an override-less WSL UNC cwd', async () => {
     await withPlatform('win32', async () => {
       seedWslGitReadEnvironmentForTests(DISTRO, LOGIN_ENVIRONMENT)
       succeedExecFile()
@@ -359,7 +362,81 @@ describe('WSL direct Git reads', () => {
         preferWslDirectGit: true
       })
 
-      expect(execFileMock.mock.calls[0]?.[1]?.slice(3, 5)).toEqual(['bash', '-c'])
+      const resolved = execFileMock.mock.calls[0]?.[1] ?? []
+      expect(resolved).toContain('--exec')
+      expect(resolved).toContain(`PATH=${LOGIN_ENVIRONMENT.path}`)
+      expect(resolved).not.toContain('bash')
+    })
+  })
+
+  // The classifier already recognizes `show`, so the blob reads behind every diff take the
+  // direct route from the cwd alone -- no caller-supplied distro, no explicit opt-in.
+  it('takes the direct read route for an unclassified-caller blob read on a UNC cwd', async () => {
+    await withPlatform('win32', async () => {
+      seedWslGitReadEnvironmentForTests(DISTRO, LOGIN_ENVIRONMENT)
+      succeedExecFile()
+
+      await gitExecFileAsync(['show', ':src/file.ts'], {
+        cwd: String.raw`\\wsl.localhost\Ubuntu\repo`
+      })
+
+      expect(execFileMock.mock.calls[0]?.[1]).toContain('--exec')
+    })
+  })
+
+  // Kicking the probe off and resolving without it left the reads issued before it
+  // answered on the login shell -- the slow route, chosen by nothing but timing.
+  it('waits for a cold probe so the first read already skips the shell', async () => {
+    await withPlatform('win32', async () => {
+      execFileMock.mockImplementation((_command, args, _options, callback) => {
+        const child = createMockChild()
+        if (String(args).includes('_orca_git_path')) {
+          setTimeout(
+            () => callback?.(null, fencedProbeStdout(args, LOGIN_ENVIRONMENT_FIELDS), ''),
+            0
+          )
+        } else {
+          queueMicrotask(() => callback?.(null, 'ok', ''))
+        }
+        return child
+      })
+
+      await gitExecFileAsync(['show', ':src/file.ts'], {
+        cwd: String.raw`\\wsl.localhost\Ubuntu\repo`
+      })
+
+      expect(execFileMock.mock.calls.at(-1)?.[1]).toContain('--exec')
+      expect(execFileMock.mock.calls.at(-1)?.[1]).toContain(`PATH=${LOGIN_ENVIRONMENT.path}`)
+    })
+  })
+
+  it('stops waiting for a wedged probe and reads through the shell route', async () => {
+    await withPlatform('win32', async () => {
+      vi.useFakeTimers()
+      try {
+        execFileMock.mockImplementation((_command, args, _options, callback) => {
+          const child = createMockChild()
+          // The probe never answers; only the git command itself does.
+          if (!String(args).includes('_orca_git_path')) {
+            queueMicrotask(() => callback?.(null, 'ok', ''))
+          }
+          return child
+        })
+
+        const pending = gitExecFileAsync(['show', ':src/file.ts'], {
+          cwd: String.raw`\\wsl.localhost\Ubuntu\repo`
+        })
+        await vi.advanceTimersByTimeAsync(WSL_GIT_READ_ENVIRONMENT_WAIT_MS)
+        await pending
+
+        // Exactly the routing this read had before the wait existed: an unanswered
+        // probe must cost the bound and nothing else.
+        const resolved = execFileMock.mock.calls.at(-1)?.[1] ?? []
+        expect(resolved.slice(3, 5)).toEqual(['bash', '-c'])
+        expect(resolved).not.toContain('/usr/bin/env')
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 

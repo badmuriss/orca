@@ -7,6 +7,12 @@ import {
 export type WslGitReadEnvironment = { gitPath: string; home: string; path: string }
 
 const PROBE_TIMEOUT_MS = 10_000
+/**
+ * How long a read may wait for a cold probe before taking the login shell.
+ * Short enough that a wedged distro cannot stall the panel, long enough that a
+ * healthy one resolves and every later read runs shell-free.
+ */
+export const WSL_GIT_READ_ENVIRONMENT_WAIT_MS = 1_500
 const PROBE_MAX_BUFFER = 64 * 1024
 const TRANSIENT_PROBE_RETRY_MS = 30_000
 const environmentByDistro = new Map<string, Promise<WslGitReadEnvironment | null>>()
