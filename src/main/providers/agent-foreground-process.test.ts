@@ -277,6 +277,13 @@ describe('resolveAgentForegroundProcess', () => {
     await expect(confirmShellForegroundProcess(100, 'zsh')).resolves.toBe(false)
   })
 
+  it('refuses WSL shells: wsl.exe is not a provable shell identity', async () => {
+    // Why pinned: the WSL job object holds only wsl.exe, so a looser
+    // isShellProcess would confirm ownership regardless of distro-side state.
+    await expect(confirmShellForegroundProcess(100, 'wsl.exe')).resolves.toBe(false)
+    expect(execFileMock).not.toHaveBeenCalled()
+  })
+
   it('fails open when fresh shell ownership inspection is unavailable', async () => {
     execFileMock.mockImplementation(
       (_cmd: string, _args: string[], _opts: unknown, cb: unknown) => {

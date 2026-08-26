@@ -11826,8 +11826,12 @@ describe('OrcaRuntimeService', () => {
 
     resolveConfirmation?.(true)
     const shellSnapshot = await shellSnapshotPromise
+    // Why alternateScreen stays true here: the mirror never rewrites its own
+    // model — without a daemon barrier injecting the reset in-stream (direct
+    // provider path), the snapshot publishes the poisoned mode alongside the
+    // proof and the renderer's dead-TUI branch grounds the pane.
     expect(shellSnapshot).toMatchObject({
-      alternateScreen: false,
+      alternateScreen: true,
       terminalOwner: 'shell',
       seq: '\x1b[?1049hTUI\x1b]133;D;137\x07shell-marker'.length
     })
@@ -11857,7 +11861,6 @@ describe('OrcaRuntimeService', () => {
     type HeadlessStateForTest = {
       emulator: {
         isAlternateScreen: boolean
-        settleShellOwnershipConfirmation: () => Promise<void>
         getSnapshot: (opts: { scrollbackRows?: number }) => {
           rehydrateSequences: string
           snapshotAnsi: string
@@ -11867,6 +11870,7 @@ describe('OrcaRuntimeService', () => {
       }
       outputSequence: number
       writeChain: Promise<void>
+      ownership: { settle: () => Promise<void>; owner: undefined }
     }
     const runtimePrivate = runtime as unknown as {
       headlessTerminals: Map<string, HeadlessStateForTest>
@@ -11874,11 +11878,11 @@ describe('OrcaRuntimeService', () => {
     runtimePrivate.headlessTerminals.set('pty-empty', {
       emulator: {
         isAlternateScreen: false,
-        settleShellOwnershipConfirmation: async () => {},
         getSnapshot: () => ({ rehydrateSequences: '', snapshotAnsi: '', cols: 90, rows: 30 })
       },
       outputSequence: 17,
-      writeChain: Promise.resolve()
+      writeChain: Promise.resolve(),
+      ownership: { settle: async () => {}, owner: undefined }
     })
 
     await expect(runtime.serializeHiddenOutputRecoveryBuffer('pty-empty')).resolves.toEqual({

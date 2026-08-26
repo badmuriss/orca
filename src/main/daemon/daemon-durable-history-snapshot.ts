@@ -1,6 +1,7 @@
 import { ColdRestoreReplayWriter } from './cold-restore-replay-writer'
 import { DAEMON_RESTORE_SCROLLBACK_ROWS } from './daemon-restore-scrollback-depth'
 import { HeadlessEmulator } from './headless-emulator'
+import { TerminalShellLifecycleScanner } from './terminal-shell-lifecycle-scanner'
 import { isValidTerminalHistorySize } from './terminal-history-dimensions'
 import type { ColdRestoreInfo } from './terminal-history-cold-restore-info'
 import type { PendingOutputRecord, TerminalSnapshot } from './types'
@@ -92,14 +93,25 @@ export async function buildDurableCheckpointSnapshot(opts: {
         emulator.setLastTitle(base.lastTitle)
       }
       emulator.setCwd(base.cwd)
-      emulator.setTerminalOwner(base.terminalOwner)
     }
+    // Why a scanner, not emulator state: ownership is lifecycle evidence bound
+    // to byte order — newer replayed output (a TUI starting) must revoke a
+    // persisted proof exactly as it would have live.
+    const ownershipScanner = new TerminalShellLifecycleScanner()
+    ownershipScanner.seedOwner(opts.restoreInfo?.terminalOwner)
     if (!(await replayPendingRecords(replay, pendingRecords))) {
       return opts.liveSnapshot
     }
+    for (const record of pendingRecords) {
+      if (record.kind === 'output') {
+        scanAllForOwnership(ownershipScanner, record.data)
+      }
+    }
     const snapshot = emulator.getSnapshot()
+    const terminalOwner = ownershipScanner.owner
     return {
       ...snapshot,
+      ...(terminalOwner ? { terminalOwner } : {}),
       ...(opts.liveSnapshot.outputSequence !== undefined
         ? { outputSequence: opts.liveSnapshot.outputSequence }
         : {}),
@@ -129,6 +141,19 @@ function restoreBaseFrom(restoreInfo: ColdRestoreInfo): RestoreBase {
     cwd: restoreInfo.cwd,
     cols: restoreInfo.cols,
     rows: restoreInfo.rows
+  }
+}
+
+/** Replay can only carry or revoke a persisted proof, never mint one: the
+ *  scanner has no confirmation source, so triggers are consumed as revocations. */
+function scanAllForOwnership(scanner: TerminalShellLifecycleScanner, data: string): void {
+  let rest = data
+  while (rest.length > 0) {
+    const events = scanner.scan(rest)
+    if (events.uncleanDeathTriggerEnd === undefined) {
+      return
+    }
+    rest = rest.slice(events.uncleanDeathTriggerEnd)
   }
 }
 

@@ -175,19 +175,26 @@ describe('Session', () => {
       expect(session.getSnapshot()?.terminalOwner).toBeUndefined()
     })
 
-    it('coalesces concurrent host shell confirmations for one PTY', async () => {
+    it('answers concurrent runtime confirmations from one episode inspection', async () => {
       let resolveConfirmation: ((confirmed: boolean) => void) | undefined
       subprocess.confirmShellForeground.mockImplementation(
         () => new Promise((resolve) => void (resolveConfirmation = resolve))
       )
       createSession()
 
+      // Why no inspection without a candidate: the RPC reads the barrier's
+      // settled verdict; it must never mint proof the byte stream didn't ask for.
+      await expect(session.confirmShellForeground()).resolves.toBe(false)
+      expect(subprocess.confirmShellForeground).not.toHaveBeenCalled()
+
+      subprocess.simulateData('\x1b[?1049hTUI\x1b]133;D;137\x07')
       const first = session.confirmShellForeground()
       const second = session.confirmShellForeground()
       expect(subprocess.confirmShellForeground).toHaveBeenCalledTimes(1)
       resolveConfirmation?.(true)
 
       await expect(Promise.all([first, second])).resolves.toEqual([true, true])
+      expect(subprocess.confirmShellForeground).toHaveBeenCalledTimes(1)
     })
 
     it('reuses the parser confirmation for a concurrent runtime request', async () => {

@@ -155,6 +155,18 @@ for (const exitMode of ['normal', 'sigkill'] as const) {
       )
       .toEqual({ buffer: 'normal', mouse: 'none' })
 
+    // Why normal-exit only: the barrier preserves shell output from the 133;D
+    // boundary onward (the prompt), but bytes the dying command printed while
+    // the alternate screen was still up are part of the discarded dead frame.
+    // On SIGKILL the parent's exit line lands pre-D in the alt buffer, so it is
+    // unrecoverable by design; on normal exit the child's own ?1049l precedes
+    // it and it survives on the normal buffer.
+    if (exitMode === 'normal') {
+      await expect
+        .poll(() => getTerminalContent(orcaPage, 6_000), { timeout: 8_000 })
+        .toContain('CHILD_TUI_KILLED')
+    }
+
     const shellInputMarker = 'SHELL_INPUT_AFTER_TUI_KILL'
     await execInTerminal(orcaPage, revealedPtyId!, `printf ${shellInputMarker}`)
     await expect

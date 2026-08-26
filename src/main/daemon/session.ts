@@ -1,7 +1,9 @@
 import { isValidPtySize } from './daemon-pty-size'
-import { SessionOutputPlane, type AttachedClient } from './session-output-plane'
+import type { SessionOutputPlane, AttachedClient } from './session-output-plane'
+import { createSessionOutputPipeline } from './session-output-pipeline'
 import { SessionProducerPause } from './session-producer-pause'
 import { SessionShellReadyBarrier } from './session-shell-ready-barrier'
+import type { TerminalShellRecoveryBarrier } from './terminal-shell-recovery-barrier'
 import {
   SessionTerminationController,
   IMMEDIATE_KILL_PHYSICAL_EXIT_TIMEOUT_MS
@@ -37,6 +39,7 @@ export class Session {
   private readonly shellReady: SessionShellReadyBarrier
   private readonly termination: SessionTerminationController
   private readonly startupIngress: PtyStartupIngress
+  private readonly recoveryBarrier: TerminalShellRecoveryBarrier
 
   constructor(opts: SessionOptions) {
     this.sessionId = opts.sessionId
@@ -45,15 +48,17 @@ export class Session {
     this.wslDistro = opts.wslDistro ?? null
     this.subprocess = opts.subprocess
     this.onSessionExit = opts.onExit
-    this.output = new SessionOutputPlane({
+    const pipeline = createSessionOutputPipeline({
       cols: opts.cols,
       rows: opts.rows,
       scrollback: opts.scrollback,
       wslDistro: opts.wslDistro,
       historySeedChunks: opts.historySeedChunks,
-      confirmShellForeground: this.subprocess.confirmShellForeground,
-      isSessionAlive: () => !this._disposed && this._state !== 'exited'
+      subprocess: this.subprocess,
+      isAlive: () => !this._disposed && this._state !== 'exited'
     })
+    this.output = pipeline.output
+    this.recoveryBarrier = pipeline.recoveryBarrier
     this.producerPause = new SessionProducerPause(this.subprocess)
     this.termination = new SessionTerminationController({
       sessionId: this.sessionId,
@@ -79,7 +84,7 @@ export class Session {
       ...(opts.startupIngress ? { intent: opts.startupIngress } : {}),
       ...(opts.ownerBackend ? { ownerBackend: opts.ownerBackend } : {}),
       write: (data) => this.subprocess.write(data),
-      onEmission: (emission) => this.output.emit(emission)
+      onEmission: (emission) => this.recoveryBarrier.accept(emission)
     })
     this.shellReady.startPromptReadinessProbe()
     this.subprocess.onData((data) => this.handleSubprocessData(data))
@@ -151,10 +156,7 @@ export class Session {
   }
 
   resize(cols: number, rows: number): void {
-    if (this._state === 'exited' || this._disposed) {
-      return
-    }
-    if (!isValidPtySize(cols, rows)) {
+    if (this._state === 'exited' || this._disposed || !isValidPtySize(cols, rows)) {
       return
     }
     this.output.resize(cols, rows)
@@ -254,22 +256,23 @@ export class Session {
     return this.subprocess.confirmForegroundProcess?.() ?? this.subprocess.getForegroundProcess()
   }
 
-  async confirmShellForeground(): Promise<boolean> {
-    return this.output.confirmShellForeground()
+  confirmShellForeground(): Promise<boolean> {
+    return this.recoveryBarrier.confirmOwnerSettled()
   }
 
-  settleShellOwnershipConfirmation(): Promise<void> {
-    return this.output.settleShellOwnershipConfirmation()
+  async settleShellOwnershipConfirmation(): Promise<void> {
+    await this.recoveryBarrier.awaitProofSettled()
+    // Why the fence: a snapshot at settle-resolution must not race the drained prompt's async parse.
+    await this.output.flushParsedWrites()
   }
 
   clearScrollback(): void {
-    if (this._disposed) {
-      return
-    }
     this.output.clearScrollback(this.subprocess, this.shellReady.isGatingWrites)
   }
 
   prepareForFinalSnapshot(): string {
+    // Why first: a teardown checkpoint mid-episode must not lose the barrier's queued prompt bytes.
+    this.recoveryBarrier.flushPending()
     const held = this.shellReady.releaseHeldBytes()
     this.startupIngress.snapshotBarrier()
     return held
@@ -302,6 +305,7 @@ export class Session {
 
     this.output.clearClients()
     this.shellReady.clearPendingWrites()
+    this.recoveryBarrier.dispose()
     this.output.disposeEmulator()
 
     for (const client of clientsToNotify) {

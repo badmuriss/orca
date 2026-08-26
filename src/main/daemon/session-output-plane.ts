@@ -5,7 +5,6 @@ import { normalizePtySize } from './daemon-pty-size'
 import type { PtyIngressEmission } from '../../shared/pty-startup-ingress'
 import type { PendingOutputRecord, TakePendingOutputResult, TerminalSnapshot } from './types'
 import type { TerminalOwner } from '../../shared/terminal-owner'
-import { SessionShellForegroundConfirmation } from './session-shell-foreground-confirmation'
 import type { SubprocessHandle } from './session-subprocess-handle'
 import { nudgePowerShellPromptRepaint } from './session-powershell-prompt-repaint'
 
@@ -25,8 +24,9 @@ export type SessionOutputPlaneOptions = {
   scrollback?: number | undefined
   wslDistro?: string | undefined
   historySeedChunks?: readonly string[] | undefined
-  confirmShellForeground?: (() => Promise<boolean>) | undefined
-  isSessionAlive?: (() => boolean) | undefined
+  /** Read from the recovery barrier at snapshot time; the barrier scans bytes
+   *  before this plane receives them, so its owner never lags the emulator. */
+  getTerminalOwner?: (() => TerminalOwner | undefined) | undefined
 }
 
 /** Everything downstream of the PTY: the scrollback emulator, the pending-output record buffer that
@@ -34,7 +34,7 @@ export type SessionOutputPlaneOptions = {
 export class SessionOutputPlane {
   readonly historySeeded: boolean | undefined
   private readonly emulator: HeadlessEmulator
-  private readonly shellForeground: SessionShellForegroundConfirmation
+  private readonly readTerminalOwner: (() => TerminalOwner | undefined) | undefined
   private attachedClients: AttachedClient[] = []
   private pendingOutputRecords: PendingOutputRecord[] = []
   private pendingOutputBytes = 0
@@ -63,12 +63,7 @@ export class SessionOutputPlane {
       opts.historySeedChunks === undefined
         ? undefined
         : opts.historySeedChunks.every((chunk) => this.emulator.writeSync(chunk))
-    this.shellForeground = new SessionShellForegroundConfirmation(
-      opts.confirmShellForeground,
-      opts.isSessionAlive ?? (() => !this.disposed),
-      () => this.emulator.getTerminalOwner() === 'shell'
-    )
-    this.emulator.setShellOwnershipConfirmation(() => this.shellForeground.confirm())
+    this.readTerminalOwner = opts.getTerminalOwner
   }
 
   get responderParser(): HeadlessEmulator['responderParser'] {
@@ -117,6 +112,9 @@ export class SessionOutputPlane {
   }
 
   clearScrollback(subprocess: SubprocessHandle, isGatingWrites: boolean): void {
+    if (this.disposed) {
+      return
+    }
     this.emulator.clearScrollback()
     this.record({ kind: 'clear' })
     subprocess.clear?.()
@@ -136,22 +134,28 @@ export class SessionOutputPlane {
   }
 
   getTerminalOwner(): TerminalOwner | undefined {
-    return this.emulator.getTerminalOwner()
+    return this.readTerminalOwner?.()
   }
 
-  confirmShellForeground(): Promise<boolean> {
-    return this.shellForeground.confirm()
-  }
-
-  settleShellOwnershipConfirmation(): Promise<void> {
-    return this.emulator.settleShellOwnershipConfirmation()
+  /** FIFO fence over the emulator's async parse queue: resolves once every
+   *  write issued before this call has been parsed into the model. */
+  flushParsedWrites(): Promise<void> {
+    if (this.disposed) {
+      return Promise.resolve()
+    }
+    return this.emulator.write('')
   }
 
   getSnapshot(opts: { scrollbackRows?: number } = {}): TerminalSnapshot | null {
     if (this.disposed) {
       return null
     }
-    return { ...this.emulator.getSnapshot(opts), outputSequence: this._outputSequence }
+    const terminalOwner = this.readTerminalOwner?.()
+    return {
+      ...this.emulator.getSnapshot(opts),
+      ...(terminalOwner ? { terminalOwner } : {}),
+      outputSequence: this._outputSequence
+    }
   }
 
   getPartialEscapeTailAnsi(): string {

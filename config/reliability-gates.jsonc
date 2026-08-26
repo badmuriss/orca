@@ -4976,16 +4976,18 @@
       "coveredProviders": ["local", "daemon", "remote-runtime"],
       "coverageNotes": "Deterministic host/parser, process-classifier, snapshot-publication, mixed-version, renderer, and macOS Electron coverage proves the local and shared paired-runtime contracts. Direct SSH intentionally publishes no shell proof and immediately preserves incumbent behavior. WSL, Windows ConPTY, Linux desktop, and paired headed/headless journeys remain gaps.",
       "motivatingLinks": ["https://github.com/stablyai/orca/pull/16379"],
-      "invariant": "After a TUI exits or is killed, reveal, reattach, snapshot replay, or renderer remount must not deliver terminal-owned mouse or alternate-screen protocol bytes to the surviving shell. A focused mode reset is permitted only when ordered shell completion and fresh execution-host process inspection establish sequence-bound shell ownership; the host then normalizes its snapshot model once, while later command or mode bytes revoke proof and missing proof preserves incumbent behavior.",
-      "oracle": "Run one fixed child-TUI journey for normal exit and cleanup-free SIGKILL. Assert the visible shell marker, renderer and host normal-buffer/non-mouse state, host snapshot terminalOwner metadata, exact PTY writes with no post-exit mouse report, unrelated-pane survival, ordered proof invalidation, bounded snapshot settlement, one inspection per poisoned mode episode, zero ownership scans for ordinary output/live TUI frames, and old/new client-host fallback parity.",
+      "invariant": "After a TUI exits or is killed, reveal, reattach, snapshot replay, or renderer remount must not deliver terminal-owned mouse or alternate-screen protocol bytes to the surviving shell. Recovery is an ordered output barrier in the daemon session data path: an OSC 133;D completing while the alternate screen is still active pauses the stream at that exact byte boundary, a fresh execution-host process inspection proves shell ownership, and on proof a mode reset is injected as in-stream output so every consumer converges by parsing the same bytes and the queued post-boundary shell output (the prompt) lands on the normal buffer. Snapshots are pure reads. Any failure — refuted proof, timeout, queue overflow, session death, disposal — flushes the queue unmodified, preserving incumbent behavior; later command or mode bytes revoke proof. Clean alternate-screen exits prove ownership asynchronously without pausing.",
+      "oracle": "Run one fixed child-TUI journey for normal exit and cleanup-free SIGKILL. Assert renderer and host normal-buffer/non-mouse state, host snapshot terminalOwner metadata, exact PTY writes with no post-exit mouse report, unrelated-pane survival, post-boundary prompt output preserved (normal exit), ordered proof invalidation, bounded settlement and bail-out flush, one inspection per unclean episode with zero scans for ordinary output, split-escape safety at every chunk boundary, and old/new client-host fallback parity.",
       "commands": [
-        "pnpm exec vitest run --config config/vitest.config.ts src/main/daemon/headless-emulator.test.ts src/main/daemon/session.test.ts src/main/daemon/terminal-host-concurrent-create.test.ts src/main/daemon/daemon-pty-adapter.test.ts src/main/daemon/daemon-restore-scrollback-depth.test.ts src/main/daemon/terminal-checkpoint-serializer.test.ts src/main/providers/agent-foreground-process.test.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/mobile-subscribe-integration.test.ts src/main/runtime/rpc/terminal-multiplex-escape-tail.test.ts src/renderer/src/components/terminal-pane/pty-connection-hidden-codex-queries.test.ts src/renderer/src/components/terminal-pane/pty-connection-reattach-mode-reset.test.ts src/renderer/src/components/terminal-pane/pty-connection-daemon-snapshot-replay.test.ts src/renderer/src/components/terminal-pane/remote-runtime-pty-snapshot-escape-tail.test.ts --reporter=dot",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/daemon/terminal-shell-lifecycle-scanner.test.ts src/main/daemon/terminal-shell-recovery-barrier.test.ts src/main/daemon/session-shell-recovery.test.ts src/main/daemon/session.test.ts src/main/daemon/terminal-host-concurrent-create.test.ts src/main/daemon/daemon-pty-adapter.test.ts src/main/daemon/daemon-restore-scrollback-depth.test.ts src/main/daemon/terminal-checkpoint-serializer.test.ts src/main/providers/agent-foreground-process.test.ts src/main/runtime/orca-runtime.test.ts src/main/runtime/mobile-subscribe-integration.test.ts src/main/runtime/rpc/terminal-multiplex-escape-tail.test.ts src/renderer/src/components/terminal-pane/pty-connection-hidden-codex-queries.test.ts src/renderer/src/components/terminal-pane/pty-connection-reattach-mode-reset.test.ts src/renderer/src/components/terminal-pane/pty-connection-daemon-snapshot-replay.test.ts src/renderer/src/components/terminal-pane/remote-runtime-pty-snapshot-escape-tail.test.ts --reporter=dot",
         "pnpm exec vitest run --config config/vitest.config.ts tests/e2e/cross-version-wire/cross-version-terminal-wire.unit.test.ts --reporter=dot",
         "pnpm exec electron-vite build --mode e2e",
         "SKIP_BUILD=1 pnpm exec playwright test tests/e2e/terminal-hidden-child-tui-kill-mode-reset.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1"
       ],
       "testFiles": [
-        "src/main/daemon/headless-emulator.test.ts",
+        "src/main/daemon/terminal-shell-lifecycle-scanner.test.ts",
+        "src/main/daemon/terminal-shell-recovery-barrier.test.ts",
+        "src/main/daemon/session-shell-recovery.test.ts",
         "src/main/daemon/session.test.ts",
         "src/main/daemon/terminal-host-concurrent-create.test.ts",
         "src/main/daemon/daemon-pty-adapter.test.ts",
@@ -5004,12 +5006,20 @@
       ],
       "assertionRefs": [
         {
-          "file": "src/main/daemon/headless-emulator.test.ts",
+          "file": "src/main/daemon/terminal-shell-recovery-barrier.test.ts",
           "assertions": [
-            "ordered shell completion plus foreground proof publishes terminalOwner and normalizes stale host modes at one snapshot boundary",
-            "command start, alternate-screen or Kitty-keyboard entry, replacement, or disposal invalidates stale proof",
-            "later completion candidates cannot starve an in-flight snapshot settlement",
-            "ordinary output, live TUI frames, and later plain commands perform no repeated ownership scans"
+            "an unclean-death boundary pauses the stream, injects the reset in order, and delivers the queued prompt after it",
+            "refuted proof, timeout, overflow, death, and disposal all flush the queue unmodified with no injection",
+            "clean alternate-screen exits prove ownership without pausing and later command starts revoke proof",
+            "a second unclean episode queued behind the first resolves in order",
+            "split triggers across emissions split the completing emission at the exact sequence boundary"
+          ]
+        },
+        {
+          "file": "src/main/daemon/session-shell-recovery.test.ts",
+          "assertions": [
+            "post-kill shell output survives into the normalized snapshot instead of the discarded alt buffer",
+            "a snapshot taken during a split escape keeps the pending tail intact and stale proof is revoked by the completing bytes"
           ]
         },
         {
@@ -5029,8 +5039,8 @@
           "platform": "macos",
           "command": "SKIP_BUILD=1 pnpm exec playwright test tests/e2e/terminal-hidden-child-tui-kill-mode-reset.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
           "result": "passed",
-          "durationSeconds": 31.3,
-          "summary": "Both normal-exit and SIGKILL journeys passed after the host-owned fix; each asserted visible content, renderer and host normal modes, host ownership metadata, exact PTY input, and unrelated-pane survival."
+          "durationSeconds": 33.8,
+          "summary": "Both normal-exit and SIGKILL journeys passed on the ordered-output-barrier implementation; each asserted renderer and host normal modes, host ownership metadata, exact PTY input, no post-exit SGR mouse report under real pointer input, and unrelated-pane survival, with post-boundary prompt output additionally proven visible on normal exit."
         }
       ],
       "runtimeBudget": {
@@ -5047,7 +5057,7 @@
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "No reveal timer, polling, periodic scan, broad session inventory, or renderer remount is added. Deterministic count tests prove zero process inspections for ordinary output/live TUI frames and exactly one inspection for a poisoned mode episode even after later plain commands; settlement ignores post-boundary candidates. The event-triggered fresh host inspection measured 30 local macOS samples at 84.6 ms median, 103.7 ms p95, and 124.5 ms maximum; concurrent daemon/runtime requests coalesce per PTY."
+        "evidence": "No reveal timer, polling, periodic scan, broad session inventory, or renderer remount is added, and snapshots perform no writes. The stream pauses only for an unclean alternate-screen death (never for clean TUI exits or ordinary output), bounded by a 750 ms bail timer and a 256 KiB queue cap that both flush unmodified. The event-triggered fresh host inspection measured 30 local macOS samples at 84.6 ms median, 103.7 ms p95, and 124.5 ms maximum; the paired runtime asks the daemon for its settled verdict instead of running a second inspection."
       },
       "promotionCriteria": [
         "Collect 100 consecutive focused CI passes or 14 days of soak history.",
@@ -5056,6 +5066,9 @@
         "Keep missing-proof mixed-version behavior identical to the incumbent client path."
       ],
       "knownGaps": [
+        "A zero-width injected reset does not advance outputSequence, so the mobile renderer-snapshot stability oracle cannot detect a reset landing inside its serialize round-trip; the resulting tear is transient and self-heals on the next repaint (same exposure as the pre-existing device-attributes release emission).",
+        "Bytes the dying command printed before its OSC 133;D (pre-boundary output into the still-active alternate screen, e.g. a final panic line) are discarded with the dead frame; only post-boundary shell output is preserved.",
+        "Direct local provider and degraded (daemon-less) sessions get ownership proof and the renderer-side reset, but no in-stream normalization — pre-reveal prompt output is not preserved there.",
         "Visible Electron evidence is macOS-only.",
         "Direct SSH intentionally fails closed to current-main behavior because foreground proof would inherit transport timeout and enumeration ambiguity.",
         "WSL and Windows ConPTY process-membership behavior has no physical-host proof yet.",

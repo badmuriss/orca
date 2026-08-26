@@ -202,7 +202,6 @@ describe('mobile subscribe integration', () => {
     type HeadlessStateForTest = {
       emulator: {
         isAlternateScreen: boolean
-        settleShellOwnershipConfirmation: () => Promise<void>
         getSnapshot: (opts: { scrollbackRows?: number }) => {
           rehydrateSequences: string
           snapshotAnsi: string
@@ -212,6 +211,7 @@ describe('mobile subscribe integration', () => {
       }
       outputSequence: number
       writeChain: Promise<void>
+      ownership: { settle: () => Promise<void>; owner: undefined }
     }
     const runtimePrivate = runtime as unknown as {
       headlessTerminals: Map<string, HeadlessStateForTest>
@@ -219,11 +219,11 @@ describe('mobile subscribe integration', () => {
     runtimePrivate.headlessTerminals.set('pty-empty', {
       emulator: {
         isAlternateScreen: false,
-        settleShellOwnershipConfirmation: async () => {},
         getSnapshot: () => ({ rehydrateSequences: '', snapshotAnsi: '', cols: 90, rows: 30 })
       },
       outputSequence: 17,
-      writeChain: Promise.resolve()
+      writeChain: Promise.resolve(),
+      ownership: { settle: async () => {}, owner: undefined }
     })
 
     await expect(runtime.serializeMainTerminalBuffer('pty-empty')).resolves.toEqual({

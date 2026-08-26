@@ -1180,6 +1180,7 @@ import {
 } from '../ipc/watcher-removal-drain'
 import { withWorktreeSpan } from '../observability/instrumentation'
 import { HeadlessEmulator } from '../daemon/headless-emulator'
+import { PtyShellOwnershipMirror } from './pty-shell-ownership-mirror'
 import {
   isNativeWindowsConptyPty,
   registerConptyDa1OverrideInstaller,
@@ -1826,6 +1827,7 @@ type RuntimeHeadlessTerminal = {
   // the seq actually painted into this emulator, not the latest PTY seq.
   outputSequence: number
   writeChain: Promise<void>
+  ownership: PtyShellOwnershipMirror
 }
 
 export type RuntimePtyDataAdmission = Readonly<{
@@ -13079,14 +13081,18 @@ export class OrcaRuntimeService {
         if (metadata.oscLinks !== undefined) {
           state.emulator.setRestoredOscLinks(metadata.oscLinks)
         }
-        state.emulator.setTerminalOwner(metadata.terminalOwner)
+        // Why derived from the emulator: the seed bytes bypass ownership.scan,
+        // so the scanner must inherit the restored alternate-screen state or a
+        // pane seeded mid-TUI never arms its recovery trigger.
+        state.ownership.seedOwner(metadata.terminalOwner, {
+          alternateScreen: state.emulator.isAlternateScreen
+        })
         this.providerSnapshotPreferredPtys.delete(ptyId)
       })
       .catch(() => {
         // Seeding is best-effort; live data will continue to populate the
         // emulator even if the snapshot replay fails.
       })
-      .finally(() => this.installShellOwnershipConfirmation(ptyId, state))
   }
 
   // Why: reattach/cold-restore/replay payloads arrive as spawn RPC results and
@@ -13188,6 +13194,9 @@ export class OrcaRuntimeService {
         // (they feed main's tracker only), so its serializer lastTitle can be
         // stale here. Prefer main's tracked title; the renderer's is only the
         // seed when main has observed none (fresh relaunch, cold tracker).
+        state.ownership.seedOwner(undefined, {
+          alternateScreen: state.emulator.isAlternateScreen
+        })
         const seedTitle = this.getTrackedRawTitleForPty(ptyId) ?? rendered.lastTitle
         if (seedTitle) {
           state.emulator.setLastTitle(seedTitle)
@@ -13199,7 +13208,6 @@ export class OrcaRuntimeService {
         // writeChain that this catch-arm leaves intact.
       } finally {
         this.headlessHydrationState.set(ptyId, 'done')
-        this.installShellOwnershipConfirmation(ptyId, state)
       }
     })
   }
@@ -13264,6 +13272,9 @@ export class OrcaRuntimeService {
     const completion = state.writeChain.then(async () => {
       // Why: the ingestion-time ownership decision is closed over this
       // chain link; async scheduling cannot retroactively change it.
+      // Why inside the chain: the ownership mirror must observe live bytes in
+      // the same total order as seeds (seedOwner also runs on this chain).
+      state.ownership.scan(data)
       await state.emulator.write(data, { forwardQueryReplies })
       state.outputSequence = outputSequence
     })
@@ -13323,24 +13334,29 @@ export class OrcaRuntimeService {
     if (viewAttributes) {
       emulator.applyPushedViewAttributes(viewAttributes)
     }
-    state = { emulator, outputSequence: 0, writeChain: Promise.resolve() }
+    const constructed: RuntimeHeadlessTerminal = {
+      emulator,
+      outputSequence: 0,
+      writeChain: Promise.resolve(),
+      ownership: new PtyShellOwnershipMirror(async () => {
+        const controller = this.ptyController
+        const lifecycleGeneration = this.getPtyLifecycleGeneration(ptyId)
+        if (
+          !controller?.confirmShellForeground ||
+          this.headlessTerminals.get(ptyId) !== constructed
+        ) {
+          return false
+        }
+        const confirmed = await controller.confirmShellForeground(ptyId)
+        return (
+          confirmed &&
+          this.headlessTerminals.get(ptyId) === constructed &&
+          this.getPtyLifecycleGeneration(ptyId) === lifecycleGeneration
+        )
+      })
+    }
+    state = constructed
     return state
-  }
-
-  private installShellOwnershipConfirmation(ptyId: string, state: RuntimeHeadlessTerminal): void {
-    state.emulator.setShellOwnershipConfirmation(async () => {
-      const controller = this.ptyController
-      const lifecycleGeneration = this.getPtyLifecycleGeneration(ptyId)
-      if (!controller?.confirmShellForeground || this.headlessTerminals.get(ptyId) !== state) {
-        return false
-      }
-      const confirmed = await controller.confirmShellForeground(ptyId)
-      return (
-        confirmed &&
-        this.headlessTerminals.get(ptyId) === state &&
-        this.getPtyLifecycleGeneration(ptyId) === lifecycleGeneration
-      )
-    })
   }
 
   /** Phase-5 ConPTY DA1 retrofit (terminal-query-authority.md): invoked via
@@ -13360,7 +13376,6 @@ export class OrcaRuntimeService {
     const size = this.getTerminalSize(ptyId) ?? { cols: 80, rows: 24 }
     const state = this.createPtyHeadlessTerminalState(ptyId, size)
     this.headlessTerminals.set(ptyId, state)
-    this.installShellOwnershipConfirmation(ptyId, state)
     return state
   }
 
@@ -13392,7 +13407,9 @@ export class OrcaRuntimeService {
         if (snapshot.oscLinks !== undefined) {
           state.emulator.setRestoredOscLinks(snapshot.oscLinks)
         }
-        state.emulator.setTerminalOwner(snapshot.terminalOwner)
+        state.ownership.seedOwner(snapshot.terminalOwner, {
+          alternateScreen: state.emulator.isAlternateScreen
+        })
         state.outputSequence = snapshot.seq
       })
       .catch(() => {
@@ -13400,7 +13417,6 @@ export class OrcaRuntimeService {
       })
       .finally(() => {
         this.providerSnapshotPreferredPtys.delete(ptyId)
-        this.installShellOwnershipConfirmation(ptyId, state)
       })
   }
 
@@ -13944,11 +13960,12 @@ export class OrcaRuntimeService {
       return null
     }
     await state.writeChain
-    await state.emulator.settleShellOwnershipConfirmation()
+    await state.ownership.settle()
     // Why: normal history is separated from an active alternate frame, so the
     // caller's scrollback policy can be honored without painting it into alt.
     const scrollbackRows = opts.scrollbackRows ?? 0
     const snapshot = state.emulator.getSnapshot({ scrollbackRows })
+    const terminalOwner = state.ownership.owner
     const data = snapshot.rehydrateSequences + snapshot.snapshotAnsi
     return data.length > 0 || opts.includeEmpty === true
       ? this.preferTrackedLastTitle(ptyId, {
@@ -13971,7 +13988,7 @@ export class OrcaRuntimeService {
           ...(snapshot.pendingEscapeTailAnsi
             ? { pendingEscapeTailAnsi: snapshot.pendingEscapeTailAnsi }
             : {}),
-          ...(snapshot.terminalOwner ? { terminalOwner: snapshot.terminalOwner } : {}),
+          ...(terminalOwner ? { terminalOwner } : {}),
           // Why: lets the renderer skip the destructive scrollback clear when
           // restoring an alt-screen snapshot — clearing wipes xterm's own
           // history that the TUI relies on for scroll-up after a tab return.
@@ -13995,6 +14012,7 @@ export class OrcaRuntimeService {
     // sever the reply sink now so they cannot write to a respawned PTY that
     // reused this id (belt to the sink's state-identity check).
     state.emulator.disableQueryReplyForwarding()
+    state.ownership.dispose()
     state.writeChain.finally(() => state.emulator.dispose()).catch(() => state.emulator.dispose())
   }
 

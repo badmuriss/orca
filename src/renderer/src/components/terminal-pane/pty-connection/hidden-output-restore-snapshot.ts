@@ -144,11 +144,15 @@ export function bindHiddenOutputRestoreSnapshot(session: ConnectPanePtySession):
             }
           }
           const hasLiveAgent = session.hasLiveAgentReattachStatusOrTitleSignal()
+          // Why the pane-local fallback: every owner-publishing host also fills
+          // alternateScreen, but the reattach site falls back to pane state for
+          // an absent flag and this site must not drift from it (?1049l on a
+          // normal-buffer pane still runs cursor restore).
           const postReplayReset =
             snapshot.terminalOwner === 'shell'
-              ? snapshot.alternateScreen === false
-                ? POST_REPLAY_REATTACH_RESET
-                : POST_REPLAY_DEAD_TUI_RESET
+              ? (snapshot.alternateScreen ?? session.isPaneOnAlternateScreen())
+                ? POST_REPLAY_DEAD_TUI_RESET
+                : POST_REPLAY_REATTACH_RESET
               : hasLiveAgent
                 ? POST_REPLAY_LIVE_AGENT_SNAPSHOT_RESET
                 : POST_REPLAY_LIVE_SNAPSHOT_RESET
