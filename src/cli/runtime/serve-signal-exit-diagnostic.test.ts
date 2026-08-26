@@ -1,8 +1,12 @@
 import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { serveSignalExitError } from './serve-signal-exit-diagnostic'
-import { superviseForegroundServe } from './serve-update-supervisor'
+import {
+  SERVE_CHILD_FORCE_KILL_GRACE_MS,
+  superviseForegroundServe
+} from './serve-update-supervisor'
 import { RuntimeClientError } from './types'
+import { WILL_QUIT_TEARDOWN_DEADLINE_MS } from '../../shared/quit-teardown-deadline'
 
 class FakeChildProcess extends EventEmitter {
   kill = vi.fn()
@@ -74,6 +78,11 @@ describe('serveSignalExitError', () => {
 })
 
 describe('superviseForegroundServe signal exits', () => {
+  it('lets the Electron quit barrier finish before force-killing serve', () => {
+    expect(SERVE_CHILD_FORCE_KILL_GRACE_MS).toBeGreaterThan(WILL_QUIT_TEARDOWN_DEADLINE_MS)
+    expect(SERVE_CHILD_FORCE_KILL_GRACE_MS).toBeLessThanOrEqual(30_000)
+  })
+
   it('throws the macOS diagnostic when the child aborts on darwin', async () => {
     setPlatform('darwin')
 

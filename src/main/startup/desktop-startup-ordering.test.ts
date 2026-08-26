@@ -270,6 +270,43 @@ describe('startup ordering', () => {
     expect(disposeIndex).toBeGreaterThan(commitIndex)
   })
 
+  it('joins agent-browser cleanup before the committed quit exits', () => {
+    const source = readFileSync(join(process.cwd(), 'src/main/index.ts'), 'utf8')
+    const willQuitStart = source.indexOf("app.on('will-quit'")
+    const windowAllClosedStart = source.indexOf("app.on('window-all-closed'", willQuitStart)
+    const willQuit = source.slice(willQuitStart, windowAllClosedStart)
+    const cleanupStart = willQuit.indexOf('const browserShutdown')
+    const offscreenCleanupStart = willQuit.indexOf(
+      'runtime?.getOffscreenBrowserBackend()?.destroyAll?.()'
+    )
+    const residualCleanupStart = willQuit.indexOf(
+      'runtime?.getAgentBrowserBridge()?.destroyAllSessions()'
+    )
+    const barrierStart = willQuit.indexOf('settleTeardownWithinDeadline([')
+
+    expect(willQuitStart).toBeGreaterThanOrEqual(0)
+    expect(windowAllClosedStart).toBeGreaterThan(willQuitStart)
+    expect(cleanupStart).toBeGreaterThanOrEqual(0)
+    expect(offscreenCleanupStart).toBeGreaterThan(cleanupStart)
+    expect(residualCleanupStart).toBeGreaterThan(offscreenCleanupStart)
+    expect(barrierStart).toBeGreaterThan(cleanupStart)
+    expect(willQuit.slice(barrierStart)).toContain("{ name: 'browser', promise: browserShutdown }")
+  })
+
+  it('keeps serve signal handlers installed while committed quit drains', () => {
+    const source = readFileSync(join(process.cwd(), 'src/main/index.ts'), 'utf8')
+    const handlerStart = source.indexOf('function installServeSignalHandlers()')
+    const handlerEnd = source.indexOf('registerPaneKeyTeardownListener', handlerStart)
+    const handler = source.slice(handlerStart, handlerEnd)
+
+    expect(handlerStart).toBeGreaterThanOrEqual(0)
+    expect(handlerEnd).toBeGreaterThan(handlerStart)
+    expect(handler).toContain('let quitStarted = false')
+    expect(handler).toContain("process.on('SIGINT', quit)")
+    expect(handler).toContain("process.on('SIGTERM', quit)")
+    expect(handler).not.toContain("process.once('SIGINT', quit)")
+  })
+
   it('starts the automation scheduler before headless serve reports ready', () => {
     const source = readFileSync(join(process.cwd(), 'src/main/index.ts'), 'utf8')
     const serveStart = source.indexOf('if (serveOptions) {')

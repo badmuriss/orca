@@ -10,6 +10,8 @@ import { serveSignalExitError } from './serve-signal-exit-diagnostic'
 import { waitForMacBundleVersion } from './mac-app-update-bundle'
 
 export const SERVE_REPLACEMENT_READY_TIMEOUT_MS = 60_000
+// Electron's committed quit barrier has a 20s deadline; the supervisor must not kill it first.
+export const SERVE_CHILD_FORCE_KILL_GRACE_MS = 30_000
 
 type InstallRequestedHandoff = Extract<ServeUpdateHandoffState, { phase: 'install-requested' }>
 type ServeReadiness = 'not-expected' | 'pending' | 'verified' | 'failed'
@@ -113,7 +115,7 @@ function waitForForegroundChild(
     let stateWrite = Promise.resolve()
     const terminateChild = (): void => {
       child.kill('SIGTERM')
-      forceKillTimer ??= setTimeout(() => child.kill('SIGKILL'), 5000)
+      forceKillTimer ??= setTimeout(() => child.kill('SIGKILL'), SERVE_CHILD_FORCE_KILL_GRACE_MS)
     }
     const recordReplacementFailure = (reason: string): boolean => {
       if (!expected || readiness !== 'pending') {
@@ -141,7 +143,7 @@ function waitForForegroundChild(
     }
     const forwardSignal = (signal: NodeJS.Signals): void => {
       child.kill(signal)
-      forceKillTimer ??= setTimeout(() => child.kill('SIGKILL'), 5000)
+      forceKillTimer ??= setTimeout(() => child.kill('SIGKILL'), SERVE_CHILD_FORCE_KILL_GRACE_MS)
     }
     const handleMessage = (value: unknown): void => {
       const message = parseServeSupervisorMessage(value)
