@@ -1148,8 +1148,8 @@ async function prepareCodexRuntimeHomeForLaunch(
     launchContext.workspacePath
   ) {
     try {
-      // Why: renderer quick-launch cannot await trust IPC before its PTY mounts; launch prep runs synchronously before every recognized Codex spawn.
-      markCodexProjectTrusted(launchContext.workspacePath)
+      // Why: renderer quick-launch cannot await trust IPC before its PTY mounts; launch prep runs before every recognized Codex spawn.
+      await markCodexProjectTrusted(launchContext.workspacePath)
     } catch (error) {
       console.warn('[codex-project-trust] failed to pre-mark launch workspace:', error)
     }
@@ -1304,7 +1304,7 @@ async function prepareCodexSessionResumeForLaunch(args: {
 
       if (args.workspacePath) {
         try {
-          markCodexProjectTrusted(args.workspacePath)
+          await markCodexProjectTrusted(args.workspacePath)
         } catch (error) {
           console.warn('[codex-project-trust] failed to pre-mark resumed workspace:', error)
         }

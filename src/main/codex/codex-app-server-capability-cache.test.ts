@@ -29,8 +29,7 @@ describe('CodexAppServerCapabilityCache', () => {
         'native',
         firstPreferred,
         () => Promise.resolve('first-fallback'),
-        isUnsupported,
-        5
+        isUnsupported
       )
     ).resolves.toBe('first-fallback')
     expect(firstPreferred).toHaveBeenCalledTimes(1)
@@ -41,8 +40,7 @@ describe('CodexAppServerCapabilityCache', () => {
         'native',
         laterPreferred,
         () => Promise.resolve('cached-fallback'),
-        isUnsupported,
-        6
+        isUnsupported
       )
     ).resolves.toBe('cached-fallback')
     await expect(
@@ -50,8 +48,7 @@ describe('CodexAppServerCapabilityCache', () => {
         'native',
         laterPreferred,
         () => Promise.resolve('cached-fallback'),
-        isUnsupported,
-        7
+        isUnsupported
       )
     ).resolves.toBe('cached-fallback')
     expect(laterPreferred).not.toHaveBeenCalled()
@@ -71,8 +68,7 @@ describe('CodexAppServerCapabilityCache', () => {
         'native',
         nativePreferred,
         () => Promise.resolve('unexpected'),
-        isUnsupported,
-        1_001
+        isUnsupported
       )
     ).resolves.toBe('native-result')
     expect(nativePreferred).toHaveBeenCalledTimes(1)
@@ -85,8 +81,7 @@ describe('CodexAppServerCapabilityCache', () => {
         'native',
         () => Promise.resolve('supported'),
         () => Promise.resolve('unexpected'),
-        isUnsupported,
-        1
+        isUnsupported
       )
     ).resolves.toBe('supported')
     expect(cache.isKnownSupported('native')).toBe(true)
@@ -96,8 +91,7 @@ describe('CodexAppServerCapabilityCache', () => {
         'native',
         () => Promise.reject(unsupportedError),
         () => Promise.resolve('fallback'),
-        isUnsupported,
-        2
+        isUnsupported
       )
     ).resolves.toBe('fallback')
     expect(cache.isKnownSupported('native')).toBe(false)
@@ -108,8 +102,7 @@ describe('CodexAppServerCapabilityCache', () => {
         'native',
         laterPreferred,
         () => Promise.resolve('cached-fallback'),
-        isUnsupported,
-        3
+        isUnsupported
       )
     ).resolves.toBe('cached-fallback')
     expect(laterPreferred).not.toHaveBeenCalled()
@@ -123,8 +116,7 @@ describe('CodexAppServerCapabilityCache', () => {
         'native',
         () => Promise.reject(transient),
         () => Promise.resolve('unexpected-fallback'),
-        isUnsupported,
-        1
+        isUnsupported
       )
     ).rejects.toBe(transient)
     expect(cache.shouldTry('native', 2)).toBe(true)

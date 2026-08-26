@@ -48,37 +48,24 @@ export class CapabilityProbeCache<TCapability> {
     capability: TCapability,
     runPreferred: () => Promise<T>,
     runFallback: () => Promise<T>,
-    isUnsupportedError: (error: unknown) => boolean,
-    nowMs?: number
+    isUnsupportedError: (error: unknown) => boolean
   ): Promise<T> {
     if (this.supportedCapabilities.has(capability)) {
       // Why: supported commands are real work, not disposable probes. Let
       // sibling repo/SSH calls retain their intended concurrency.
-      return this.runPreferredOrFallback(
-        capability,
-        runPreferred,
-        runFallback,
-        isUnsupportedError,
-        nowMs
-      )
+      return this.runPreferredOrFallback(capability, runPreferred, runFallback, isUnsupportedError)
     }
-    if (!this.shouldTry(capability, nowMs ?? Date.now())) {
+    if (!this.shouldTry(capability)) {
       return runFallback()
     }
 
     const inFlightProbe = this.probesByCapability.get(capability)
     if (inFlightProbe) {
       const outcome = await inFlightProbe
-      if (outcome === 'unsupported' || !this.shouldTry(capability, nowMs ?? Date.now())) {
+      if (outcome === 'unsupported' || !this.shouldTry(capability)) {
         return runFallback()
       }
-      return this.runPreferredOrFallback(
-        capability,
-        runPreferred,
-        runFallback,
-        isUnsupportedError,
-        nowMs
-      )
+      return this.runPreferredOrFallback(capability, runPreferred, runFallback, isUnsupportedError)
     }
 
     let settleProbe!: (outcome: CapabilityProbeOutcome) => void
@@ -92,15 +79,14 @@ export class CapabilityProbeCache<TCapability> {
         runPreferred,
         runFallback,
         isUnsupportedError,
-        nowMs,
         settleProbe
       )
     } finally {
       if (this.probesByCapability.get(capability) === probe) {
         this.probesByCapability.delete(capability)
       }
-      // Why: a preferred callback that throws a non-capability error leaves the
-      // probe unsettled; waiters must not hang behind it.
+      // Backstop: `isUnsupportedError` or `rememberUnsupported` can throw
+      // before the settle below them runs; waiters must not hang behind it.
       settleProbe('unknown')
     }
   }
@@ -116,7 +102,6 @@ export class CapabilityProbeCache<TCapability> {
     runPreferred: () => Promise<T>,
     runFallback: () => Promise<T>,
     isUnsupportedError: (error: unknown) => boolean,
-    nowMs?: number,
     settleProbe?: (outcome: CapabilityProbeOutcome) => void
   ): Promise<T> {
     try {
@@ -135,7 +120,7 @@ export class CapabilityProbeCache<TCapability> {
         settleProbe?.('unknown')
         throw error
       }
-      this.rememberUnsupported(capability, nowMs ?? Date.now())
+      this.rememberUnsupported(capability)
       settleProbe?.('unsupported')
       return runFallback()
     }

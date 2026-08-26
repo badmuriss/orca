@@ -100,6 +100,23 @@ afterEach(() => {
 })
 
 describe('ensureRealHomeCodexHookState (install)', () => {
+  // Why (#16441): the ensure chain is process-wide; a rejection that escapes it
+  // would return the same rejected promise to every later pane launch, with no
+  // retry and no cooldown recovery.
+  it('recovers from a home-resolution failure instead of poisoning later ensures', async () => {
+    grantSucceeds()
+    homedirMock.mockImplementationOnce(() => {
+      throw new Error('home unavailable')
+    })
+
+    await expect(
+      ensureRealHomeCodexHookState({ hooksEnabled: true, userDataPath: userDataDir })
+    ).resolves.toBe('unavailable')
+    await expect(
+      ensureRealHomeCodexHookState({ hooksEnabled: false, userDataPath: userDataDir })
+    ).resolves.toBe('removed')
+  })
+
   it('creates hooks.json with the Orca entry in every managed event for a fresh home', async () => {
     grantSucceeds()
 

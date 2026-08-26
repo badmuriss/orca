@@ -586,6 +586,20 @@ function removeSystemManagedHookTrustEntries(systemHomePath: string, hooksJsonPa
   })
 }
 
+// Why (#16441): these sequences mutate the runtime config.toml *and* the
+// system one — approval promotion, the system-config sync and the legacy sweep
+// all touch ~/.codex/config.toml — so holding only the runtime lane still lets
+// a real-home grant's capture->restore window swallow their writes. Lock order
+// is always runtime-before-system; every other holder acquires it that way too.
+function runExclusivelyForRuntimeAndSystemTrustConfig<T>(
+  runtimeHomePath: string,
+  run: () => Promise<T>
+): Promise<T> {
+  return runExclusivelyForCodexTrustConfig(getCodexConfigTomlPath(runtimeHomePath), () =>
+    runExclusivelyForCodexTrustConfig(getSystemCodexConfigTomlPath(), run)
+  )
+}
+
 function cleanupLegacySystemManagedHooks(): Promise<void> {
   // Why: shares the real-home lane with ensureRealHomeCodexHookState — both
   // capture, mutate and roll back the user's ~/.codex/config.toml.
@@ -1316,7 +1330,7 @@ export class CodexHookService {
     runtimeHomePath: string = getOrcaManagedCodexHomePath()
   ): Promise<AgentHookInstallStatus> {
     // Why: same lane as the grant it performs — see installManagedHooksIntoWslRuntime.
-    return runExclusivelyForCodexTrustConfig(getCodexConfigTomlPath(runtimeHomePath), () =>
+    return runExclusivelyForRuntimeAndSystemTrustConfig(runtimeHomePath, () =>
       this.installExclusively(runtimeHomePath)
     )
   }
@@ -1576,8 +1590,16 @@ export class CodexHookService {
     }
   }
 
-  async refreshRuntimeUserHooks(
+  refreshRuntimeUserHooks(
     runtimeHomePath: string = getOrcaManagedCodexHomePath()
+  ): Promise<AgentHookInstallStatus> {
+    return runExclusivelyForRuntimeAndSystemTrustConfig(runtimeHomePath, () =>
+      this.refreshRuntimeUserHooksExclusively(runtimeHomePath)
+    )
+  }
+
+  private async refreshRuntimeUserHooksExclusively(
+    runtimeHomePath: string
   ): Promise<AgentHookInstallStatus> {
     const configPath = getConfigPath(runtimeHomePath)
     // Why: same as install() — capture in-Orca approvals before this refresh
@@ -1639,7 +1661,13 @@ export class CodexHookService {
     return this.getStatus(runtimeHomePath)
   }
 
-  async remove(): Promise<AgentHookInstallStatus> {
+  remove(): Promise<AgentHookInstallStatus> {
+    return runExclusivelyForRuntimeAndSystemTrustConfig(getOrcaManagedCodexHomePath(), () =>
+      this.removeExclusively()
+    )
+  }
+
+  private async removeExclusively(): Promise<AgentHookInstallStatus> {
     const configPath = getConfigPath()
     const configExists = existsSync(configPath)
     const config = readHooksJson(configPath)

@@ -85,14 +85,14 @@ export function resolveManagedCodexShellPreflightHome(
  * borrow an event loop; the CLI already has one, so awaiting here removes a
  * whole ELECTRON_RUN_AS_NODE process from every managed-home shell launch.
  */
-export function prepareManagedCodexHomeBeforeShellLaunch(args: {
+export async function prepareManagedCodexHomeBeforeShellLaunch(args: {
   env?: ShellPreflightEnvironment
   userDataPath: string
   hooksEnabled: boolean
   install?: (runtimeHomePath: string) => AgentHookInstallStatus | Promise<AgentHookInstallStatus>
 }): Promise<AgentHookInstallStatus | null> {
   if (!args.hooksEnabled) {
-    return Promise.resolve(null)
+    return null
   }
   const env = args.env ?? {
     CODEX_HOME: process.env.CODEX_HOME,
@@ -100,9 +100,7 @@ export function prepareManagedCodexHomeBeforeShellLaunch(args: {
   }
   const runtimeHomePath = resolveManagedCodexShellPreflightHome(env, args.userDataPath)
   if (!runtimeHomePath) {
-    return Promise.resolve(null)
+    return null
   }
-  return Promise.resolve(
-    (args.install ?? ((home) => codexHookService.install(home)))(runtimeHomePath)
-  )
+  return (args.install ?? ((home) => codexHookService.install(home)))(runtimeHomePath)
 }

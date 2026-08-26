@@ -83,11 +83,10 @@ export function ensureRealHomeCodexHookState(args: {
   // Concurrent pane launches must not interleave two of them, and the shared
   // config.toml lane keeps the rebase + grant pair atomic against the managed
   // installer's legacy sweep of the same file.
-  ensureInFlight = ensureInFlight.then(() =>
-    runExclusivelyForCodexTrustConfig(getRealHomeConfigTomlPath(), () =>
-      runRealHomeCodexHookEnsure(args)
-    )
-  )
+  const run = (): Promise<RealHomeCodexHookLane> => runRealHomeCodexHookEnsure(args)
+  // Why both handlers: a rejected predecessor must not poison every later
+  // ensure for the process' lifetime.
+  ensureInFlight = ensureInFlight.then(run, run)
   return ensureInFlight
 }
 
@@ -96,9 +95,11 @@ async function runRealHomeCodexHookEnsure(args: {
   userDataPath: string
 }): Promise<RealHomeCodexHookLane> {
   try {
-    currentLane = args.hooksEnabled
-      ? await installRealHomeCodexHook(args.userDataPath)
-      : await sweepRealHomeCodexHook()
+    // Why inside the try: resolving the real home can throw too, and this
+    // function is the module's "never throws" boundary.
+    currentLane = await runExclusivelyForCodexTrustConfig(getRealHomeConfigTomlPath(), () =>
+      args.hooksEnabled ? installRealHomeCodexHook(args.userDataPath) : sweepRealHomeCodexHook()
+    )
     if (!args.hooksEnabled || currentLane === 'installed') {
       installRetryAfterMs = 0
     }

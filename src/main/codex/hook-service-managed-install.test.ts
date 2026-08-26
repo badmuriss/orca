@@ -28,6 +28,7 @@ vi.mock('os', async (importOriginal) => {
 })
 
 import { CodexHookService } from './hook-service'
+import { runExclusivelyForCodexTrustConfig } from './codex-trust-config-mutation-queue'
 
 const WINDOWS_POWERSHELL_LAUNCHER =
   /^[A-Za-z]:\/[^"]*\/System32\/WindowsPowerShell\/v1\.0\/powershell\.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand \S+$/
@@ -48,6 +49,57 @@ function localManagedCodexEvents(): string[] {
 }
 
 describe('CodexHookService', () => {
+  // Why (#16441): install promotes in-Orca approvals into ~/.codex/config.toml
+  // and mirrors that file into the managed home, so holding only the runtime
+  // lane still lets it land inside a real-home grant's capture->restore window.
+  it('waits for an in-flight mutation of the system config.toml', async () => {
+    const systemCodexHome = join(homes.tmpHome, '.codex')
+    mkdirSync(systemCodexHome, { recursive: true })
+    writeFileSync(join(systemCodexHome, 'config.toml'), 'approval_policy = "on-request"\n', 'utf-8')
+    const managedHooksJsonPath = join(homes.userDataDir, 'codex-runtime-home', 'home', 'hooks.json')
+    let releaseGrant!: () => void
+    const grantHoldingSystemConfig = new Promise<void>((resolve) => {
+      releaseGrant = resolve
+    })
+    const held = runExclusivelyForCodexTrustConfig(
+      join(systemCodexHome, 'config.toml'),
+      () => grantHoldingSystemConfig
+    )
+
+    const install = new CodexHookService().install()
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(existsSync(managedHooksJsonPath)).toBe(false)
+
+    releaseGrant()
+    await held
+    await expect(install).resolves.toMatchObject({ state: 'installed' })
+    expect(existsSync(managedHooksJsonPath)).toBe(true)
+  })
+
+  it('makes the user-hook refresh wait for the system config.toml too', async () => {
+    const systemCodexHome = join(homes.tmpHome, '.codex')
+    mkdirSync(systemCodexHome, { recursive: true })
+    writeFileSync(join(systemCodexHome, 'config.toml'), 'approval_policy = "on-request"\n', 'utf-8')
+    const managedHooksJsonPath = join(homes.userDataDir, 'codex-runtime-home', 'home', 'hooks.json')
+    let releaseGrant!: () => void
+    const held = runExclusivelyForCodexTrustConfig(
+      join(systemCodexHome, 'config.toml'),
+      () =>
+        new Promise<void>((resolve) => {
+          releaseGrant = resolve
+        })
+    )
+
+    const refresh = new CodexHookService().refreshRuntimeUserHooks()
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(existsSync(managedHooksJsonPath)).toBe(false)
+
+    releaseGrant()
+    await held
+    await refresh
+    expect(existsSync(managedHooksJsonPath)).toBe(true)
+  })
+
   it('installs PermissionRequest with trust so Codex approval prompts reach Orca', async () => {
     const systemCodexHome = join(homes.tmpHome, '.codex')
     mkdirSync(systemCodexHome, { recursive: true })
