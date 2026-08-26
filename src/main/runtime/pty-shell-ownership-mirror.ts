@@ -16,6 +16,7 @@ const SETTLE_DEADLINE_MS = 750
 export class PtyShellOwnershipMirror {
   private readonly scanner = new TerminalShellLifecycleScanner()
   private confirmInFlight = false
+  private confirmAttempt = 0
   private latestCandidateGeneration: number | undefined
   private settleWaiters: (() => void)[] = []
   private disposed = false
@@ -87,27 +88,55 @@ export class PtyShellOwnershipMirror {
     }
     this.confirmInFlight = true
     const requested = generation
-    void this.confirm()
+    const attempt = ++this.confirmAttempt
+    // Why the deadline: a confirm that never settles (hung RPC) must not wedge
+    // ownership confirmation for the rest of the PTY's life; retire the attempt
+    // so a later candidate can start a fresh one.
+    const deadline = setTimeout(
+      () => this.retireConfirmAttempt(attempt, requested),
+      SETTLE_DEADLINE_MS
+    )
+    deadline.unref?.()
+    // Why the guard: the callback is injected; a synchronous throw must not
+    // strand confirmInFlight.
+    let proof: Promise<boolean>
+    try {
+      proof = this.confirm()
+    } catch {
+      proof = Promise.resolve(false)
+    }
+    void proof
       .then((confirmed) => {
-        if (confirmed && !this.disposed) {
+        // A retired attempt's late verdict is inert: an unsettled proof already
+        // read as no owner, and flipping it afterwards would race fresh bytes.
+        if (attempt === this.confirmAttempt && confirmed && !this.disposed) {
           this.scanner.trySetOwner(requested)
         }
       })
       .catch(() => {})
       .finally(() => {
-        this.confirmInFlight = false
-        const latest = this.latestCandidateGeneration
-        if (
-          latest !== undefined &&
-          latest !== requested &&
-          latest === this.scanner.generation &&
-          !this.disposed
-        ) {
-          // One superseding candidate can still be current; stale ones are not retried.
-          this.startConfirmation(latest)
-        }
-        this.resolveSettleWaiters()
+        clearTimeout(deadline)
+        this.retireConfirmAttempt(attempt, requested)
       })
+  }
+
+  private retireConfirmAttempt(attempt: number, requested: number): void {
+    if (attempt !== this.confirmAttempt) {
+      return
+    }
+    this.confirmAttempt += 1
+    this.confirmInFlight = false
+    const latest = this.latestCandidateGeneration
+    if (
+      latest !== undefined &&
+      latest !== requested &&
+      latest === this.scanner.generation &&
+      !this.disposed
+    ) {
+      // One superseding candidate can still be current; stale ones are not retried.
+      this.startConfirmation(latest)
+    }
+    this.resolveSettleWaiters()
   }
 
   private resolveSettleWaiters(): void {

@@ -98,7 +98,12 @@ export async function buildDurableCheckpointSnapshot(opts: {
     // to byte order — newer replayed output (a TUI starting) must revoke a
     // persisted proof exactly as it would have live.
     const ownershipScanner = new TerminalShellLifecycleScanner()
-    ownershipScanner.seedOwner(opts.restoreInfo?.terminalOwner)
+    // Why the live fallback: with no disk history the live snapshot holds the
+    // only persisted proof for this boundary; the re-scan below can revoke it
+    // but never mint one, so the result is never less safe than dropping it.
+    ownershipScanner.seedOwner(
+      opts.restoreInfo ? opts.restoreInfo.terminalOwner : opts.liveSnapshot.terminalOwner
+    )
     if (!(await replayPendingRecords(replay, pendingRecords))) {
       return opts.liveSnapshot
     }

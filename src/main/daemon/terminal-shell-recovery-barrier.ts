@@ -48,6 +48,7 @@ export class TerminalShellRecoveryBarrier {
   private bailTimer: ReturnType<typeof setTimeout> | null = null
   private idleWaiters: (() => void)[] = []
   private cleanConfirmInFlight = false
+  private cleanConfirmAttempt = 0
   private cleanConfirmWaiters: (() => void)[] = []
   private latestCleanCandidateGeneration: number | undefined
   private disposed = false
@@ -120,11 +121,7 @@ export class TerminalShellRecoveryBarrier {
     const deadline = setTimeout(() => {
       deadlineHit = true
       this.resolveIdleWaiters()
-      const waiters = this.cleanConfirmWaiters
-      this.cleanConfirmWaiters = []
-      for (const waiter of waiters) {
-        waiter()
-      }
+      this.drainCleanConfirmWaiters()
     }, this.maxPendingMs)
     deadline.unref?.()
     try {
@@ -154,11 +151,7 @@ export class TerminalShellRecoveryBarrier {
     this.queuedBytes = 0
     this.pending = false
     this.resolveIdleWaiters()
-    const waiters = this.cleanConfirmWaiters
-    this.cleanConfirmWaiters = []
-    for (const waiter of waiters) {
-      waiter()
-    }
+    this.drainCleanConfirmWaiters()
   }
 
   private scanAndRelease(emission: PtyIngressEmission): void {
@@ -318,31 +311,62 @@ export class TerminalShellRecoveryBarrier {
     }
     this.cleanConfirmInFlight = true
     const requested = generation
-    void this.confirmShellForeground()
+    const attempt = ++this.cleanConfirmAttempt
+    // Why the deadline: a proof that never settles must not wedge the in-flight
+    // flag for the session's life, silently ignoring every later candidate.
+    const deadline = setTimeout(
+      () => this.retireCleanConfirmAttempt(attempt, requested),
+      this.maxPendingMs
+    )
+    deadline.unref?.()
+    // Why the guard: the callback is injected; a synchronous throw must not
+    // strand cleanConfirmInFlight (mirrors enterPending).
+    let proof: Promise<boolean>
+    try {
+      proof = this.confirmShellForeground()
+    } catch {
+      proof = Promise.resolve(false)
+    }
+    void proof
       .then((confirmed) => {
-        if (confirmed && !this.disposed && this.isAlive()) {
+        // A retired attempt's late verdict is inert: an unsettled proof already
+        // read as no owner, and flipping it afterwards would race fresh bytes.
+        if (attempt === this.cleanConfirmAttempt && confirmed && !this.disposed && this.isAlive()) {
           this.scanner.trySetOwner(requested)
         }
       })
       .catch(() => {})
       .finally(() => {
-        this.cleanConfirmInFlight = false
-        const latest = this.latestCleanCandidateGeneration
-        if (
-          latest !== undefined &&
-          latest !== requested &&
-          latest === this.scanner.generation &&
-          !this.disposed
-        ) {
-          // One superseding candidate can still be current; stale ones are not retried.
-          this.startCleanExitConfirmation(latest)
-        }
-        const waiters = this.cleanConfirmWaiters
-        this.cleanConfirmWaiters = []
-        for (const waiter of waiters) {
-          waiter()
-        }
+        clearTimeout(deadline)
+        this.retireCleanConfirmAttempt(attempt, requested)
       })
+  }
+
+  private retireCleanConfirmAttempt(attempt: number, requested: number): void {
+    if (attempt !== this.cleanConfirmAttempt) {
+      return
+    }
+    this.cleanConfirmAttempt += 1
+    this.cleanConfirmInFlight = false
+    const latest = this.latestCleanCandidateGeneration
+    if (
+      latest !== undefined &&
+      latest !== requested &&
+      latest === this.scanner.generation &&
+      !this.disposed
+    ) {
+      // One superseding candidate can still be current; stale ones are not retried.
+      this.startCleanExitConfirmation(latest)
+    }
+    this.drainCleanConfirmWaiters()
+  }
+
+  private drainCleanConfirmWaiters(): void {
+    const waiters = this.cleanConfirmWaiters
+    this.cleanConfirmWaiters = []
+    for (const waiter of waiters) {
+      waiter()
+    }
   }
 
   private resolveIdleWaiters(): void {

@@ -235,7 +235,13 @@ export class TerminalHost {
 
   async confirmShellForeground(sessionId: string): Promise<boolean> {
     const session = this.sessions.get(sessionId)
-    return session?.isAlive === true && (await session.confirmShellForeground())
+    if (session?.isAlive !== true) {
+      return false
+    }
+    const confirmed = await session.confirmShellForeground()
+    // Why the recheck: proof for a session that exited or was replaced during
+    // the await is stale; the caller would bind it to the successor's stream.
+    return confirmed && this.sessions.get(sessionId) === session && session.isAlive
   }
 
   clearScrollback(sessionId: string): void {

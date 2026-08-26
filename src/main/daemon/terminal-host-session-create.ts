@@ -48,6 +48,11 @@ export async function createOrAttachTerminalSession(
     ) {
       throw new SessionNotFoundError(opts.sessionId)
     }
+    // Why here: a cancel that landed during the settle await must not detach
+    // the live viewer and hand the session to a stream nobody reads.
+    if (opts.isCanceled?.()) {
+      throw new TerminalAttachCanceledError(opts.sessionId)
+    }
     const snapshot = existing.getSnapshot()
     existing.detachAllClients()
     const token = existing.attachClient(opts.streamClient)

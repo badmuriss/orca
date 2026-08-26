@@ -79,8 +79,13 @@ export async function confirmShellForegroundProcess(
     return false
   }
   if (process.platform === 'win32') {
-    const processIds = await options.readWindowsPtyJobProcessIds?.()
-    return processIds?.size === 1 && processIds.has(shellPid)
+    try {
+      const processIds = await options.readWindowsPtyJobProcessIds?.()
+      return processIds?.size === 1 && processIds.has(shellPid)
+    } catch {
+      // Unavailable job inspection is missing proof, never a thrown confirmation.
+      return false
+    }
   }
   try {
     const rows = await getFreshProcessTableSnapshot()

@@ -46,4 +46,43 @@ describe('PtyShellOwnershipMirror', () => {
     expect(Date.now() - start).toBeLessThan(2000)
     expect(mirror.owner).toBeUndefined()
   })
+
+  it('retires a hung confirmation so a later candidate can still prove ownership', async () => {
+    let calls = 0
+    const mirror = new PtyShellOwnershipMirror(() => {
+      calls += 1
+      return calls === 1 ? new Promise(() => {}) : Promise.resolve(true)
+    })
+    mirror.seedOwner(undefined, { alternateScreen: true })
+    mirror.scan('\x1b]133;D;137\x07')
+    // The settle deadline outlives the attempt deadline, so this waits out the
+    // retirement of the hung attempt.
+    await mirror.settle()
+    expect(mirror.owner).toBeUndefined()
+
+    mirror.scan('\x1b[?1049hTUI\x1b]133;D;137\x07')
+    await vi.waitFor(() => expect(calls).toBe(2))
+    await mirror.settle()
+    expect(mirror.owner).toBe('shell')
+  })
+
+  it('contains a synchronously throwing confirm callback', async () => {
+    let calls = 0
+    const mirror = new PtyShellOwnershipMirror(() => {
+      calls += 1
+      if (calls === 1) {
+        throw new Error('sync boom')
+      }
+      return Promise.resolve(true)
+    })
+    mirror.seedOwner(undefined, { alternateScreen: true })
+    expect(() => mirror.scan('\x1b]133;D;137\x07')).not.toThrow()
+    await mirror.settle()
+    expect(mirror.owner).toBeUndefined()
+
+    mirror.scan('\x1b[?1049hTUI\x1b]133;D;137\x07')
+    await vi.waitFor(() => expect(calls).toBe(2))
+    await mirror.settle()
+    expect(mirror.owner).toBe('shell')
+  })
 })

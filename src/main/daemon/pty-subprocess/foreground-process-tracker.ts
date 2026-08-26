@@ -1,9 +1,7 @@
 import type * as pty from 'node-pty'
 import { getAgentForegroundContextPaths } from '../../providers/agent-foreground-context-paths'
-import {
-  confirmShellForegroundProcess,
-  resolveAgentForegroundProcessWithAvailability
-} from '../../providers/agent-foreground-process'
+import { resolveAgentForegroundProcessWithAvailability } from '../../providers/agent-foreground-process'
+import { confirmPtyShellForeground } from './pty-shell-foreground-confirmation'
 import {
   judgeCachedAgentJobEvidence,
   WINDOWS_DETACHED_DESCENDANT_IDENTITY_MAX_AGE_MS
@@ -299,18 +297,7 @@ export function createPtyForegroundProcessTracker(args: {
         return null
       }
     },
-    confirmShellForeground: async () => {
-      if (args.isDead() || !proc.pid) {
-        return false
-      }
-      const confirmed = await confirmShellForegroundProcess(
-        proc.pid,
-        args.shellPath,
-        process.platform === 'win32'
-          ? { readWindowsPtyJobProcessIds: () => readWindowsPtyJobProcessIds(proc) }
-          : {}
-      )
-      return !args.isDead() && confirmed
-    }
+    confirmShellForeground: () =>
+      confirmPtyShellForeground({ process: proc, shellPath: args.shellPath, isDead: args.isDead })
   }
 }
