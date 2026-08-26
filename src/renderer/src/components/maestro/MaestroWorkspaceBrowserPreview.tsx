@@ -1,5 +1,5 @@
 import { Camera, CircleHelp, Loader2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { BrowserScreenshotResult } from '../../../../shared/runtime-types'
 import type { RuntimeClientTarget } from '@/runtime/runtime-client-target'
 import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
@@ -17,10 +17,15 @@ export function MaestroWorkspaceBrowserPreview({
   const [preview, setPreview] = useState<string | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'unavailable'>('loading')
 
+  // Layout mutations rebuild equivalent targets, so primitive identity prevents recapture on Fit.
+  const latestTarget = useRef(target)
+  latestTarget.current = target
+  const targetKey = target.kind === 'environment' ? `environment:${target.environmentId}` : 'local'
+
   useEffect(() => {
     let active = true
     setState('loading')
-    void callRuntimeRpc<BrowserScreenshotResult>(target, 'browser.screenshot', {
+    void callRuntimeRpc<BrowserScreenshotResult>(latestTarget.current, 'browser.screenshot', {
       page: pageId,
       format: 'png'
     })
@@ -39,7 +44,7 @@ export function MaestroWorkspaceBrowserPreview({
     return () => {
       active = false
     }
-  }, [pageId, receiptRevision, target])
+  }, [pageId, receiptRevision, targetKey])
 
   if (state === 'ready' && preview) {
     return (

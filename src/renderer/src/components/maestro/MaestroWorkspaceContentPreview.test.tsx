@@ -69,4 +69,38 @@ describe('MaestroWorkspaceContentPreview', () => {
       surface(null).id
     )
   })
+
+  it('keeps the resolved preview when a layout mutation rebuilds equivalent objects', async () => {
+    const view = render(
+      <MaestroWorkspaceContentPreview target={{ kind: 'local' }} surface={surface(null)} />
+    )
+    expect(await screen.findByText('Exact file')).not.toBeNull()
+    readContent.mockClear()
+    view.rerender(
+      <MaestroWorkspaceContentPreview target={{ kind: 'local' }} surface={surface(null)} />
+    )
+    expect(screen.getByText('Exact file')).not.toBeNull()
+    expect(screen.queryByText('Loading exact content…')).toBeNull()
+    expect(readContent).not.toHaveBeenCalled()
+  })
+
+  it('reads again only when the content identity changes after resolution', async () => {
+    const view = render(
+      <MaestroWorkspaceContentPreview target={{ kind: 'local' }} surface={surface(null)} />
+    )
+    expect(await screen.findByText('Exact file')).not.toBeNull()
+    readContent.mockClear()
+    view.rerender(
+      <MaestroWorkspaceContentPreview
+        target={{ kind: 'local' }}
+        surface={{
+          ...surface(null),
+          id: { ...surface(null).id, unified_tab_id: 'tab-2' }
+        }}
+      />
+    )
+    await screen.findByText('Exact file')
+    expect(readContent).toHaveBeenCalledTimes(1)
+    expect(readContent.mock.calls[0][2]).toMatchObject({ unified_tab_id: 'tab-2' })
+  })
 })

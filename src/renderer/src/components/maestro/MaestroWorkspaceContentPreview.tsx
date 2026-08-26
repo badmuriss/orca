@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { WorkspaceSurface } from '../../../../shared/maestro-workspace-canvas'
 import { parseWorkspaceKey } from '../../../../shared/workspace-scope'
 import type { RuntimeClientTarget } from '@/runtime/runtime-client-target'
@@ -56,38 +56,49 @@ export function MaestroWorkspaceContentPreview({
   const workspaceKey = surface.id.workspace_key
   const unifiedTabId = surface.id.unified_tab_id
 
+  // Layout mutations rebuild equivalent objects, so primitive identity prevents reloads on Fit.
+  const latestTarget = useRef(target)
+  latestTarget.current = target
+  const targetKey = target.kind === 'environment' ? `environment:${target.environmentId}` : 'local'
+  const hasAnnotation = binding?.annotation != null
+  const modelRevision = binding?.model_revision ?? ''
+  const sourceMode = binding?.source?.mode ?? null
+  const sourceRelativePath = binding?.source?.relative_path ?? null
+  const sourceDiffSource = binding?.source?.diff_source ?? null
+  const sourceIsDirty = binding?.source?.is_dirty ?? false
+
   useEffect(() => {
     let active = true
     setPreview(null)
     setUnavailable(false)
-    if (!worktreeId || !binding?.source) {
+    if (!worktreeId || sourceRelativePath === null) {
       setUnavailable(true)
       return
     }
-    const source = binding.source
+    const activeTarget = latestTarget.current
     const load = async (): Promise<Preview> => {
-      if (binding.annotation) {
-        const result = await readRuntimeMaestroAnnotation(target, worktreeId, unifiedTabId)
+      if (hasAnnotation) {
+        const result = await readRuntimeMaestroAnnotation(activeTarget, worktreeId, unifiedTabId)
         return { content: result.content, revision: result.version, source: result.source }
       }
-      if (source.mode === 'diff') {
+      if (sourceMode === 'diff') {
         const result = await readRuntimeMaestroDiff(
-          target,
+          activeTarget,
           worktreeId,
-          source.relative_path,
-          source.diff_source === 'staged'
+          sourceRelativePath,
+          sourceDiffSource === 'staged'
         )
         if (result.kind === 'binary') {
           throw new Error('binary_diff_unavailable')
         }
         return {
           content: `--- Original\n${result.originalContent}\n+++ Modified\n${result.modifiedContent}`,
-          revision: binding.model_revision,
-          source: source.diff_source ?? 'unstaged'
+          revision: modelRevision,
+          source: sourceDiffSource ?? 'unstaged'
         }
       }
       const result = await readRuntimeMaestroContent(
-        target,
+        activeTarget,
         {
           execution_host_id: executionHostId,
           workspace_key: workspaceKey
@@ -101,7 +112,7 @@ export function MaestroWorkspaceContentPreview({
       return {
         content: result.content,
         revision: result.modelRevision,
-        source: source.is_dirty ? 'live draft' : 'file'
+        source: sourceIsDirty ? 'live draft' : 'file'
       }
     }
     void load().then(
@@ -111,7 +122,19 @@ export function MaestroWorkspaceContentPreview({
     return () => {
       active = false
     }
-  }, [binding, executionHostId, target, unifiedTabId, workspaceKey, worktreeId])
+  }, [
+    executionHostId,
+    hasAnnotation,
+    modelRevision,
+    sourceDiffSource,
+    sourceIsDirty,
+    sourceMode,
+    sourceRelativePath,
+    targetKey,
+    unifiedTabId,
+    workspaceKey,
+    worktreeId
+  ])
 
   if (preview && binding) {
     const tone = binding.annotation?.tone
