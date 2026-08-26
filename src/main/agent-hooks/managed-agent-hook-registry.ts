@@ -15,9 +15,18 @@ import { hermesHookService } from '../hermes/hook-service'
 import { kimiHookService } from '../kimi/hook-service'
 import { openClaudeHookService } from '../openclaude/hook-service'
 
-export type ManagedAgentHookInstaller = readonly [HookInstallAgent, () => AgentHookInstallStatus]
+// Why (#16441): Codex's installer awaits a codex app-server trust-grant session
+// instead of blocking the main thread on spawnSync. Widening the tuple keeps the
+// other thirteen agent services synchronous — the shared loop already awaits.
+export type ManagedAgentHookInstaller = readonly [
+  HookInstallAgent,
+  () => AgentHookInstallStatus | Promise<AgentHookInstallStatus>
+]
 export type ManagedAgentHookScriptRefresher = readonly [HookInstallAgent, () => Promise<void>]
-export type ManagedAgentHookRemover = readonly [HookInstallAgent, () => AgentHookInstallStatus]
+export type ManagedAgentHookRemover = readonly [
+  HookInstallAgent,
+  () => AgentHookInstallStatus | Promise<AgentHookInstallStatus>
+]
 export type ManagedAgentHookStatusReader = readonly [HookInstallAgent, () => AgentHookInstallStatus]
 
 export const MANAGED_AGENT_HOOK_INSTALLERS: readonly ManagedAgentHookInstaller[] = [

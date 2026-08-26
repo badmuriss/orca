@@ -534,7 +534,10 @@ export type LocalPtyProviderOptions = {
       isWsl?: boolean
       wslDistro?: string | null
     }
-  ) => Record<string, string>
+    // Why (#16441): Codex launch prep grants hook trust through a codex
+    // app-server session. `spawn` already awaits, so returning a promise keeps
+    // the Electron main thread responsive instead of blocking on spawnSync.
+  ) => Record<string, string> | Promise<Record<string, string>>
   /** Whether worktree-scoped shell history is enabled; when true (or absent) with a worktreeId, HISTFILE is scoped per-worktree. */
   isHistoryEnabled?: () => boolean
   /** Why: COMSPEC is always cmd.exe, so this callback injects the user's persisted shell preference. Undefined when none set. */
@@ -744,7 +747,7 @@ export class LocalPtyProvider implements IPtyProvider {
     const isWslShell = Boolean(wslInfo) || pathWin32.basename(shellPath).toLowerCase() === 'wsl.exe'
     const launchWslDistro = isWslShell ? (launchWslContext?.distro ?? null) : null
     const finalEnv = this.opts.buildSpawnEnv
-      ? this.opts.buildSpawnEnv(id, spawnEnv, {
+      ? await this.opts.buildSpawnEnv(id, spawnEnv, {
           command: args.command,
           launchAgent: args.launchAgent,
           codexHomePathOverride: args.codexHomePathOverride,
