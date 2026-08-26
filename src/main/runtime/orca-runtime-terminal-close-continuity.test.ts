@@ -3,6 +3,7 @@ import { getDefaultWorkspaceSession } from '../../shared/constants'
 import { makePaneKey } from '../../shared/stable-pane-id'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
 import { OrcaRuntimeService } from './orca-runtime'
+import { createPtyStopReceipt } from '../../shared/pty-stop-receipt'
 
 const REPO_ID = 'repo-close-continuity'
 const WORKTREE_PATH = '/tmp/terminal-close-continuity'
@@ -156,12 +157,26 @@ function createHarness(
   const kill = vi.fn(() => true)
   let verifiedStopResult: boolean | Error = false
   let stopAndWaitAction: ((stoppingPtyId: string) => void | Promise<void>) | null = null
-  const stopAndWait = vi.fn(async (stoppingPtyId: string) => {
-    await stopAndWaitAction?.(stoppingPtyId)
+  const stopAndWait = vi.fn(async (requestedPtyId: string) => {
+    await stopAndWaitAction?.(requestedPtyId)
     if (verifiedStopResult instanceof Error) {
       throw verifiedStopResult
     }
-    return verifiedStopResult
+    if (!verifiedStopResult) {
+      return null
+    }
+    const root = { pid: 41, parentPid: 1, processGroupId: 41, startedAt: 'captured' }
+    return createPtyStopReceipt({
+      executionHostId: 'local',
+      terminalHandle: requestedPtyId,
+      ptyId: requestedPtyId,
+      ptyIncarnation: requestedPtyId === SIBLING_PTY_ID ? SIBLING_INCARNATION_ID : incarnationId,
+      root,
+      descendants: [],
+      observations: [{ identity: root, status: 'absent', observedAt: new Date().toISOString() }],
+      verdict: 'exited',
+      processTreeVerified: true
+    })
   })
   const listProcesses = vi.fn(async () => [
     ...(victimPtyListed

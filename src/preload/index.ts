@@ -187,6 +187,8 @@ import type { ClientHostedBrowserRowsEvent } from '../shared/client-hosted-brows
 import type {
   RuntimeBrowserDriverState,
   RuntimeMobileSessionTabMove,
+  RuntimeMaestroWorkspaceTabCommand,
+  RuntimeMaestroWorkspaceTabCommandResponse,
   RuntimeRendererSyncWindowGraph,
   RuntimeStatus,
   RuntimeSyncWindowGraphResult,
@@ -3784,6 +3786,19 @@ const api = {
       ipcRenderer.on('ui:openSettings', listener)
       return () => ipcRenderer.removeListener('ui:openSettings', listener)
     },
+    onOpenMaestroCanvas: (callback): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        target: { requestId: string; executionHostId: string; workspaceKey: string }
+      ): void => {
+        ipcRenderer.send('maestro:canvasOpenReply', {
+          requestId: target.requestId,
+          opened: callback(target)
+        })
+      }
+      ipcRenderer.on('ui:openMaestroCanvas', listener)
+      return () => ipcRenderer.removeListener('ui:openMaestroCanvas', listener)
+    },
     consumePendingOpenSettings: (): Promise<boolean> =>
       ipcRenderer.invoke('ui:consumePendingOpenSettings'),
     onOpenSkillShare: (callback: (shareId: string) => void): (() => void) => {
@@ -4292,6 +4307,21 @@ const api = {
       ) => callback(data)
       ipcRenderer.on('ui:moveSessionTab', listener)
       return () => ipcRenderer.removeListener('ui:moveSessionTab', listener)
+    },
+    onMaestroWorkspaceTabCommand: (
+      callback: (command: RuntimeMaestroWorkspaceTabCommand) => void
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        command: RuntimeMaestroWorkspaceTabCommand
+      ): void => callback(command)
+      ipcRenderer.on('ui:maestroWorkspaceTabCommand', listener)
+      return () => ipcRenderer.removeListener('ui:maestroWorkspaceTabCommand', listener)
+    },
+    respondMaestroWorkspaceTabCommand: (
+      response: RuntimeMaestroWorkspaceTabCommandResponse
+    ): void => {
+      ipcRenderer.send('ui:maestroWorkspaceTabCommandResponse', response)
     },
     onOpenFileFromMobile: (
       callback: (data: {

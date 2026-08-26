@@ -1,7 +1,13 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 
-const { mockPtySpawn, mockPtyInstance, mockCreateShellPromptReadinessProbe } = vi.hoisted(() => ({
+const {
+  mockPtySpawn,
+  mockPtyInstance,
+  mockCreateShellPromptReadinessProbe,
+  stopPtyProcessTreeMock
+} = vi.hoisted(() => ({
   mockPtySpawn: vi.fn(),
+  stopPtyProcessTreeMock: vi.fn(),
   mockCreateShellPromptReadinessProbe: vi.fn(),
   mockPtyInstance: {
     // Why: attach now proves the backing pid is alive before replaying, so the
@@ -31,6 +37,10 @@ vi.mock('../main/shell-prompt-readiness-probe', () => ({
   createShellPromptReadinessProbe: mockCreateShellPromptReadinessProbe
 }))
 
+vi.mock('../main/daemon/terminal-session-teardown', () => ({
+  stopPtyProcessTree: stopPtyProcessTreeMock
+}))
+
 import { IMMEDIATE_PTY_EXIT_TIMEOUT_MS, type PtyHandler } from './pty-handler'
 import { beginPtyHandlerTest, endPtyHandlerTest } from './pty-handler-test-harness'
 import type { MockDispatcher } from './pty-handler-test-harness'
@@ -41,6 +51,17 @@ describe('PtyHandler', () => {
   let originalPlatform: PropertyDescriptor | undefined
 
   beforeEach(() => {
+    stopPtyProcessTreeMock.mockImplementation(async (pid: number, killRoot: () => void) => {
+      killRoot()
+      const root = { pid, parentPid: 1, processGroupId: pid, startedAt: 'captured' }
+      return {
+        root,
+        descendants: [],
+        observations: [{ identity: root, status: 'absent', observedAt: new Date().toISOString() }],
+        verdict: 'exited',
+        processTreeVerified: true
+      }
+    })
     ;({ dispatcher, handler, originalPlatform } = beginPtyHandlerTest({
       mockPtySpawn,
       mockPtyInstance,
@@ -93,6 +114,7 @@ describe('PtyHandler', () => {
     })
     let settled = false
     const shutdown = dispatcher.callRequest('pty.shutdown', { id: 'pty-1', immediate: true })
+    const duplicate = dispatcher.callRequest('pty.shutdown', { id: 'pty-1', immediate: true })
     void shutdown.then(() => {
       settled = true
     })
@@ -102,9 +124,10 @@ describe('PtyHandler', () => {
     expect(exits).toEqual([])
     expect(handler.activePtyCount).toBe(1)
     onExitCb!({ exitCode: 0 })
-    await shutdown
+    const [receipt, duplicateReceipt] = await Promise.all([shutdown, duplicate])
 
     expect(mockKill).toHaveBeenCalledWith('SIGKILL')
+    expect(duplicateReceipt).toBe(receipt)
     expect(exits).toEqual([{ id: 'pty-1', paneKey: 'tab-shutdown:0' }])
     expect(handler.activePtyCount).toBe(0)
   })
@@ -157,7 +180,7 @@ describe('PtyHandler', () => {
     expect(handler.activePtyCount).toBe(1)
   })
 
-  it('rejects timed-out immediate shutdown while retaining the physical owner', async () => {
+  it('returns process-tree proof while retaining a delayed native exit owner', async () => {
     let onExitCb: ((evt: { exitCode: number }) => void) | undefined
     const mockKill = vi.fn()
     mockPtySpawn.mockReturnValue({
@@ -171,16 +194,18 @@ describe('PtyHandler', () => {
 
     await dispatcher.callRequest('pty.spawn', {})
     const shutdown = dispatcher.callRequest('pty.shutdown', { id: 'pty-1', immediate: true })
-    const rejected = expect(shutdown).rejects.toThrow('Timed out waiting for PTY process exit')
     await vi.advanceTimersByTimeAsync(IMMEDIATE_PTY_EXIT_TIMEOUT_MS)
-    await rejected
+    await expect(shutdown).resolves.toMatchObject({
+      verdict: 'exited',
+      processTreeVerified: true
+    })
 
     expect(mockKill).toHaveBeenCalledTimes(1)
     expect(handler.activePtyCount).toBe(1)
     const retry = dispatcher.callRequest('pty.shutdown', { id: 'pty-1', immediate: true })
     expect(mockKill).toHaveBeenCalledTimes(1)
+    await expect(retry).resolves.toMatchObject({ verdict: 'exited', processTreeVerified: true })
     onExitCb!({ exitCode: 137 })
-    await retry
     expect(handler.activePtyCount).toBe(0)
   })
 

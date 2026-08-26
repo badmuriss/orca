@@ -37,7 +37,9 @@ import type {
   BrowserSelectAllResult,
   BrowserSelectResult,
   BrowserSnapshotResult,
+  BrowserPaneFocusReceipt,
   BrowserTabCurrentResult,
+  BrowserTabCreateResult,
   BrowserTabListResult,
   BrowserTabProfileCloneResult,
   BrowserTabProfileShowResult,
@@ -105,6 +107,11 @@ import type {
   RuntimeBrowserClientPage,
   RuntimeBrowserPageRegistry
 } from './runtime-browser-page-registry'
+import {
+  observedPanePaint,
+  UNOBSERVED_PANE_PAINT,
+  type BrowserPanePaintObservation
+} from './browser-pane-paint-observation'
 
 export type BrowserCommandTargetParams = {
   worktree?: string
@@ -877,7 +884,13 @@ export class RuntimeBrowserCommands {
         worktreeId: clientPage.workspaceId,
         focus: params.focus
       })
-      return { switched: switchedIndex, browserPageId: clientPage.browserPageId }
+      return {
+        switched: switchedIndex,
+        browserPageId: clientPage.browserPageId,
+        ...(params.focus
+          ? { focusReceipt: this.paneFocusReceipt(true, UNOBSERVED_PANE_PAINT) }
+          : {})
+      }
     }
     const bridge = this.requireAgentBrowserBridge()
     const worktreeId =
@@ -903,7 +916,20 @@ export class RuntimeBrowserCommands {
     if (params.focus) {
       this.notifyRendererBrowserPaneFocus(focusWorktreeId, result.browserPageId)
     }
-    return { ...result, switched: switchedIndex }
+    return {
+      ...result,
+      switched: switchedIndex,
+      ...(params.focus
+        ? {
+            focusReceipt: this.paneFocusReceipt(
+              bridge.getActivePageId(focusWorktreeId) === result.browserPageId,
+              await this.observePanePaint(
+                bridge.getRegisteredTabs(focusWorktreeId).get(result.browserPageId)
+              )
+            )
+          }
+        : {})
+    }
   }
 
   async browserHover(
@@ -1560,6 +1586,34 @@ export class RuntimeBrowserCommands {
     )
   }
 
+  // Why: only a completed capture is paint evidence; an unavailable guest remains unobserved.
+  private async observePanePaint(wcId: number | undefined): Promise<BrowserPanePaintObservation> {
+    const guest = wcId == null ? null : webContents.fromId(wcId)
+    if (!guest || guest.isDestroyed()) {
+      return UNOBSERVED_PANE_PAINT
+    }
+    if (this.host.getAvailableAuthoritativeWindow()?.isVisible() !== true) {
+      return UNOBSERVED_PANE_PAINT
+    }
+    try {
+      return observedPanePaint(!(await guest.capturePage()).isEmpty())
+    } catch {
+      return UNOBSERVED_PANE_PAINT
+    }
+  }
+
+  private paneFocusReceipt(
+    exactPageSelected: boolean,
+    paint: BrowserPanePaintObservation
+  ): BrowserPaneFocusReceipt {
+    return {
+      requested: true,
+      exactPageSelected,
+      nativePanePaint: paint.verdict,
+      observedAt: paint.observedAt
+    }
+  }
+
   async browserTabCreate(
     params: {
       url?: string
@@ -1568,15 +1622,16 @@ export class RuntimeBrowserCommands {
       profileId?: string
       waitForRegistration?: boolean
       activate?: boolean
+      focus?: boolean
       navigation?: RuntimeNavigationTarget
       targetGroupId?: string
       placement?: BrowserPageCreationPlacement
     },
     caller?: { pairedDeviceId?: string; clientKind?: 'mobile' | 'runtime' }
-  ): Promise<{ browserPageId: string }> {
+  ): Promise<BrowserTabCreateResult> {
     const url = params.url ?? 'about:blank'
     const focus = resolveBrowserTabCreateFocus({
-      activate: params.activate,
+      activate: params.activate ?? params.focus,
       navigation: params.navigation,
       clientKind: caller?.clientKind
     })
@@ -1674,7 +1729,12 @@ export class RuntimeBrowserCommands {
         ...(caller?.pairedDeviceId ? { clientNavigationId: caller.pairedDeviceId } : {}),
         targetGroupId: params.targetGroupId
       })
-      return { browserPageId: created.browserPageId }
+      return {
+        browserPageId: created.browserPageId,
+        ...(params.focus
+          ? { focusReceipt: this.paneFocusReceipt(false, UNOBSERVED_PANE_PAINT) }
+          : {})
+      }
     }
     const { browserPageId } = await this.createBrowserTabInRenderer(
       url,
@@ -1704,6 +1764,10 @@ export class RuntimeBrowserCommands {
       targetGroupId: params.targetGroupId
     })
 
+    if (params.focus) {
+      this.notifyRendererBrowserPaneFocus(worktreeId, browserPageId)
+    }
+
     // Why: the webview loads about:blank first; route navigation through the bridge so its registered owner remains authoritative.
     if (url && url !== 'about:blank') {
       const navigate = async (): Promise<void> => {
@@ -1715,7 +1779,17 @@ export class RuntimeBrowserCommands {
       }
       if (params.waitForRegistration === true) {
         void navigate().catch(() => {})
-        return { browserPageId }
+        // Why: this path deliberately returns before the requested URL can paint, so there is no
+        // paint to observe yet — report that rather than a verdict the page never had a chance at.
+        return {
+          browserPageId,
+          focusReceipt: params.focus
+            ? this.paneFocusReceipt(
+                bridge.getActivePageId(worktreeId) === browserPageId,
+                UNOBSERVED_PANE_PAINT
+              )
+            : undefined
+        }
       }
       try {
         await navigate()
@@ -1724,7 +1798,16 @@ export class RuntimeBrowserCommands {
       }
     }
 
-    return { browserPageId }
+    if (!params.focus) {
+      return { browserPageId }
+    }
+    return {
+      browserPageId,
+      focusReceipt: this.paneFocusReceipt(
+        bridge.getActivePageId(worktreeId) === browserPageId,
+        await this.observePanePaint(bridge.getRegisteredTabs(worktreeId).get(browserPageId))
+      )
+    }
   }
 
   async browserTabSetProfile(

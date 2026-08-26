@@ -44,6 +44,7 @@ describe('orchestration worker-start CLI contract', () => {
     await invokeWorkerStart(
       new Map<string, string | boolean>([
         ['task', 'task_1'],
+        ['attempt-id', 'attempt_1'],
         ['on', 'windows'],
         ['worktree', 'new-top-level'],
         ['name', 'release-audit'],
@@ -64,6 +65,7 @@ describe('orchestration worker-start CLI contract', () => {
       'orchestration.workerStart',
       {
         task: 'task_1',
+        attemptId: 'attempt_1',
         on: 'windows',
         worktree: 'new-top-level',
         name: 'release-audit',
@@ -106,6 +108,7 @@ describe('orchestration worker-start CLI contract', () => {
     await invokeWorkerStart(
       new Map<string, string | boolean>([
         ['task', 'task_1'],
+        ['attempt-id', 'attempt_2'],
         ['agent', 'claude'],
         ['model', 'aws-bedrock-opus-5'],
         ['effort', 'high'],
@@ -132,6 +135,7 @@ describe('orchestration worker-start CLI contract', () => {
       invokeWorkerStart(
         new Map<string, string | boolean>([
           ['task', 'task_1'],
+          ['attempt-id', 'attempt_3'],
           ['agent', 'codex'],
           ['model', 'gpt-5.6-sol'],
           ['from', 'term_coord']
@@ -156,6 +160,7 @@ describe('orchestration worker-start CLI contract', () => {
     await invokeWorkerStart(
       new Map<string, string | boolean>([
         ['task', 'task_1'],
+        ['attempt-id', 'attempt_4'],
         ['agent', 'codex'],
         ['from', 'term_coord']
       ])
@@ -179,6 +184,7 @@ describe('orchestration worker-start CLI contract', () => {
     await ORCHESTRATION_HANDLERS['orchestration worker-start']({
       flags: new Map<string, string | boolean>([
         ['task', 'task_1'],
+        ['attempt-id', 'attempt_5'],
         ['agent', 'codex'],
         ['from', 'term_coord']
       ]),

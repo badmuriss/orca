@@ -7,6 +7,7 @@ import {
   assertCallerHandleMatchesEvidence,
   resolveOrchestrationCaller
 } from './orchestration-run-scope'
+import { ORCHESTRATION_COORDINATOR_HANDOFF_METHODS } from './orchestration-coordinator-handoff'
 
 const RunCreateParams = z.object({
   objective: requiredString('Missing --objective'),
@@ -27,6 +28,7 @@ const RunListParams = z.object({
 const RunShowParams = z.object({ id: requiredString('Missing --id'), from: OptionalString })
 
 export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
+  ...ORCHESTRATION_COORDINATOR_HANDOFF_METHODS,
   defineMethod({
     name: 'orchestration.runCreate',
     params: RunCreateParams,

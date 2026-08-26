@@ -1,6 +1,6 @@
 /* eslint-disable max-lines -- Why: filesystem, editor-file, and search commands share the same local/SSH path authorization rules. Keeping that IO adapter together prevents separate command paths from drifting on safety checks. */
 import type { ChildProcess } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { watch as watchFs } from 'node:fs'
 import type { FileHandle } from 'node:fs/promises'
 import {
@@ -245,6 +245,8 @@ type TerminalFileGrant = {
   clientId?: string
   expiresAt: number
   statIdentity: string | null
+  /** Local grants also pin the bytes a preview could return; see terminalArtifactContentDigest. */
+  contentDigest: string | null
   readOnly: boolean
   provenance: 'terminal-output' | 'native-chat'
   expiryTimer?: ReturnType<typeof setTimeout>
@@ -1054,6 +1056,12 @@ export class RuntimeFileCommands {
         isDirectory: false
       }
     }
+    // Why local only: a remote digest would cost an extra relay round trip at grant time,
+    // and the SSH path proves freshness through its own provider-side guard.
+    const contentDigest =
+      isDirectory || args.connectionId
+        ? null
+        : await this.digestLocalTerminalPath(args.artifactPath, stats)
     const grant = isDirectory
       ? null
       : this.createTerminalFileGrant({
@@ -1064,7 +1072,8 @@ export class RuntimeFileCommands {
           clientId: args.clientId,
           readOnly: args.readOnly === true,
           provenance: args.provenance ?? 'terminal-output',
-          stats
+          stats,
+          contentDigest
         })
     return {
       worktree: args.worktreeId,
@@ -1122,6 +1131,27 @@ export class RuntimeFileCommands {
     }
   }
 
+  /** Reads the grant-time content digest in the same open as the stat that anchors it. */
+  private async digestLocalTerminalPath(
+    absolutePath: string,
+    stats: RuntimeFileStatLike & { isDirectory: () => boolean }
+  ): Promise<string | null> {
+    if (stats.isDirectory()) {
+      return null
+    }
+    const handle = await open(absolutePath, 'r')
+    try {
+      return await terminalArtifactContentDigest(
+        handle,
+        typeof stats.size === 'number' ? stats.size : 0
+      )
+    } catch {
+      return null
+    } finally {
+      await handle.close()
+    }
+  }
+
   private createTerminalFileGrant(args: {
     worktreeId: string
     absolutePath: string
@@ -1131,6 +1161,7 @@ export class RuntimeFileCommands {
     readOnly?: boolean
     provenance: TerminalFileGrant['provenance']
     stats: RuntimeFileStatLike
+    contentDigest?: string | null
   }): TerminalFileGrant {
     assertTerminalArtifactNotHardLinked(args.stats)
     const grant: TerminalFileGrant = {
@@ -1142,6 +1173,7 @@ export class RuntimeFileCommands {
       ...(args.clientId ? { clientId: args.clientId } : {}),
       expiresAt: Date.now() + TERMINAL_FILE_GRANT_TTL_MS,
       statIdentity: terminalFileStatIdentity(args.stats),
+      contentDigest: args.contentDigest ?? null,
       readOnly: args.readOnly === true,
       provenance: args.provenance
     }
@@ -1354,7 +1386,7 @@ export class RuntimeFileCommands {
       if (fileStats.size > MOBILE_FILE_READ_MAX_BYTES) {
         throw new Error('file_too_large')
       }
-      assertTerminalFileGrantFresh(grant, fileStats)
+      await assertLocalTerminalFileGrantFresh(grant, handle, fileStats)
       if (
         isBinaryBuffer(await readFileHandleBufferBounded(handle, MOBILE_FILE_READ_MAX_BYTES + 1))
       ) {
@@ -1374,14 +1406,14 @@ export class RuntimeFileCommands {
       }
       const freshHandle = await openLocalTerminalArtifactGrant(grant, constants.O_RDONLY)
       try {
-        assertTerminalFileGrantFresh(grant, await freshHandle.stat())
+        await assertLocalTerminalFileGrantFresh(grant, freshHandle, await freshHandle.stat())
       } finally {
         await freshHandle.close()
       }
       await rename(tempPath, grant.absolutePath)
-      grant.statIdentity = terminalFileStatIdentity(
-        await this.statLocalTerminalPath(grant.absolutePath)
-      )
+      const writtenStats = await this.statLocalTerminalPath(grant.absolutePath)
+      grant.statIdentity = terminalFileStatIdentity(writtenStats)
+      grant.contentDigest = await this.digestLocalTerminalPath(grant.absolutePath, writtenStats)
       this.refreshTerminalFileGrant(grant)
       return { ok: true }
     } finally {
@@ -1770,6 +1802,39 @@ export class RuntimeFileCommands {
     }
     await writeFile(filePath, content, 'utf-8')
     return { ok: true }
+  }
+
+  async createMaestroWorkspaceAnnotation(
+    worktreeSelector: string,
+    relativePath: string,
+    content: string
+  ): Promise<{ worktreeId: string; filePath: string }> {
+    const target = await this.resolveFileExplorerPath(worktreeSelector, relativePath)
+    const provider = target.connectionId ? getSshFilesystemProvider(target.connectionId) : null
+    if (target.connectionId) {
+      if (!provider) {
+        throw new Error(SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE)
+      }
+      try {
+        await provider.createFile(target.path)
+        await provider.writeFile(target.path, content)
+      } catch (error) {
+        if (!(error instanceof Error && /exist/i.test(error.message))) {
+          throw error
+        }
+      }
+      return { worktreeId: target.worktree.id, filePath: target.path }
+    }
+    const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
+    await mkdir(dirname(filePath), { recursive: true })
+    try {
+      await writeFile(filePath, content, { encoding: 'utf-8', flag: 'wx' })
+    } catch (error) {
+      if (!(error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST')) {
+        throw error
+      }
+    }
+    return { worktreeId: target.worktree.id, filePath }
   }
 
   async writeFileExplorerFileBase64(
@@ -2599,7 +2664,7 @@ async function readLocalTerminalArtifactFileFromHandle(
   if (fileStat.size > MOBILE_FILE_READ_MAX_BYTES) {
     throw new Error('file_too_large')
   }
-  assertTerminalFileGrantFresh(grant, fileStat)
+  await assertLocalTerminalFileGrantFresh(grant, handle, fileStat)
   const buffer = await readFileHandleBufferBounded(handle, MOBILE_FILE_READ_MAX_BYTES + 1)
   if (isBinaryBuffer(buffer)) {
     throw new Error('binary_file')
@@ -2616,7 +2681,7 @@ async function readLocalTerminalArtifactPreviewFromHandle(
   if (fileStats.isDirectory()) {
     throw new Error('Cannot preview a directory')
   }
-  assertTerminalFileGrantFresh(grant, fileStats)
+  await assertLocalTerminalFileGrantFresh(grant, handle, fileStats)
   const mimeType = RUNTIME_PREVIEWABLE_BINARY_MIME_TYPES[extname(grant.absolutePath).toLowerCase()]
   if (mimeType) {
     const binaryMaxBytes =
@@ -2787,6 +2852,59 @@ function terminalFileStatIdentity(stats: RuntimeFileStatLike): string | null {
     return `${size}:${mtimeMs}`
   }
   return null
+}
+
+// Why: `dev:ino:nlink:size:mtimeMs` cannot see a rewrite that reuses a freed inode,
+// keeps the same byte length, and lands in the same millisecond — which is exactly what
+// replacing a small artifact looks like. Pin the content as well, bounded by the largest
+// preview this file can ever return, so staleness never depends on clock resolution.
+const TERMINAL_ARTIFACT_DIGEST_MAX_BYTES = LOCAL_PREVIEWABLE_BINARY_MAX_BYTES
+const TERMINAL_ARTIFACT_DIGEST_CHUNK_BYTES = 1024 * 1024
+
+async function terminalArtifactContentDigest(
+  handle: FileHandle,
+  size: number
+): Promise<string | null> {
+  if (!Number.isFinite(size) || size < 0) {
+    return null
+  }
+  const bounded = Math.min(size, TERMINAL_ARTIFACT_DIGEST_MAX_BYTES)
+  const hash = createHash('sha256')
+  const buffer = Buffer.alloc(Math.min(Math.max(bounded, 1), TERMINAL_ARTIFACT_DIGEST_CHUNK_BYTES))
+  let offset = 0
+  while (offset < bounded) {
+    const { bytesRead } = await handle.read(
+      buffer,
+      0,
+      Math.min(buffer.length, bounded - offset),
+      offset
+    )
+    if (bytesRead <= 0) {
+      break
+    }
+    hash.update(buffer.subarray(0, bytesRead))
+    offset += bytesRead
+  }
+  return `${offset}:${hash.digest('hex')}`
+}
+
+/** Local reads and writes prove freshness against the recorded bytes, not just the stat tuple. */
+async function assertLocalTerminalFileGrantFresh(
+  grant: TerminalFileGrant,
+  handle: FileHandle,
+  stats: RuntimeFileStatLike
+): Promise<void> {
+  assertTerminalFileGrantFresh(grant, stats)
+  if (grant.contentDigest === null) {
+    return
+  }
+  const currentDigest = await terminalArtifactContentDigest(
+    handle,
+    typeof stats.size === 'number' ? stats.size : 0
+  )
+  if (currentDigest !== null && currentDigest !== grant.contentDigest) {
+    throw new Error('terminal_file_grant_stale')
+  }
 }
 
 function assertTerminalFileGrantFresh(grant: TerminalFileGrant, stats: RuntimeFileStatLike): void {

@@ -1,7 +1,13 @@
 import { isTuiAgent } from '../../../../shared/tui-agent-config'
+import {
+  federatedUnknownReceipt,
+  isKnownRemoteStartFailure
+} from './orchestration-federated-start-outcome'
 import type { RuntimeStatus } from '../../../../shared/runtime-types'
 import {
   ORCHESTRATION_CONTRACT_RUNTIME_CAPABILITY,
+  ORCHESTRATION_FEDERATION_ATTEMPT_BOUND_WORKER_LEASE_PROTOCOL_VERSION,
+  ORCHESTRATION_FEDERATION_ATTEMPT_BOUND_WORKER_LEASE_RUNTIME_CAPABILITY,
   ORCHESTRATION_FEDERATION_CONTROL_MAIL_PROTOCOL_VERSION,
   ORCHESTRATION_FEDERATION_CONTROL_MAIL_RUNTIME_CAPABILITY,
   ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION,
@@ -23,11 +29,10 @@ import { validateFederatedWorkerStartPlacement } from './orchestration-worker-st
 import { resolveFederatedWorkerStartBudgets } from './orchestration-worker-start-budgets'
 import { resolveDispatchCreator } from './orchestration-dispatch-creator'
 import {
-  isReadyRemoteFederatedWorkerStartReceipt,
   parseRemoteFederatedWorkerStartReceipt
 } from './orchestration-federated-attach-receipt'
 import { isWorkerStartTimeoutWithinTimerLimit } from '../../../../shared/orchestration-timing-budgets'
-import { federatedUnknownReceipt } from './orchestration-federated-worker-start-unknown-receipt'
+import { boundedRedactedDiagnostic } from './orchestration-worker-start-receipt'
 
 export async function startFederatedWorker(args: {
   params: WorkerStartInput
@@ -53,6 +58,19 @@ export async function startFederatedWorker(args: {
     throw new OrchestrationError(
       'invalid_argument',
       'Remote worker-start requires a durable retry request.'
+    )
+  }
+  if (params.retryOf) {
+    throw new OrchestrationError(
+      'capability_unsupported',
+      'Federated retry transfer is not supported by the attempt-bound lease protocol. No effects were applied.'
+    )
+  }
+  const run = db.getRun(runId)
+  if (!run) {
+    throw new OrchestrationError(
+      'consumer_fenced',
+      `Run ${runId} is not authoritative for federated worker-start. No effects were applied.`
     )
   }
   const worktree = params.worktree ?? 'current'
@@ -91,22 +109,31 @@ export async function startFederatedWorker(args: {
       `Connected server ${server.name} does not support orchestration federation.`
     )
   }
+
   assertWorkerLaunchPreferencesRuntimeSupported({
     model: params.model,
     effort: params.effort,
     capabilities: status.capabilities,
     serverName: server.name
   })
-  const supportsControlMail = status.capabilities?.includes(
-    ORCHESTRATION_FEDERATION_CONTROL_MAIL_RUNTIME_CAPABILITY
+  // Why: mixed client and server versions are the normal state, so negotiate down to
+  // the highest protocol this peer actually advertises. A capability the peer never
+  // published is never assumed, and the attempt-bound identity below is sent only on
+  // the version that defines it.
+  const capabilities = status.capabilities ?? []
+  const federationProtocolVersion = capabilities.includes(
+    ORCHESTRATION_FEDERATION_ATTEMPT_BOUND_WORKER_LEASE_RUNTIME_CAPABILITY
   )
-  const federationProtocolVersion =
-    supportsControlMail &&
-    status.capabilities?.includes(ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_RUNTIME_CAPABILITY)
+    ? ORCHESTRATION_FEDERATION_ATTEMPT_BOUND_WORKER_LEASE_PROTOCOL_VERSION
+    : capabilities.includes(ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_RUNTIME_CAPABILITY) &&
+        capabilities.includes(ORCHESTRATION_FEDERATION_CONTROL_MAIL_RUNTIME_CAPABILITY)
       ? ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION
-      : supportsControlMail
+      : capabilities.includes(ORCHESTRATION_FEDERATION_CONTROL_MAIL_RUNTIME_CAPABILITY)
         ? ORCHESTRATION_FEDERATION_CONTROL_MAIL_PROTOCOL_VERSION
         : 1
+  const attemptBoundTransfer =
+    federationProtocolVersion ===
+    ORCHESTRATION_FEDERATION_ATTEMPT_BOUND_WORKER_LEASE_PROTOCOL_VERSION
 
   const setupDecision = createsWorktree ? (params.setup ?? 'run') : 'not_applicable'
   const started = db.createStartingWorkerDispatch({
@@ -150,6 +177,14 @@ export async function startFederatedWorker(args: {
         {
           dispatchId: started.dispatch.id,
           taskId: task.id,
+          ...(attemptBoundTransfer
+            ? {
+                attemptId: params.attemptId,
+                runId,
+                coordinatorGeneration: run.consumer_generation
+              }
+            : {}),
+          retryOf: params.retryOf,
           taskSpec: task.spec,
           // Carry the home dispatch depth across the federation boundary so a
           // remote worker cannot be mistaken for a root when it dispatches again.
@@ -190,12 +225,23 @@ export async function startFederatedWorker(args: {
       requestedLaunch,
       remote.state === 'ready'
     )
-    if (isReadyRemoteFederatedWorkerStartReceipt(remote)) {
+    // Why: pane identity is part of the attempt-bound receipt only. A peer that
+    // negotiated down never sends it, and demanding it would strand a worker that
+    // actually started on an older server.
+    if (
+      remote.state === 'ready' &&
+      remote.runtimeEpoch &&
+      remote.worktreeId &&
+      remote.terminalHandle &&
+      (!attemptBoundTransfer || (remote.paneKey && remote.processIncarnation))
+    ) {
       db.updateFederatedDispatchResources({
         dispatchId: started.dispatch.id,
         remoteRuntimeEpoch: remote.runtimeEpoch,
         worktreeId: remote.worktreeId,
-        terminalHandle: remote.terminalHandle
+        terminalHandle: remote.terminalHandle,
+        ...(remote.paneKey ? { paneKey: remote.paneKey } : {}),
+        ...(remote.processIncarnation ? { processIncarnation: remote.processIncarnation } : {})
       })
       db.recordWorkerStage({
         dispatchId: started.dispatch.id,
@@ -222,18 +268,34 @@ export async function startFederatedWorker(args: {
         residualResources: remote.residualResources ?? []
       }
     }
+    // Why: a ready receipt without its exact attachment identity cannot later prove release safety.
+    if (remote.state === 'ready') {
+      const worker = db.markWorkerStartUnknown(
+        started.dispatch.id,
+        'remote_attach',
+        'The worker server accepted the attachment without its authoritative terminal identity.'
+      )
+      return federatedUnknownReceipt(worker, task.id, server.name, launch)
+    }
+    // Why: remote.lastError can arrive raw/unbounded from an older peer that
+    // predates redaction — bound and redact at the home too. Naturally
+    // idempotent on an already-sanitized message from a newer peer (see
+    // boundedRedactedDiagnostic's own doc comment).
+    const remoteFailedStage = remote.failedStage ?? 'remote_attach'
     if (remote.state === 'outcome_unknown') {
       const worker = db.markWorkerStartUnknown(
         started.dispatch.id,
-        remote.failedStage ?? 'remote_attach',
-        remote.lastError ?? 'The worker server reported an unknown start outcome.'
+        remoteFailedStage,
+        boundedRedactedDiagnostic(
+          remote.lastError ?? 'The worker server reported an unknown start outcome.'
+        )
       )
       return federatedUnknownReceipt(worker, task.id, server.name, launch)
     }
     const worker = db.failWorkerStart(
       started.dispatch.id,
-      remote.failedStage ?? 'remote_attach',
-      remote.lastError ?? `The worker server returned ${remote.state}.`
+      remoteFailedStage,
+      boundedRedactedDiagnostic(remote.lastError ?? `The worker server returned ${remote.state}.`)
     )
     return {
       runId,
@@ -250,7 +312,8 @@ export async function startFederatedWorker(args: {
       residualResources: remote.residualResources ?? []
     }
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error)
+    const rawReason = error instanceof Error ? error.message : String(error)
+    const reason = boundedRedactedDiagnostic(rawReason)
     if (error instanceof OrchestrationError && isKnownRemoteStartFailure(error.code)) {
       const worker = db.failWorkerStart(started.dispatch.id, 'remote_attach', reason)
       return {
@@ -270,14 +333,4 @@ export async function startFederatedWorker(args: {
     const worker = db.markWorkerStartUnknown(started.dispatch.id, 'remote_attach', reason)
     return federatedUnknownReceipt(worker, task.id, server.name, requestedLaunch)
   }
-}
-
-function isKnownRemoteStartFailure(code: string): boolean {
-  return [
-    'invalid_argument',
-    'agent_unconfigured',
-    'worktree_not_found_on_server',
-    'terminal_worktree_mismatch',
-    'capability_unsupported'
-  ].includes(code)
 }

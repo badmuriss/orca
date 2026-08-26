@@ -10,6 +10,7 @@ import {
 } from '../../../providers/pty-process-list-admission'
 import type { PtyListedSession } from '../../../../shared/pty-listed-session'
 import { SSH_PROVIDER_UNREGISTERED_REASON } from '../../../../shared/pty-liveness-verdict'
+import type { PtyProviderShutdownResult } from '../provider/shutdown-detect'
 import { ptyOwnership } from '../provider/ownership-state'
 import {
   getProviderForPty,
@@ -36,7 +37,7 @@ export function installPtyInspectIpcHandlers(deps: {
     provider: IPtyProvider,
     id: string,
     opts: { immediate?: boolean; keepHistory?: boolean; deadlineMs?: number }
-  ) => Promise<boolean>
+  ) => Promise<PtyProviderShutdownResult>
   rememberSyntheticKillExit: (id: string) => void
   sendPtyExitToRenderer: (payload: { id: string; code: number; incarnationId?: string }) => void
 }): void {
@@ -81,9 +82,9 @@ export function installPtyInspectIpcHandlers(deps: {
       return
     }
     const shutdownProvider = provider ?? getProviderForPty(args.id)
-    let providerExitObserved = false
+    let stopResult: PtyProviderShutdownResult
     try {
-      providerExitObserved = await shutdownProviderAndDetectExit(shutdownProvider, args.id, {
+      stopResult = await shutdownProviderAndDetectExit(shutdownProvider, args.id, {
         immediate: true,
         keepHistory: args.keepHistory ?? false
       })
@@ -92,17 +93,24 @@ export function installPtyInspectIpcHandlers(deps: {
         // Why: a failed shutdown can leave the process alive (SSH relay grace window / local daemon); keep ownership/lease state so the user can retry.
         throw err
       }
-      /* session already dead — cleanup below handles the rest */
+      return
     }
-    // Why: some shutdown paths do not emit onExit through the provider listener.
-    // Explicit cleanup is idempotent and covers already-dead PTYs.
+    const { receipt, providerExitObserved } = stopResult
+    if (receipt.verdict === 'live') {
+      runtime?.markPtyLivenessLive?.(args.id)
+      return
+    }
+    if (receipt.verdict !== 'exited' || !receipt.processTreeVerified) {
+      runtime?.markPtyLivenessUnverifiable?.(args.id, receipt.reason)
+      return
+    }
     const incarnationId = finishPtyShutdown(args.id, connectionId, store)
     if (!providerExitObserved) {
-      runtime?.onPtyExit(args.id, -1, incarnationId)
+      runtime?.onPtyExit(args.id, 0, incarnationId)
       rememberSyntheticKillExit(args.id)
       sendPtyExitToRenderer({
         id: args.id,
-        code: -1,
+        code: 0,
         ...(incarnationId ? { incarnationId } : {})
       })
     }

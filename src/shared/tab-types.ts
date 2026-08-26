@@ -24,9 +24,11 @@ export type TabContentType =
   | 'check-details'
   | 'browser'
   | 'simulator'
+  | 'maestro'
 
 export type WorkspaceVisibleTabType = 'terminal' | 'editor' | 'browser' | 'simulator'
 export type CtrlTabOrderMode = 'mru' | 'sequential'
+export type SystemTabRole = 'workspace-maestro'
 
 // Why: many-to-one — every editor-family kind collapses to 'editor'. Never invert it by equality;
 // resolve the concrete tab and project forward instead.
@@ -56,11 +58,14 @@ export type Tab = {
   createdAt: number
   isPreview?: boolean // preview tabs get replaced by next single-click open
   isPinned?: boolean // pinned tabs survive "close others"
+  systemRole?: SystemTabRole
   /** Why: per-tab rendering mode for coding-agent terminals. `'chat'` shows the
    *  native chat view as an overlay while the live terminal stays mounted
    *  underneath; `'terminal'` (the default for legacy/missing) shows the raw
    *  xterm. Optional so sessions persisted before this field hydrate cleanly. */
   viewMode?: 'terminal' | 'chat'
+  maestroExecutionHostId?: string
+  maestroWorkspaceKey?: string
   /** Timestamp when the tab was last focused / activated by the user. */
   lastFocusedAt?: number
 }

@@ -139,7 +139,7 @@ export function transferWorkerTerminalResourceStatement(
       `Worker terminal resource ${params.resourceId} was not found.`
     )
   }
-  const priorOwners = JSON.parse(resource.prior_owner_dispatch_ids) as string[]
+  const priorOwners = parsePriorOwnerDispatchIds(resource.prior_owner_dispatch_ids)
   priorOwners.push(resource.owner_dispatch_id)
   this.db
     .prepare(
@@ -160,6 +160,19 @@ export function transferWorkerTerminalResourceStatement(
       params.resourceId
     )
   return this.getWorkerTerminalResource(params.resourceId) as WorkerTerminalResourceRow
+}
+
+function parsePriorOwnerDispatchIds(value: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (Array.isArray(parsed) && parsed.every((entry) => typeof entry === 'string')) {
+      return parsed
+    }
+  } catch {}
+  throw new OrchestrationError(
+    'lease_identity_conflict',
+    'Worker terminal prior-owner identity is invalid.'
+  )
 }
 
 // Finds an owned, settled, exact-match resource for an explicitly reused terminal.

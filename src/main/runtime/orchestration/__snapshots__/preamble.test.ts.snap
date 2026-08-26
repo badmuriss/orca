@@ -8,6 +8,19 @@ Your task ID is: task_SNAP
 You talk to the coordinator only through the CLI commands below. Do not use
 Slack, GitHub comments, or any other channel to reach a human during the run.
 
+=== VALIDATION LOOP BREAKER ===
+
+Every validation command must have an explicit deadline. Record the normalized
+failure signature and how many times it has occurred. After the first occurrence,
+do not repeat an equivalent validation unchanged: change the methodology, reduce
+to a focused reproduction/test, or split the journey. A focused checkpoint or
+journey may be invoked at most three times in total, even when its failure
+signatures differ. After the third invocation, accept only honest composed focal
+evidence or mark the checkpoint blocked; never rerun it to peel another tail.
+The same failure signature may occur at most twice across equivalent validations.
+Validate a localized correction with its focused checkpoint, never by rerunning
+the entire suite.
+
 === CLI COMMANDS ===
 
   # Report the terminal task outcome (REQUIRED exactly once).

@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ORCHESTRATION_CONTRACT_VERSION } from '../../../../shared/protocol-version'
+import { createManagedCliContext } from '../../../../shared/managed-cli-context'
+import { toSshExecutionHostId } from '../../../../shared/execution-host'
 import { OrcaRuntimeService } from '../../orca-runtime'
 import { OrchestrationDb } from '../../orchestration/db'
 import { RpcDispatcher } from '../dispatcher'
@@ -16,8 +18,14 @@ describe('orchestration new-worktree workers', () => {
   let runtime: OrcaRuntimeService
   let runId: string
   const paths: string[] = []
+  // Why: the ManagedCliContext test double must reflect the worktree the
+  // worker's agent terminal actually lands in — the coordinator's current
+  // 'repo::parent' by default, or 'repo::created' once mockCreatedWorktree
+  // sets up a new-worktree worker — never a value that drifts from it.
+  let workerWorkspaceKey = 'worktree:repo::parent'
 
   beforeEach(() => {
+    workerWorkspaceKey = 'worktree:repo::parent'
     db = new OrchestrationDb(':memory:')
     runtime = new OrcaRuntimeService()
     runtime.setOrchestrationDb(db)
@@ -67,6 +75,17 @@ describe('orchestration new-worktree workers', () => {
       new Promise(() => undefined)
     )
     vi.spyOn(runtime, 'getTerminalOrchestrationCliCommand').mockReturnValue('orca')
+    vi.spyOn(runtime, 'preflightWorktreeManagedCliExecutable').mockReturnValue('orca')
+    vi.spyOn(runtime, 'assertTerminalManagedCliAvailable').mockImplementation(() => {})
+    vi.spyOn(runtime, 'buildTerminalManagedCliContext').mockImplementation((handle) =>
+      createManagedCliContext({
+        executable: 'orca',
+        runtimeId: runtime.getRuntimeId(),
+        executionHostId: 'local',
+        workspaceKey: workerWorkspaceKey,
+        terminalHandle: handle
+      })
+    )
     vi.spyOn(runtime, 'sendTerminalAgentPrompt').mockResolvedValue({
       handle: 'term_worker',
       accepted: true,
@@ -92,6 +111,7 @@ describe('orchestration new-worktree workers', () => {
     const params = method.params!.parse({
       task: task.id,
       from: 'term_coord',
+      attemptId: 'attempt-test',
       worktree: 'new-child',
       name: 'new-worker',
       agent: 'codex',
@@ -123,6 +143,7 @@ describe('orchestration new-worktree workers', () => {
           options?.terminals?.find((terminal) => terminal.title === 'Setup')?.handle
       }
     } as never)
+    workerWorkspaceKey = 'worktree:repo::created'
     if (options?.terminals) {
       vi.mocked(runtime.listTerminals).mockResolvedValue({
         terminals: options.terminals,
@@ -142,6 +163,7 @@ describe('orchestration new-worktree workers', () => {
         startupAgent: 'codex',
         awaitTerminalProvisioning: true,
         observeSetupCompletion: true,
+        orchestrationManagedLaunch: true,
         lineage: expect.objectContaining({ noParent: true, parentWorktree: undefined })
       })
     )
@@ -207,6 +229,7 @@ describe('orchestration new-worktree workers', () => {
         method.params!.parse({
           task: task.id,
           from: 'term_coord',
+          attemptId: 'attempt-folder',
           worktree: 'new-child',
           name: 'folder-worker',
           agent: 'codex'
@@ -225,7 +248,21 @@ describe('orchestration new-worktree workers', () => {
 
   it('injects the execution host CLI command and Dispatch capability together', async () => {
     mockCreatedWorktree()
+    // Why: once a ManagedCliContext is present, its `executable` is the
+    // authoritative CLI command the preamble renders — getTerminalOrchestrationCliCommand
+    // alone no longer decides it, so both the preflight and the managed
+    // context lookup must agree on the execution host's real command.
     vi.mocked(runtime.getTerminalOrchestrationCliCommand).mockReturnValue('orca-ide')
+    vi.mocked(runtime.preflightWorktreeManagedCliExecutable).mockReturnValue('orca-ide')
+    vi.mocked(runtime.buildTerminalManagedCliContext).mockImplementation((handle) =>
+      createManagedCliContext({
+        executable: 'orca-ide',
+        runtimeId: runtime.getRuntimeId(),
+        executionHostId: 'local',
+        workspaceKey: workerWorkspaceKey,
+        terminalHandle: handle
+      })
+    )
 
     await startWorker({ worktree: 'new-top-level' })
 
@@ -235,8 +272,30 @@ describe('orchestration new-worktree workers', () => {
     expect(prompt).not.toMatch(/(^|\s)orca orchestration send/)
   })
 
+  it('injects the exact bounded ManagedCliContext into the worker preamble', async () => {
+    mockCreatedWorktree()
+
+    await startWorker({ worktree: 'new-top-level' })
+
+    expect(runtime.assertTerminalManagedCliAvailable).toHaveBeenCalledWith('term_worker')
+    expect(runtime.buildTerminalManagedCliContext).toHaveBeenCalledWith('term_worker')
+    const prompt = vi.mocked(runtime.sendTerminalAgentPrompt).mock.calls[0]?.[1] ?? ''
+    expect(prompt).toContain('executable: orca')
+    expect(prompt).toContain(`runtimeId: ${runtime.getRuntimeId()}`)
+    expect(prompt).toContain('executionHostId: local')
+    expect(prompt).toContain('workspaceKey: worktree:repo::created')
+    expect(prompt).toContain('terminalHandle: term_worker')
+  })
+
   it('passes exact repo, base, metadata, lineage, and setup choices to worktree creation', async () => {
     mockCreatedWorktree({ state: 'skipped' })
+    // Why: showRepo resolves the selector to a DIFFERENT authoritative repo id
+    // and host than the raw selector string — proves the preflight uses the
+    // resolved repo, never the selector itself.
+    vi.mocked(runtime.showRepo).mockResolvedValue({
+      id: 'repo-explicit-resolved',
+      connectionId: 'ssh-explicit-host'
+    } as never)
 
     await startWorker({
       worktree: 'new-top-level',
@@ -258,6 +317,11 @@ describe('orchestration new-worktree workers', () => {
         lineage: expect.objectContaining({ noParent: true, parentWorktree: undefined })
       })
     )
+    expect(runtime.showRepo).toHaveBeenCalledWith('id:repo-explicit')
+    expect(runtime.preflightWorktreeManagedCliExecutable).toHaveBeenCalledWith({
+      id: 'repo-explicit-resolved',
+      hostId: toSshExecutionHostId('ssh-explicit-host')
+    })
   })
 
   it('reports an absent setup hook as not configured without failing the start', async () => {
@@ -541,6 +605,7 @@ describe('orchestration new-worktree workers', () => {
       params: {
         task: task.id,
         from: 'term_coord',
+        attemptId: 'attempt-rpc',
         worktree: 'new-child',
         name: 'atomic-worker',
         agent: 'codex'
@@ -608,6 +673,7 @@ describe('orchestration new-worktree workers', () => {
       params: {
         task: task.id,
         from: 'term_coord',
+        attemptId: 'attempt-replay',
         worktree: 'new-child',
         name: 'recover-input-worker',
         agent: 'codex'

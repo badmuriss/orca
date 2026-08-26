@@ -4,12 +4,17 @@ import type {
   WorkerTerminalRetainedReason
 } from '../../worker-terminal-ownership'
 import { OrchestrationError } from '../../orchestration-error'
-import { parseWorkerTerminalPriorOwnerIds } from '../pane-key-match'
 import type { OrchestrationDb } from '../orchestration-db'
+import {
+  markLinkedWorkerLeaseReleased,
+  markLinkedWorkerLeaseReleasePending,
+  retainLinkedWorkerLease
+} from './worker-terminal-lease-lifecycle'
 
 export function requestWorkerTerminalRelease(
   this: OrchestrationDb,
-  dispatchId: string
+  dispatchId: string,
+  options: { auto?: boolean } = {}
 ):
   | { disposition: 'requested'; resource: WorkerTerminalResourceRow }
   | { disposition: 'already_released'; resource: WorkerTerminalResourceRow }
@@ -55,16 +60,35 @@ export function requestWorkerTerminalRelease(
       this.db.exec('COMMIT')
       return { disposition: 'already_released', resource }
     }
+    if (options.auto && resource.release_state !== 'not_requested') {
+      this.db.exec('COMMIT')
+      return {
+        disposition: 'retained',
+        resource,
+        reason: (resource.retained_reason as WorkerTerminalRetainedReason) ?? 'identity_unproven'
+      }
+    }
     if (worker.state === 'stopped' || worker.state === 'abandoned') {
       this.db.exec('COMMIT')
       return { disposition: 'retained', resource, reason: 'identity_unproven' }
     }
     if (resource.ownership_state === 'external') {
+      this.db
+        .prepare(
+          `UPDATE worker_terminal_resources
+           SET release_state = 'retained', retained_reason = 'external_terminal',
+               updated_at = datetime('now')
+           WHERE id = ? AND ownership_state = 'external'
+             AND release_state = 'not_requested'`
+        )
+        .run(resource.id)
+      const retained = this.getWorkerTerminalResource(resource.id) as WorkerTerminalResourceRow
+      retainLinkedWorkerLease(this, resource.id)
       this.db.exec('COMMIT')
       return {
         disposition: 'retained',
-        resource,
-        reason: (resource.retained_reason as WorkerTerminalRetainedReason) ?? 'external_terminal'
+        resource: retained,
+        reason: (retained.retained_reason as WorkerTerminalRetainedReason) ?? 'external_terminal'
       }
     }
     if (resource.ownership_state === 'user_owned') {
@@ -78,6 +102,9 @@ export function requestWorkerTerminalRelease(
     if (resource.release_state === 'retained' && resource.retained_reason === 'user_requested') {
       this.db.prepare('DELETE FROM worker_terminal_archives WHERE dispatch_id = ?').run(dispatchId)
     }
+    const releasableStates = options.auto
+      ? "'not_requested'"
+      : "'not_requested', 'retained', 'requested', 'releasing', 'unknown'"
     this.db
       .prepare(
         `UPDATE worker_terminal_resources
@@ -88,13 +115,23 @@ export function requestWorkerTerminalRelease(
              retained_reason = NULL,
              release_requested_at = COALESCE(release_requested_at, datetime('now')),
              release_error = NULL, updated_at = datetime('now')
-         WHERE id = ? AND release_state IN ('not_requested', 'retained', 'requested', 'releasing', 'unknown')`
+         WHERE id = ? AND release_state IN (${releasableStates})`
       )
       .run(resource.id)
+    const requested = this.getWorkerTerminalResource(resource.id) as WorkerTerminalResourceRow
+    if (requested.release_state !== 'requested' && requested.release_state !== 'releasing') {
+      this.db.exec('COMMIT')
+      return {
+        disposition: 'retained',
+        resource: requested,
+        reason: (requested.retained_reason as WorkerTerminalRetainedReason) ?? 'identity_unproven'
+      }
+    }
+    markLinkedWorkerLeaseReleasePending(this, resource.id)
     this.db.exec('COMMIT')
     return {
       disposition: 'requested',
-      resource: this.getWorkerTerminalResource(resource.id) as WorkerTerminalResourceRow
+      resource: requested
     }
   } catch (error) {
     this.db.exec('ROLLBACK')
@@ -121,21 +158,16 @@ export function settleDeadWorkerTerminalRelease(
         `Worker terminal resource ${params.resourceId} was not found.`
       )
     }
-    const priorOwners = parseWorkerTerminalPriorOwnerIds(resource.prior_owner_dispatch_ids)
-    const requesterRelated =
-      resource.owner_dispatch_id === params.requestingDispatchId ||
-      priorOwners?.includes(params.requestingDispatchId) === true
     const requester = this.getWorkerDispatch(params.requestingDispatchId)
     const owner = this.getWorkerDispatch(resource.owner_dispatch_id)
     const requesterSettled = Boolean(requester && WORKER_SETTLED_STATES.includes(requester.state))
     const ownerSettled = Boolean(owner && WORKER_SETTLED_STATES.includes(owner.state))
     if (
-      !priorOwners ||
-      !requesterRelated ||
+      resource.owner_dispatch_id !== params.requestingDispatchId ||
       !requesterSettled ||
       !ownerSettled ||
+      resource.ownership_state !== 'owned' ||
       resource.process_incarnation !== params.processIncarnation ||
-      resource.ownership_state === 'released' ||
       !['not_requested', 'retained', 'unknown'].includes(resource.release_state)
     ) {
       this.db.exec('COMMIT')
@@ -148,11 +180,15 @@ export function settleDeadWorkerTerminalRelease(
              release_requested_at = COALESCE(release_requested_at, datetime('now')),
              release_completed_at = datetime('now'), release_error = NULL,
              updated_at = datetime('now')
-         WHERE id = ? AND process_incarnation = ? AND ownership_state != 'released'
+         WHERE id = ? AND owner_dispatch_id = ? AND process_incarnation = ?
+           AND ownership_state = 'owned'
            AND release_state IN ('not_requested', 'retained', 'unknown')`
       )
-      .run(params.resourceId, params.processIncarnation)
+      .run(params.resourceId, params.requestingDispatchId, params.processIncarnation)
     const released = this.getWorkerTerminalResource(params.resourceId) as WorkerTerminalResourceRow
+    if (released.release_state === 'released') {
+      markLinkedWorkerLeaseReleased(this, params.resourceId)
+    }
     this.db.exec('COMMIT')
     return released.release_state === 'released'
       ? { disposition: 'released', resource: released }

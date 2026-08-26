@@ -91,6 +91,21 @@ describe('buildDispatchPreamble', () => {
     expect(result).toMatch(/orchestration send --from term_worker/)
   })
 
+  it('includes the bounded validation loop-breaker contract', () => {
+    const result = buildDispatchPreamble(baseParams())
+
+    expect(result).toContain('=== VALIDATION LOOP BREAKER ===')
+    expect(result).toContain('Every validation command must have an explicit deadline')
+    expect(result).toMatch(/Record the normalized\s+failure signature/)
+    expect(result).toContain('do not repeat an equivalent validation unchanged')
+    expect(result).toMatch(/checkpoint or\s+journey may be invoked at most three times in total/)
+    expect(result).toMatch(/even when its failure\s+signatures differ/)
+    expect(result).toMatch(/honest composed focal\s+evidence or mark the checkpoint blocked/)
+    expect(result).toContain('never rerun it to peel another tail')
+    expect(result).toContain('may occur at most twice')
+    expect(result).toMatch(/never by rerunning\s+the entire suite/)
+  })
+
   it('includes ask block with BEHAVIOR RULE #1 forbidding AskUserQuestion', () => {
     const result = buildDispatchPreamble(baseParams())
     expect(result).toMatch(/orchestration ask --from term_worker/)
@@ -199,6 +214,72 @@ describe('buildDispatchPreamble', () => {
     expect(result).toContain('orca-ide orchestration check')
     expect(result).toContain('orca-ide orchestration ask')
     expect(result).not.toMatch(/(^|\s)orca orchestration/m)
+  })
+
+  const SAMPLE_MANAGED_CLI_CONTEXT = {
+    executable: '/home/user/.orca-relay/bin/orca',
+    runtimeId: 'runtime-1',
+    executionHostId: 'ssh:target-1',
+    workspaceKey: 'worktree:repo::worktree-1',
+    terminalHandle: 'term_worker',
+    protocolCapability: 'managed-cli-context.v1'
+  } as const
+
+  it('uses the authoritative managedCliContext executable over cliCommand', () => {
+    const result = buildDispatchPreamble(
+      baseParams({ cliCommand: 'orca', managedCliContext: SAMPLE_MANAGED_CLI_CONTEXT })
+    )
+
+    expect(result).toContain('/home/user/.orca-relay/bin/orca orchestration send')
+    expect(result).not.toMatch(/(^|\s)orca orchestration/m)
+  })
+
+  it('renders every ManagedCliContext field in a bounded, deterministic context section', () => {
+    const result = buildDispatchPreamble(
+      baseParams({ managedCliContext: SAMPLE_MANAGED_CLI_CONTEXT })
+    )
+
+    const sectionStart = result.indexOf('=== MANAGED CLI CONTEXT ===')
+    expect(sectionStart).toBeGreaterThan(-1)
+    const section = result.slice(sectionStart, result.indexOf('=== TASK ==='))
+
+    expect(section).toContain(`executable: ${SAMPLE_MANAGED_CLI_CONTEXT.executable}`)
+    expect(section).toContain(`runtimeId: ${SAMPLE_MANAGED_CLI_CONTEXT.runtimeId}`)
+    expect(section).toContain(`executionHostId: ${SAMPLE_MANAGED_CLI_CONTEXT.executionHostId}`)
+    expect(section).toContain(`workspaceKey: ${SAMPLE_MANAGED_CLI_CONTEXT.workspaceKey}`)
+    expect(section).toContain(`terminalHandle: ${SAMPLE_MANAGED_CLI_CONTEXT.terminalHandle}`)
+    expect(section).toContain(`capability: ${SAMPLE_MANAGED_CLI_CONTEXT.protocolCapability}`)
+  })
+
+  it('omits the context section entirely when no managedCliContext is given', () => {
+    const result = buildDispatchPreamble(baseParams())
+    expect(result).not.toContain('=== MANAGED CLI CONTEXT ===')
+  })
+
+  it('throws instead of falling back to bare orca when a managed dispatch has no ManagedCliContext', () => {
+    expect(() =>
+      buildDispatchPreamble(baseParams({ cliCommand: 'orca', requiresManagedCliContext: true }))
+    ).toThrow('managed_cli_context_required')
+  })
+
+  it('fails closed for a devMode managed dispatch too, not just production', () => {
+    expect(() =>
+      buildDispatchPreamble(baseParams({ devMode: true, requiresManagedCliContext: true }))
+    ).toThrow('managed_cli_context_required')
+  })
+
+  it('accepts a devMode managed dispatch once ManagedCliContext is supplied', () => {
+    const result = buildDispatchPreamble(
+      baseParams({
+        devMode: true,
+        requiresManagedCliContext: true,
+        managedCliContext: SAMPLE_MANAGED_CLI_CONTEXT
+      })
+    )
+    // Why: devMode still forces the orca-dev command text — ManagedCliContext
+    // being required is a separate contract from which CLI name is printed.
+    expect(result).toContain('orca-dev orchestration send')
+    expect(result).toContain('=== MANAGED CLI CONTEXT ===')
   })
 
   it('appends a BASE DRIFT section when baseDrift.behind > 0', () => {

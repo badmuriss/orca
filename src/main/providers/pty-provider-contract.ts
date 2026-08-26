@@ -5,6 +5,7 @@ import type { TerminalOscLinkRange } from '../../shared/terminal-osc-link-ranges
 import type { PtyBackgroundStreamEvent, PtyDataEvent } from './pty-provider-events'
 import type { PtySpawnResult } from './pty-spawn-result'
 import type { PtyIncarnationId } from '../../shared/pty-incarnation'
+import type { PtyStopReceipt } from '../../shared/pty-stop-receipt'
 import type {
   AgentSessionExecutionClaim,
   AgentSessionSurfaceBinding
@@ -199,8 +200,13 @@ export type IPtyProvider = {
   // deadline; each RPC leaf converts to a relative timeout when it actually issues.
   shutdown(
     id: string,
-    opts: { immediate?: boolean; keepHistory?: boolean; deadlineMs?: number }
-  ): Promise<void>
+    opts: {
+      immediate?: boolean
+      keepHistory?: boolean
+      deadlineMs?: number
+      expectedIncarnationId?: PtyIncarnationId
+    }
+  ): Promise<PtyStopReceipt>
   sendSignal(id: string, signal: string): Promise<void>
   getCwd(id: string): Promise<string>
   getInitialCwd(id: string): Promise<string>

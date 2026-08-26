@@ -3,6 +3,7 @@ import { isOrchestrationMutation } from '../../../shared/orchestration-rpc-contr
 import { parsePaneKey } from '../../../shared/stable-pane-id'
 import type { OrcaRuntimeService } from '../orca-runtime'
 import { OrchestrationError } from '../orchestration/orchestration-error'
+import { reconcileMaestroWorkerLeaseTransfer } from '../orchestration/maestro-terminal-lease-reconciliation'
 import type { RpcRequest } from './core'
 
 export type DurableMutationInvocation = {
@@ -45,6 +46,7 @@ export class OrchestrationMutationExecutor {
     const key = `${callerFingerprint}:${requestId}`
     const db = this.runtime.getOrchestrationDb()
     const identity = { callerFingerprint, requestId, method: request.method, payloadHash }
+    const retryableFederatedRelease = isRetryableFederatedRelease(request.method, params, db)
     const atomicWorkerAcceptance =
       request.method === 'orchestration.workerStart' ||
       request.method === 'orchestration.federationAttachStart'
@@ -63,23 +65,50 @@ export class OrchestrationMutationExecutor {
           return { disposition: row.state, row }
         })()
       : db.beginMutationReceipt(identity)
-    const resumedPendingMutation =
-      begun.disposition === 'pending' && request.method === 'orchestration.workerRelease'
+    const resumableRelease = isResumableRelease(request.method)
+    const resumedPendingMutation = begun.disposition === 'pending' && resumableRelease
 
     if (begun.disposition === 'completed') {
       const active = this.inFlight.get(key)
       if (active) {
         return attachMutationReceipt(await active, requestId, true)
       }
-      return attachMutationReceipt(JSON.parse(begun.row.receipt ?? 'null'), requestId, true)
+      const receipt = JSON.parse(begun.row.receipt ?? 'null') as unknown
+      return attachMutationReceipt(
+        attestFederatedReleaseReplay(request.method, receipt, this.runtime.getRuntimeId()),
+        requestId,
+        true
+      )
     }
     if (begun.disposition === 'pending') {
       const active = this.inFlight.get(key)
       if (active) {
         return attachMutationReceipt(await active, requestId, true)
       }
-      if (request.method !== 'orchestration.workerRelease') {
+      if (!resumableRelease) {
         const recovery = getPendingWorkerStartRecovery(request.method, begun.row.receipt)
+        if (recovery?.transferRequestId) {
+          const transfer = db.getMaestroWorkerLeaseTransferReceiptByMutationRequest(identity)
+          if (!transfer || transfer.requestId !== recovery.transferRequestId) {
+            throw new OrchestrationError(
+              'operation_unknown',
+              `Worker start ${requestId} has an incomplete transfer recovery receipt.`,
+              { requestId, dispatchId: recovery.dispatchId }
+            )
+          }
+          const reconciled = reconcileMaestroWorkerLeaseTransfer({
+            db,
+            requestId: recovery.transferRequestId
+          })
+          const recovered = {
+            dispatchId: recovery.dispatchId,
+            state: 'outcome_unknown',
+            leaseTransfer: reconciled
+          }
+          const receipted = attachMutationReceipt(recovered, requestId, true)
+          db.completeMutationReceipt({ ...identity, receipt: JSON.stringify(receipted) })
+          return receipted
+        }
         throw new OrchestrationError(
           'operation_unknown',
           recovery
@@ -107,6 +136,9 @@ export class OrchestrationMutationExecutor {
     try {
       const result = await active
       const receipted = attachMutationReceipt(result, requestId, resumedPendingMutation)
+      if (isRetryableFederatedReleaseResult(retryableFederatedRelease, result)) {
+        return receipted
+      }
       db.completeMutationReceipt({ ...identity, receipt: JSON.stringify(receipted) })
       return receipted
     } catch (error) {
@@ -122,6 +154,58 @@ export class OrchestrationMutationExecutor {
   getLocalAuthenticatedCallerFingerprint(): string {
     return this.runtime.getOrchestrationDb().getOrCreateLocalMutationCallerFingerprint()
   }
+}
+
+// Why: worker release is idempotent on both paths — it can answer already_released —
+// so an interrupted release resumes rather than reporting an unknown outcome. Only the
+// federated flavour needs a dispatch to route by; a local release resumes on its own.
+function isResumableRelease(method: string): boolean {
+  return method === 'orchestration.federationRelease' || method === 'orchestration.workerRelease'
+}
+
+function isRetryableFederatedRelease(
+  method: string,
+  params: unknown,
+  db: ReturnType<OrcaRuntimeService['getOrchestrationDb']>
+): boolean {
+  if (method === 'orchestration.federationRelease') {
+    return true
+  }
+  if (method !== 'orchestration.workerRelease') {
+    return false
+  }
+  return (
+    typeof params === 'object' &&
+    params !== null &&
+    typeof (params as { dispatch?: unknown }).dispatch === 'string' &&
+    Boolean(db.getFederatedDispatch((params as { dispatch: string }).dispatch))
+  )
+}
+
+function isRetryableFederatedReleaseResult(
+  retryableFederatedRelease: boolean,
+  result: unknown
+): boolean {
+  if (!retryableFederatedRelease || !result || typeof result !== 'object') {
+    return false
+  }
+  return (result as { state?: unknown }).state === 'unverifiable'
+}
+
+function attestFederatedReleaseReplay(
+  method: string,
+  receipt: unknown,
+  servingRuntimeEpoch: string
+): unknown {
+  if (
+    method !== 'orchestration.federationRelease' ||
+    !receipt ||
+    typeof receipt !== 'object' ||
+    Array.isArray(receipt)
+  ) {
+    return receipt
+  }
+  return { ...(receipt as Record<string, unknown>), servingRuntimeEpoch }
 }
 
 const executorsByRuntime = new WeakMap<OrcaRuntimeService, OrchestrationMutationExecutor>()
@@ -192,14 +276,22 @@ function attachMutationReceipt(result: unknown, requestId: string, replayed: boo
 function getPendingWorkerStartRecovery(
   method: string,
   receipt: string | null
-): { dispatchId: string } | undefined {
+): { dispatchId: string; transferRequestId?: string } | undefined {
   if (method !== 'orchestration.workerStart' || !receipt) {
     return undefined
   }
   try {
-    const parsed = JSON.parse(receipt) as { accepted?: { dispatchId?: unknown } }
+    const parsed = JSON.parse(receipt) as {
+      accepted?: { dispatchId?: unknown }
+      leaseTransfer?: { requestId?: unknown }
+    }
     return typeof parsed.accepted?.dispatchId === 'string'
-      ? { dispatchId: parsed.accepted.dispatchId }
+      ? {
+          dispatchId: parsed.accepted.dispatchId,
+          ...(typeof parsed.leaseTransfer?.requestId === 'string'
+            ? { transferRequestId: parsed.leaseTransfer.requestId }
+            : {})
+        }
       : undefined
   } catch {
     return undefined

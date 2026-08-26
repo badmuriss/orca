@@ -120,9 +120,9 @@ export function createProcessTableSnapshotReader(
   }
 }
 
-const readProcessTable = createProcessTableSnapshotReader(readFreshProcessTable)
+export const readProcessTable = createProcessTableSnapshotReader(readFreshProcessTable)
 
-function readProcessTableBeforeDeadline(
+export function readProcessTableBeforeDeadline(
   readTable: ProcessTableReader,
   timeoutMs: number
 ): Promise<ProcessTableCapture | null> {
@@ -226,7 +226,7 @@ export async function captureDescendantSnapshot(
   return collectDescendantRows(rootPid, capture.rows, capture.capturedAtMs)
 }
 
-type KillSweepDeps = SnapshotDeps &
+export type KillSweepDeps = SnapshotDeps &
   TerminateDeps & {
     ownsRoot?: () => boolean
     /**

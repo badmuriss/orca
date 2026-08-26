@@ -10,8 +10,11 @@ import {
   setPtyOwnership,
   setLocalPtyProvider,
   rebindLocalProviderListeners,
+  restorePtyIncarnation,
   getLocalPtyProvider
 } from './pty'
+import { TEST_PTY_INCARNATION, exitedPtyStopReceipt } from './pty-ipc-test-constants'
+import type { PtyStopReceipt } from '../../shared/pty-stop-receipt'
 
 vi.mock('electron', () => import('./pty-ipc-mock-registry').then((m) => m.electronModuleMock()))
 vi.mock('fs', () => import('./pty-ipc-mock-registry').then((m) => m.fsModuleMock()))
@@ -187,6 +190,7 @@ describe('registerPtyHandlers', () => {
     } as never)
     handlers.clear()
     registerPtyHandlers(mainWindow as never)
+    restorePtyIncarnation('local-pty', TEST_PTY_INCARNATION)
 
     await expect(handlers.get('pty:kill')!(null, { id: 'local-pty' })).rejects.toThrow(
       'daemon unavailable'
@@ -203,7 +207,9 @@ describe('registerPtyHandlers', () => {
     expect(shutdown).not.toHaveBeenCalled()
   })
   it('synthesizes runtime exit after ordinary daemon-backed pty kill', async () => {
-    const shutdown = vi.fn(async () => undefined)
+    const shutdown = vi.fn(async (id: string, opts: { expectedIncarnationId: string }) =>
+      exitedPtyStopReceipt(id, opts)
+    )
     const runtime = {
       setPtyController: vi.fn(),
       onPtyExit: vi.fn()
@@ -232,25 +238,31 @@ describe('registerPtyHandlers', () => {
     } as never)
     handlers.clear()
     registerPtyHandlers(mainWindow as never, runtime as never)
+    restorePtyIncarnation('local-pty', TEST_PTY_INCARNATION)
 
     await handlers.get('pty:kill')!(null, { id: 'local-pty', keepHistory: true })
 
-    expect(shutdown).toHaveBeenCalledWith('local-pty', {
-      immediate: true,
-      keepHistory: true
-    })
-    expect(runtime.onPtyExit).toHaveBeenCalledWith('local-pty', -1, undefined)
+    expect(shutdown).toHaveBeenCalledWith(
+      'local-pty',
+      expect.objectContaining({
+        immediate: true,
+        keepHistory: true,
+        expectedIncarnationId: TEST_PTY_INCARNATION
+      })
+    )
+    expect(runtime.onPtyExit).toHaveBeenCalledWith('local-pty', 0, TEST_PTY_INCARNATION)
     expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:exit', {
       id: 'local-pty',
-      code: -1
+      code: 0
     })
   })
   it('does not synthesize a duplicate renderer exit when kill emits provider exit', async () => {
     const exitListeners = new Set<(payload: { id: string; code: number }) => void>()
-    const shutdown = vi.fn(async (id: string) => {
+    const shutdown = vi.fn(async (id: string, opts: { expectedIncarnationId: string }) => {
       for (const listener of exitListeners) {
         listener({ id, code: 0 })
       }
+      return exitedPtyStopReceipt(id, opts)
     })
     const runtime = {
       setPtyController: vi.fn(),
@@ -283,6 +295,7 @@ describe('registerPtyHandlers', () => {
     } as never)
     handlers.clear()
     registerPtyHandlers(mainWindow as never, runtime as never)
+    restorePtyIncarnation('local-pty', TEST_PTY_INCARNATION)
 
     await handlers.get('pty:kill')!(null, { id: 'local-pty' })
 
@@ -304,7 +317,9 @@ describe('registerPtyHandlers', () => {
       spawn: vi.fn(),
       write: vi.fn(),
       resize: vi.fn(),
-      shutdown: vi.fn(async () => undefined),
+      shutdown: vi.fn(async (id: string, opts: { expectedIncarnationId: string }) =>
+        exitedPtyStopReceipt(id, opts)
+      ),
       sendSignal: vi.fn(),
       getCwd: vi.fn(),
       getInitialCwd: vi.fn(),
@@ -327,6 +342,7 @@ describe('registerPtyHandlers', () => {
     } as never)
     handlers.clear()
     registerPtyHandlers(mainWindow as never, runtime as never)
+    restorePtyIncarnation('local-pty', TEST_PTY_INCARNATION)
 
     await handlers.get('pty:kill')!(null, { id: 'local-pty' })
     for (const listener of exitListeners) {
@@ -334,9 +350,9 @@ describe('registerPtyHandlers', () => {
     }
 
     expect(runtime.onPtyExit).toHaveBeenCalledTimes(1)
-    expect(runtime.onPtyExit).toHaveBeenCalledWith('local-pty', -1, undefined)
+    expect(runtime.onPtyExit).toHaveBeenCalledWith('local-pty', 0, TEST_PTY_INCARNATION)
     expect(mainWindow.webContents.send.mock.calls.filter((call) => call[0] === 'pty:exit')).toEqual(
-      [['pty:exit', { id: 'local-pty', code: -1 }]]
+      [['pty:exit', { id: 'local-pty', code: 0 }]]
     )
   })
   it('waits for the desktop startup barrier before renderer local spawns resolve the provider', async () => {
@@ -396,13 +412,17 @@ describe('registerPtyHandlers', () => {
     expect(awaitLocalPtyProviderStartup).toHaveBeenCalledTimes(1)
     expect(fallbackShutdown).not.toHaveBeenCalled()
     const daemon = installObservableDaemonTestProvider()
+    daemon.shutdown.mockImplementation(
+      async (id: string, opts: { expectedIncarnationId: string }) => exitedPtyStopReceipt(id, opts)
+    )
+    restorePtyIncarnation(daemonSessionId, TEST_PTY_INCARNATION)
     barrier.resolve()
     await pendingKill
 
     expect(daemon.spawn).not.toHaveBeenCalled()
     expect(daemon.shutdown).toHaveBeenCalledWith(
       daemonSessionId,
-      expect.objectContaining({ immediate: true })
+      expect.objectContaining({ immediate: true, expectedIncarnationId: TEST_PTY_INCARNATION })
     )
     expect(fallbackShutdown).not.toHaveBeenCalled()
   })
@@ -426,17 +446,24 @@ describe('registerPtyHandlers', () => {
       kill: (ptyId: string) => boolean
     }
 
+    restorePtyIncarnation('daemon-session', TEST_PTY_INCARNATION)
     expect(controller.kill('daemon-session')).toBe(true)
     await Promise.resolve()
     expect(awaitLocalPtyProviderStartup).toHaveBeenCalledTimes(1)
     expect(fallbackShutdown).not.toHaveBeenCalled()
 
     const daemon = installObservableDaemonTestProvider()
+    daemon.shutdown.mockImplementation(
+      async (id: string, opts: { expectedIncarnationId: string }) => exitedPtyStopReceipt(id, opts)
+    )
     barrier.resolve()
     await vi.waitFor(() => expect(daemon.shutdown).toHaveBeenCalledTimes(1))
     await vi.waitFor(() => expect(runtime.onPtyExit).toHaveBeenCalledTimes(1))
 
-    expect(daemon.shutdown).toHaveBeenCalledWith('daemon-session', { immediate: false })
+    expect(daemon.shutdown).toHaveBeenCalledWith(
+      'daemon-session',
+      expect.objectContaining({ immediate: false, expectedIncarnationId: TEST_PTY_INCARNATION })
+    )
     expect(fallbackShutdown).not.toHaveBeenCalled()
   })
   it('waits for the desktop startup barrier before runtime exact stops resolve the provider', async () => {
@@ -456,22 +483,33 @@ describe('registerPtyHandlers', () => {
       }
     )
     const controller = runtime.setPtyController.mock.calls[0]?.[0] as {
-      stopAndWait: (ptyId: string) => Promise<boolean>
+      stopAndWait: (ptyId: string) => Promise<PtyStopReceipt | null>
     }
 
+    restorePtyIncarnation('daemon-session', TEST_PTY_INCARNATION)
     const pendingStop = controller.stopAndWait('daemon-session')
     await Promise.resolve()
     expect(awaitLocalPtyProviderStartup).toHaveBeenCalledTimes(1)
     expect(fallbackShutdown).not.toHaveBeenCalled()
 
     const daemon = installObservableDaemonTestProvider()
+    daemon.shutdown.mockImplementation(
+      async (id: string, opts: { expectedIncarnationId: string }) => exitedPtyStopReceipt(id, opts)
+    )
     barrier.resolve()
-    await expect(pendingStop).resolves.toBe(true)
-
-    expect(daemon.shutdown).toHaveBeenCalledWith('daemon-session', {
-      immediate: true,
-      keepHistory: false
+    await expect(pendingStop).resolves.toMatchObject({
+      verdict: 'exited',
+      processTreeVerified: true
     })
+
+    expect(daemon.shutdown).toHaveBeenCalledWith(
+      'daemon-session',
+      expect.objectContaining({
+        immediate: true,
+        keepHistory: false,
+        expectedIncarnationId: TEST_PTY_INCARNATION
+      })
+    )
     expect(fallbackShutdown).not.toHaveBeenCalled()
   })
   it('rebinds local data and exit listeners after a late daemon provider install', async () => {

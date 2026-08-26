@@ -23,10 +23,12 @@ describe('orchestration worker release liveness verdict', () => {
       detail: 'the stop outcome could not be verified'
     }
   ])('does not release a worker after $name', async ({ close, detail }) => {
-    const reason = 'its SSH provider is no longer registered'
     const resource = {
       id: 'resource-1',
       terminal_handle: 'term_worker',
+      worktree_id: 'repo::worktree',
+      pane_key: 'tab-worker:leaf-worker',
+      process_incarnation: 'pty-worker:incarnation-1',
       host_scope: JSON.stringify({ kind: 'ssh', targetId: 'target-1' }),
       archive_source: 'terminal',
       archive_status: 'captured',
@@ -37,8 +39,12 @@ describe('orchestration worker release liveness verdict', () => {
       showTerminal: vi.fn(async () => ({ handle: 'term_worker', connected: false })),
       getTerminalPaneKey: vi.fn(() => 'tab-worker:leaf-worker'),
       getTerminalProcessIncarnation: vi.fn(() => 'pty-worker:incarnation-1'),
-      getTerminalLivenessVerdict: vi.fn(() => ({ status: 'unverifiable', reason })),
+      getTerminalLivenessVerdict: vi.fn(() => null),
       getOrchestrationDispatchAuthority: vi.fn(() => ({
+        terminalHandle: 'term_worker',
+        worktreeId: 'repo::worktree',
+        paneKey: 'tab-worker:leaf-worker',
+        processIncarnation: 'pty-worker:incarnation-1',
         hostScope: { kind: 'ssh', targetId: 'target-1' }
       })),
       closeTerminal: vi.fn(async () => close),
@@ -79,6 +85,62 @@ describe('orchestration worker release liveness verdict', () => {
     expect(markWorkerTerminalReleaseUnknown).toHaveBeenCalledWith(
       'resource-1',
       `The agent terminal was closed but its process could not be confirmed stopped: ${detail}.`
+    )
+  })
+
+  it('does not close a terminal whose owning host is unverifiable', async () => {
+    const resource = {
+      id: 'resource-1',
+      terminal_handle: 'term_worker',
+      worktree_id: 'repo::worktree',
+      pane_key: 'tab-worker:leaf-worker',
+      process_incarnation: 'pty-worker:incarnation-1',
+      host_scope: JSON.stringify({ kind: 'ssh', targetId: 'target-1' }),
+      archive_source: 'terminal',
+      archive_status: 'captured',
+      ownership_state: 'owned',
+      release_state: 'requested'
+    } as WorkerTerminalResourceRow
+    const runtime = {
+      showTerminal: vi.fn(async () => ({ handle: 'term_worker', connected: false })),
+      getTerminalPaneKey: vi.fn(() => 'tab-worker:leaf-worker'),
+      getTerminalProcessIncarnation: vi.fn(() => 'pty-worker:incarnation-1'),
+      getTerminalLivenessVerdict: vi.fn(() => ({
+        status: 'unverifiable',
+        reason: 'the SSH relay disconnected'
+      })),
+      getOrchestrationDispatchAuthority: vi.fn(() => ({
+        terminalHandle: 'term_worker',
+        worktreeId: 'repo::worktree',
+        paneKey: 'tab-worker:leaf-worker',
+        processIncarnation: 'pty-worker:incarnation-1',
+        hostScope: { kind: 'ssh', targetId: 'target-1' }
+      })),
+      closeTerminal: vi.fn(),
+      notifyMessageArrived: vi.fn()
+    } as unknown as OrcaRuntimeService
+    const markWorkerTerminalReleaseUnknown = vi.fn(() => ({
+      ...resource,
+      release_state: 'unknown',
+      release_error: 'the SSH relay disconnected'
+    }))
+    const db = {
+      getWorkerDispatch: vi.fn(() => ({
+        agent_terminal_handle: 'term_worker',
+        created_at: '2026-08-16T00:00:00.000Z'
+      })),
+      isDispatchProcessCurrent: vi.fn(() => true),
+      workerTerminalResourceHasIdentityConflict: vi.fn(() => false),
+      markWorkerTerminalReleaseUnknown
+    } as unknown as OrchestrationDb
+
+    await expect(
+      completeWorkerTerminalRelease({ runtime, db, dispatchId: 'ctx-worker', resource })
+    ).resolves.toMatchObject({ state: 'release_unknown', processAction: 'none' })
+    expect(runtime.closeTerminal).not.toHaveBeenCalled()
+    expect(markWorkerTerminalReleaseUnknown).toHaveBeenCalledWith(
+      'resource-1',
+      'the SSH relay disconnected'
     )
   })
 })

@@ -4,6 +4,7 @@ import { createOrchestrationRpcHarness } from './orchestration-rpc-test-harness'
 import type { OrchestrationDb } from '../../orchestration/db'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
+import { createManagedCliContext } from '../../../../shared/managed-cli-context'
 
 describe('orchestration RPC methods', () => {
   const h = createOrchestrationRpcHarness()
@@ -20,8 +21,12 @@ describe('orchestration RPC methods', () => {
     h.cleanup()
   })
 
-  async function call(name: string, params: Record<string, unknown>) {
-    return h.call(name, params, ctx)
+  async function call(name: string, params: Record<string, unknown>, context = ctx) {
+    return h.call(
+      name,
+      name === 'orchestration.workerStart' ? { attemptId: 'attempt-test', ...params } : params,
+      context
+    )
   }
 
   describe('composed workers', () => {
@@ -59,6 +64,17 @@ describe('orchestration RPC methods', () => {
         handle === 'term_worker' ? 'runtime_test:term_worker:1' : null
       )
       vi.spyOn(runtime, 'getTerminalOrchestrationCliCommand').mockReturnValue('orca')
+      vi.spyOn(runtime, 'preflightWorktreeManagedCliExecutable').mockReturnValue('orca')
+      vi.spyOn(runtime, 'assertTerminalManagedCliAvailable').mockImplementation(() => {})
+      vi.spyOn(runtime, 'buildTerminalManagedCliContext').mockImplementation((handle) =>
+        createManagedCliContext({
+          executable: 'orca',
+          runtimeId: runtime.getRuntimeId(),
+          executionHostId: 'local',
+          workspaceKey: 'worktree:repo::worktree',
+          terminalHandle: handle
+        })
+      )
       vi.spyOn(runtime, 'sendTerminalAgentPrompt').mockResolvedValue({
         handle: 'term_worker',
         accepted: true,
@@ -140,7 +156,9 @@ describe('orchestration RPC methods', () => {
         effects: { kind: string; role?: string; action?: string; state?: string }[]
       }
 
-      expect(result.state).toBe('ready')
+      if (result.state !== 'ready') {
+        throw new Error(JSON.stringify(result))
+      }
       expect(result.effects).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ kind: 'worktree', action: 'reused' }),
@@ -150,12 +168,12 @@ describe('orchestration RPC methods', () => {
       )
       expect(db.getTask(task.id)?.status).toBe('dispatched')
       expect(db.getWorkerDispatch(result.dispatchId)?.state).toBe('ready')
-      // Why: dispatching a worker is background work — surfaceOwner:false adopts
-      // the tab without scrolling the sidebar to the worker's workspace.
+      // Why: dispatching a worker adopts the tab without changing the visible workspace surface.
       expect(runtime.createTerminal).toHaveBeenCalledWith('id:repo::worktree', {
         startupAgent: 'codex',
         title: `worker-${task.id}`,
-        surfaceOwner: false
+        surfaceOwner: false,
+        orchestrationManagedLaunch: true
       })
       expect(runtime.sendTerminalAgentPrompt).toHaveBeenCalledWith(
         'term_worker',
@@ -194,7 +212,8 @@ describe('orchestration RPC methods', () => {
         'id:repo::worktree',
         expect.objectContaining({
           startupAgent: 'claude',
-          launchPreferences: { model: 'aws-bedrock-opus-5', effort: 'high' }
+          launchPreferences: { model: 'aws-bedrock-opus-5', effort: 'high' },
+          orchestrationManagedLaunch: true
         })
       )
       expect(JSON.parse(db.getWorkerDispatch(result.dispatchId)!.start_options)).toMatchObject({
@@ -342,7 +361,11 @@ describe('orchestration RPC methods', () => {
         'id:repo::other',
         // Why: starting a worker in an existing worktree must not pull the sidebar
         // away from whatever the user is looking at.
-        expect.objectContaining({ startupAgent: 'codex', surfaceOwner: false })
+        expect.objectContaining({
+          startupAgent: 'codex',
+          surfaceOwner: false,
+          orchestrationManagedLaunch: true
+        })
       )
       expect(createWorktree).not.toHaveBeenCalled()
       expect(runtime.showTerminal).toHaveBeenCalledWith('term_coord')
@@ -408,6 +431,282 @@ describe('orchestration RPC methods', () => {
       )
       expect(runtime.createTerminal).not.toHaveBeenCalled()
       expect(createWorktree).not.toHaveBeenCalled()
+    })
+
+    it('transfers a retry terminal only with the lease receipt transaction', async () => {
+      setup()
+      mockCurrentWorkerStart()
+      vi.spyOn(runtime, 'isTerminalRunningAgent').mockResolvedValue(true)
+      const task = db.createTask({ spec: 'retry exact terminal' })
+      const predecessor = db.createStartingWorkerDispatch({ taskId: task.id, startOptions: {} })
+      db.db
+        .prepare("UPDATE worker_dispatches SET state = 'failed' WHERE dispatch_id = ?")
+        .run(predecessor.dispatch.id)
+      db.db
+        .prepare("UPDATE dispatch_contexts SET status = 'failed' WHERE id = ?")
+        .run(predecessor.dispatch.id)
+      db.db.prepare("UPDATE tasks SET status = 'failed' WHERE id = ?").run(task.id)
+      const resource = db.createWorkerTerminalResourceStatement({
+        dispatchId: predecessor.dispatch.id,
+        worktreeId: 'repo::worktree',
+        terminalHandle: 'term_worker',
+        paneKey: 'tab_worker:leaf_worker',
+        processIncarnation: 'runtime_test:term_worker:1',
+        ownership: 'owned'
+      })
+      const oldLease = db.reserveMaestroTerminalLease({
+        requestId: 'worker:old',
+        executionHostId: 'local',
+        workspaceKey: 'worktree:repo::worktree',
+        runId: task.run_id,
+        taskId: task.id,
+        attemptId: 'attempt-test',
+        role: 'worker',
+        coordinatorGeneration: db.getRun(task.run_id)!.consumer_generation,
+        workerTerminalResourceId: resource.id,
+        title: 'old',
+        launchProfile: {
+          agent: null,
+          model: null,
+          effort: null,
+          permissionMode: 'default',
+          routeRef: null
+        },
+        spawnedBy: 'coordinator:g1',
+        ownerPrincipal: `dispatch:${predecessor.dispatch.id}`,
+        retentionPolicy: 'auto_release'
+      })
+      db.attachMaestroTerminalLease({
+        leaseId: oldLease.id,
+        terminalHandle: 'term_worker',
+        tabId: 'tab_worker',
+        paneKey: 'tab_worker:leaf_worker',
+        ptyIncarnation: 'runtime_test:term_worker:1',
+        processRootId: null
+      })
+      db.transitionMaestroTerminalLease({ leaseId: oldLease.id, state: 'ready' })
+      db.transitionMaestroTerminalLease({ leaseId: oldLease.id, state: 'active' })
+
+      const result = (await call(
+        'orchestration.workerStart',
+        {
+          task: task.id,
+          from: 'term_coord',
+          terminal: 'term_worker',
+          retryOf: predecessor.dispatch.id
+        },
+        {
+          ...ctx,
+          orchestrationMutation: {
+            callerFingerprint: 'local-worker',
+            requestId: 'retry-transfer',
+            method: 'orchestration.workerStart',
+            payloadHash: 'retry-transfer-payload'
+          },
+          recordMutationReceipt: () => {}
+        }
+      )) as { dispatchId: string; state: string; lastError?: string }
+
+      if (result.state !== 'ready') {
+        throw new Error(result.lastError)
+      }
+      expect(db.getMaestroTerminalLease(oldLease.id)?.lifecycleState).toBe('superseded')
+      expect(db.getWorkerTerminalResource(resource.id)?.owner_dispatch_id).toBe(result.dispatchId)
+      expect(
+        db.db
+          .prepare('SELECT count(*) AS count FROM maestro_terminal_lease_transfer_receipts')
+          .get()
+      ).toEqual({ count: 1 })
+    })
+
+    it('preserves the established external reuse transfer outside retries', async () => {
+      setup()
+      mockCurrentWorkerStart()
+      vi.spyOn(runtime, 'isTerminalRunningAgent').mockResolvedValue(true)
+      const oldTask = db.createTask({ spec: 'settled owner' })
+      const oldDispatch = db.createStartingWorkerDispatch({ taskId: oldTask.id, startOptions: {} })
+      db.db
+        .prepare("UPDATE worker_dispatches SET state = 'failed' WHERE dispatch_id = ?")
+        .run(oldDispatch.dispatch.id)
+      db.createWorkerTerminalResourceStatement({
+        dispatchId: oldDispatch.dispatch.id,
+        worktreeId: 'repo::worktree',
+        terminalHandle: 'term_worker',
+        paneKey: 'tab_worker:leaf_worker',
+        processIncarnation: 'runtime_test:term_worker:1',
+        ownership: 'owned'
+      })
+      const task = db.createTask({ spec: 'unrelated reuse' })
+
+      const result = (await call('orchestration.workerStart', {
+        task: task.id,
+        from: 'term_coord',
+        terminal: 'term_worker'
+      })) as { dispatchId: string; state: string }
+
+      expect(result.state).toBe('ready')
+      expect(db.getWorkerTerminalResourceByOwner(result.dispatchId)).toBeDefined()
+    })
+
+    it('transfers a settled Maestro resource across tasks and reminted terminal handles', async () => {
+      setup()
+      mockCurrentWorkerStart()
+      vi.spyOn(runtime, 'isTerminalRunningAgent').mockResolvedValue(true)
+      const hostScope = JSON.stringify({ kind: 'local', hostId: 'local' })
+      vi.mocked(runtime.getTerminalPaneKey).mockImplementation((handle) =>
+        handle === 'term_coord'
+          ? coordinatorPaneKey
+          : handle === 'term_worker' || handle === 'term_reminted'
+            ? 'tab_worker:leaf_worker'
+            : null
+      )
+      vi.mocked(runtime.getTerminalProcessIncarnation).mockImplementation((handle) =>
+        handle === 'term_worker' || handle === 'term_reminted' ? 'runtime_test:term_worker:1' : null
+      )
+      vi.spyOn(runtime, 'getOrchestrationDispatchAuthority').mockImplementation((handle) =>
+        handle === 'term_worker' || handle === 'term_reminted'
+          ? ({
+              terminalHandle: handle,
+              worktreeId: 'repo::worktree',
+              paneKey: 'tab_worker:leaf_worker',
+              processIncarnation: 'runtime_test:term_worker:1',
+              hostScope: { kind: 'local', hostId: 'local' }
+            } as never)
+          : null
+      )
+      const predecessorTask = db.createTask({ spec: 'settled Maestro owner' })
+      const predecessor = db.createStartingWorkerDispatch({
+        taskId: predecessorTask.id,
+        startOptions: {}
+      })
+      db.db
+        .prepare("UPDATE worker_dispatches SET state = 'failed' WHERE dispatch_id = ?")
+        .run(predecessor.dispatch.id)
+      db.db
+        .prepare("UPDATE dispatch_contexts SET status = 'failed' WHERE id = ?")
+        .run(predecessor.dispatch.id)
+      db.db.prepare("UPDATE tasks SET status = 'ready' WHERE id = ?").run(predecessorTask.id)
+      const resource = db.createWorkerTerminalResourceStatement({
+        dispatchId: predecessor.dispatch.id,
+        worktreeId: 'repo::worktree',
+        terminalHandle: 'term_worker',
+        paneKey: 'tab_worker:leaf_worker',
+        processIncarnation: 'runtime_test:term_worker:1',
+        hostScope,
+        ownership: 'owned'
+      })
+      const lease = db.reserveMaestroTerminalLease({
+        requestId: 'worker:normal-old',
+        executionHostId: 'local',
+        workspaceKey: 'worktree:repo::worktree',
+        runId: predecessorTask.run_id,
+        taskId: predecessorTask.id,
+        attemptId: 'attempt-predecessor',
+        coordinatorGeneration: db.getRun(predecessorTask.run_id)!.consumer_generation,
+        role: 'worker',
+        workerTerminalResourceId: resource.id,
+        title: 'old',
+        launchProfile: {
+          agent: null,
+          model: null,
+          effort: null,
+          permissionMode: 'default',
+          routeRef: null
+        },
+        spawnedBy: 'coordinator:g1',
+        ownerPrincipal: `dispatch:${predecessor.dispatch.id}`,
+        retentionPolicy: 'auto_release'
+      })
+      db.attachMaestroTerminalLease({
+        leaseId: lease.id,
+        terminalHandle: 'term_worker',
+        tabId: 'tab_worker',
+        paneKey: 'tab_worker:leaf_worker',
+        ptyIncarnation: 'runtime_test:term_worker:1',
+        processRootId: null
+      })
+      db.transitionMaestroTerminalLease({ leaseId: lease.id, state: 'ready' })
+      db.transitionMaestroTerminalLease({ leaseId: lease.id, state: 'active' })
+      const successorTask = db.createTask({ spec: 'successor uses reminted terminal' })
+
+      const result = (await call('orchestration.workerStart', {
+        task: successorTask.id,
+        from: 'term_coord',
+        terminal: 'term_reminted',
+        attemptId: 'attempt-successor'
+      })) as { dispatchId: string; state: string; leaseTransfer: Record<string, unknown> }
+
+      expect(result.state).toBe('ready')
+      expect(db.getMaestroTerminalLease(lease.id)?.lifecycleState).toBe('superseded')
+      expect(db.getWorkerTerminalResource(resource.id)).toMatchObject({
+        owner_dispatch_id: result.dispatchId,
+        terminal_handle: 'term_reminted',
+        host_scope: hostScope
+      })
+      expect(result.leaseTransfer).toMatchObject({
+        kind: 'settled_resource_reuse',
+        predecessor: {
+          taskId: predecessorTask.id,
+          attemptId: 'attempt-predecessor',
+          terminalHandle: 'term_worker',
+          hostScope
+        },
+        successor: {
+          taskId: successorTask.id,
+          attemptId: 'attempt-successor',
+          terminalHandle: 'term_reminted',
+          hostScope
+        }
+      })
+      expect(
+        db.db
+          .prepare('SELECT count(*) AS count FROM maestro_terminal_lease_transfer_receipts')
+          .get()
+      ).toEqual({ count: 1 })
+      expect(
+        db.db
+          .prepare(
+            `SELECT count(*) AS count FROM maestro_terminal_leases
+         WHERE worker_terminal_resource_id = ? AND lifecycle_state NOT IN ('released', 'superseded', 'archived')`
+          )
+          .get(resource.id)
+      ).toEqual({ count: 1 })
+
+      db.db
+        .prepare("UPDATE worker_dispatches SET state = 'failed' WHERE dispatch_id = ?")
+        .run(result.dispatchId)
+      db.db
+        .prepare("UPDATE dispatch_contexts SET status = 'failed' WHERE id = ?")
+        .run(result.dispatchId)
+      db.db.prepare("UPDATE tasks SET status = 'ready' WHERE id = ?").run(successorTask.id)
+      vi.mocked(runtime.sendTerminalAgentPrompt).mockResolvedValueOnce({
+        handle: 'term_worker',
+        accepted: false,
+        bytesWritten: 0
+      })
+      const postTransferTask = db.createTask({ spec: 'post-transfer prompt failure' })
+      const postTransfer = (await call('orchestration.workerStart', {
+        task: postTransferTask.id,
+        from: 'term_coord',
+        terminal: 'term_worker',
+        attemptId: 'attempt-post-transfer'
+      })) as { dispatchId: string; state: string; leaseTransfer: Record<string, unknown> }
+
+      expect(postTransfer).toMatchObject({
+        state: 'outcome_unknown',
+        leaseTransfer: { kind: 'settled_resource_reuse' }
+      })
+      expect(db.getWorkerTerminalResource(resource.id)?.owner_dispatch_id).toBe(
+        postTransfer.dispatchId
+      )
+      expect(
+        db.db
+          .prepare(
+            `SELECT count(*) AS count FROM maestro_terminal_leases
+         WHERE worker_terminal_resource_id = ? AND lifecycle_state NOT IN ('released', 'superseded', 'archived')`
+          )
+          .get(resource.id)
+      ).toEqual({ count: 1 })
     })
 
     it('returns a failed receipt and preserves a created terminal as residual', async () => {

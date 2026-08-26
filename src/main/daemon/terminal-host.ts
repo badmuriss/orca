@@ -21,6 +21,7 @@ import { listLiveTerminalHostSessions } from './terminal-host-session-listing'
 import { createOrAttachTerminalSession } from './terminal-host-session-create'
 import { isShellProcess } from '../../shared/agent-detection'
 import { TerminalAttachCanceledError } from './daemon-errors'
+import { WindowsPtyJobObjectReceiptHandoff } from '../providers/windows-pty-job-object'
 
 export type { CreateOrAttachOptions, CreateOrAttachResult } from './terminal-host-create-contract'
 
@@ -56,6 +57,7 @@ export class TerminalHost {
   private maxTombstones: number
   private creationFenced = false
   private disposePromise: Promise<void> | null = null
+  private readonly windowsJobReceiptHandoff = new WindowsPtyJobObjectReceiptHandoff()
   private readonly agentSessionOwners = new ClaimedAgentPtyOwnerRegistry()
   private readonly agentSessionGenerations = new TerminalHostAgentSessionGenerations()
 
@@ -104,7 +106,7 @@ export class TerminalHost {
           if (options.agentSessionGeneration && this.sessions.get(options.sessionId)?.isAlive) {
             throw new Error('agent_session_claim_unavailable')
           }
-          return await createOrAttachTerminalSession(options, {
+          const result = await createOrAttachTerminalSession(options, {
             sessions: this.sessions,
             sessionTeardown: this.sessionTeardown,
             killedTombstones: this.killedTombstones,
@@ -121,6 +123,11 @@ export class TerminalHost {
               this.reapSession(sessionId)
             }
           })
+          if (result.isNew) {
+            this.sessionTeardown.clearReceipt(options.sessionId)
+            this.windowsJobReceiptHandoff.clearForCreate(options.sessionId)
+          }
+          return result
         }
       })
     } finally {
@@ -163,17 +170,32 @@ export class TerminalHost {
     this.sessions.get(sessionId)?.resumeProducer()
   }
 
-  kill(sessionId: string, opts: { immediate?: boolean } = {}): Promise<void> {
+  kill(sessionId: string, opts: { immediate?: boolean; expectedIncarnationId?: string } = {}) {
     const pending = this.sessionTeardown.get(sessionId)
     if (pending) {
-      return Promise.resolve(
-        opts.immediate ? this.sessionTeardown.requestImmediate(sessionId) : pending
-      )
+      const receipt = opts.immediate ? this.sessionTeardown.requestImmediate(sessionId) : pending
+      if (!receipt) {
+        return Promise.reject(new Error('pty_stop_receipt_unavailable'))
+      }
+      return this.windowsJobReceiptHandoff.resolve(sessionId, receipt, opts.expectedIncarnationId)!
+    }
+    const replay =
+      this.windowsJobReceiptHandoff.resolve(sessionId, null, opts.expectedIncarnationId) ??
+      this.sessionTeardown.getReceipt(sessionId, opts)
+    if (replay) {
+      return Promise.resolve(replay)
     }
     const session = this.getAliveSession(sessionId)
-    const killed = this.sessionTeardown.killSession(sessionId, session, opts.immediate === true)
+    if (opts.expectedIncarnationId && session.incarnationId !== opts.expectedIncarnationId) {
+      return Promise.reject(new Error('pty_stop_receipt_identity_mismatch'))
+    }
+    const killed = this.windowsJobReceiptHandoff.resolve(
+      sessionId,
+      this.sessionTeardown.killSession(sessionId, session, opts.immediate === true)
+    )!
     this.killedTombstones.record(sessionId)
-    return Promise.resolve(killed)
+    void killed.catch(() => this.killedTombstones.clearForCreate(sessionId))
+    return killed
   }
 
   // Why: dispose a dead session's emulator so exited terminals don't pin their scrollback window for the daemon's life.
@@ -334,6 +356,7 @@ export class TerminalHost {
     }
     await shutdownTerminalHostSessions(this.sessions, this.onFinalCheckpoint)
     this.killedTombstones.clear()
+    this.windowsJobReceiptHandoff.clear()
   }
 
   private getAliveSession(sessionId: string): Session {

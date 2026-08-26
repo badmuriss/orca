@@ -3,8 +3,9 @@ import { SSH_PROVIDER_UNREGISTERED_REASON } from '../../../../shared/pty-livenes
 import { parseAppSshPtyId } from '../../../providers/ssh-pty-id'
 import { ptyOwnership, ptyIncarnationById } from '../provider/ownership-state'
 import { getProvider, getProviderForPty } from '../provider/registry'
-import { isPtyAlreadyGoneError, delay, verifyPtyStopped } from '../provider/liveness'
+import { isPtyAlreadyGoneError, delay } from '../provider/liveness'
 import type { PtyRuntimeControllerDeps } from './controller-deps'
+import type { PtyStopReceipt } from '../../../../shared/pty-stop-receipt'
 
 export function killPtyFromRuntimeController(
   deps: PtyRuntimeControllerDeps,
@@ -46,17 +47,25 @@ export function killPtyFromRuntimeController(
       }
       return false
     }
-    // Why: controller is synchronous, but keep ownership until async shutdown proves whether the provider emitted an exit.
+    // Why: controller is synchronous, but keep ownership until the execution owner proves exit.
     void shutdownProviderAndDetectExit(provider, ptyId, { immediate: false })
-      .then((providerExitObserved) => {
+      .then(({ receipt, providerExitObserved }) => {
+        if (receipt.verdict !== 'exited' || !receipt.processTreeVerified) {
+          if (receipt.verdict === 'live') {
+            runtime?.markPtyLivenessLive?.(ptyId)
+          } else {
+            runtime?.markPtyLivenessUnverifiable?.(ptyId, receipt.reason)
+          }
+          return
+        }
         const retired = retiredRejectedPtyIds.has(ptyId)
         const incarnationId = finishPtyShutdown(ptyId, connectionId, store)
         if (!providerExitObserved && !retired) {
-          runtime?.onPtyExit(ptyId, -1, incarnationId)
+          runtime?.onPtyExit(ptyId, 0, incarnationId)
           rememberSyntheticKillExit(ptyId)
           sendPtyExitToRenderer({
             id: ptyId,
-            code: -1,
+            code: 0,
             ...(incarnationId ? { incarnationId } : {})
           })
         }
@@ -66,6 +75,10 @@ export function killPtyFromRuntimeController(
         if (isPtyAlreadyGoneError(err)) {
           const incarnationId = finishPtyShutdown(ptyId, connectionId, store)
           if (!retired) {
+            runtime?.markPtyLivenessUnverifiable?.(
+              ptyId,
+              'The execution owner returned no process-tree stop receipt.'
+            )
             runtime?.onPtyExit(ptyId, -1, incarnationId)
             rememberSyntheticKillExit(ptyId)
             sendPtyExitToRenderer({
@@ -79,16 +92,11 @@ export function killPtyFromRuntimeController(
         console.warn(
           `[pty] Failed to stop PTY ${ptyId}: ${err instanceof Error ? err.message : String(err)}`
         )
-        // Why: close runtime tails without clearing provider ownership, so
-        // a retry can still target a PTY that survived the failed shutdown.
-        if (!retired) {
-          if (connectionId) {
-            runtime?.markPtyLivenessUnverifiable?.(
-              ptyId,
-              err instanceof Error ? err.message : String(err)
-            )
-          }
-          runtime?.onPtyExit(ptyId, -1, ptyIncarnationById.get(ptyId))
+        if (!retired && connectionId) {
+          runtime?.markPtyLivenessUnverifiable?.(
+            ptyId,
+            err instanceof Error ? err.message : String(err)
+          )
         }
       })
     return true
@@ -195,7 +203,7 @@ export async function stopAndWaitPtyFromRuntimeController(
   deps: PtyRuntimeControllerDeps,
   ptyId: string,
   opts?: { keepHistory?: boolean; deadlineMs?: number }
-): Promise<boolean> {
+): Promise<PtyStopReceipt | null> {
   const {
     runtime,
     store,
@@ -230,7 +238,7 @@ export async function stopAndWaitPtyFromRuntimeController(
         delay(Math.max(1, deadlineMs - Date.now())).then(() => false)
       ])
       if (!won) {
-        return false
+        return null
       }
     } else {
       await startupPromise
@@ -253,15 +261,18 @@ export async function stopAndWaitPtyFromRuntimeController(
       })
       runtime?.markPtyLivenessUnverifiable?.(ptyId, SSH_PROVIDER_UNREGISTERED_REASON)
     }
-    return false
+    return null
   }
+  let receipt: PtyStopReceipt
   let providerExitObserved = false
   try {
-    providerExitObserved = await shutdownProviderAndDetectExit(provider, ptyId, {
+    const stopResult = await shutdownProviderAndDetectExit(provider, ptyId, {
       immediate: true,
       keepHistory: opts?.keepHistory ?? false,
       deadlineMs
     })
+    receipt = stopResult.receipt
+    providerExitObserved = stopResult.providerExitObserved
   } catch (err) {
     if (!isPtyAlreadyGoneError(err)) {
       if (connectionId) {
@@ -273,32 +284,20 @@ export async function stopAndWaitPtyFromRuntimeController(
       console.warn(
         `[pty] Failed to stop PTY ${ptyId}: ${err instanceof Error ? err.message : String(err)}`
       )
-      return false
+      return null
     }
+    return null
   }
-  try {
-    if (!(await verifyPtyStopped(provider, ptyId, opts))) {
-      runtime?.markPtyLivenessLive?.(ptyId)
-      return false
-    }
-  } catch (err) {
-    if (connectionId) {
-      runtime?.markPtyLivenessUnverifiable?.(
-        ptyId,
-        err instanceof Error ? err.message : String(err)
-      )
-    }
-    console.warn(
-      `[pty] Failed to verify PTY ${ptyId} stopped: ${
-        err instanceof Error ? err.message : String(err)
-      }`
-    )
-    return false
+  if (receipt.verdict === 'live') {
+    runtime?.markPtyLivenessLive?.(ptyId)
+    return receipt
+  }
+  if (receipt.verdict !== 'exited' || !receipt.processTreeVerified) {
+    runtime?.markPtyLivenessUnverifiable?.(ptyId, receipt.reason)
+    return receipt
   }
   const incarnationId = finishPtyShutdown(ptyId, connectionId, store)
   if (!providerExitObserved) {
-    // The owning provider's fresh inventory observed absence, so this is a
-    // death certificate even when its exit event was missed.
     runtime?.onPtyExit(ptyId, 0, incarnationId)
     rememberSyntheticKillExit(ptyId)
     sendPtyExitToRenderer({
@@ -307,5 +306,5 @@ export async function stopAndWaitPtyFromRuntimeController(
       ...(incarnationId ? { incarnationId } : {})
     })
   }
-  return true
+  return receipt
 }

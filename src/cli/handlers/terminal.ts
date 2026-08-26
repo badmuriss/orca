@@ -106,12 +106,22 @@ export const TERMINAL_HANDLERS: Record<string, CommandHandler> = {
     const text = getOptionalStringFlag(flags, 'text')
     const enter = flags.get('enter') === true
     const interrupt = flags.get('interrupt') === true
+    const leaseInputJson = getOptionalStringFlag(flags, 'lease-input')
+    let leaseInput: unknown
+    if (leaseInputJson) {
+      try {
+        leaseInput = JSON.parse(leaseInputJson)
+      } catch {
+        throw new RuntimeClientError('invalid_argument', '--lease-input must be valid JSON')
+      }
+    }
     const result = await client.call<{ send: RuntimeTerminalSend }>('terminal.send', {
       terminal: await getTerminalHandle(flags, cwd, client),
       text,
       enter,
       interrupt,
       ...(text && enter && !interrupt ? { agentPrompt: true } : {}),
+      ...(leaseInput ? { leaseInput } : {}),
       client: { id: 'orca-cli', type: 'desktop' }
     })
     printResult(result, json, formatTerminalSend)

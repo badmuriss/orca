@@ -35,6 +35,8 @@ export {
   GIT_CREDENTIAL_GUARD_HOST_PROTOCOL_VERSION,
   PREVIOUS_DAEMON_PROTOCOL_VERSIONS,
   PROTOCOL_VERSION,
+  PTY_STOP_RECEIPT_DAEMON_PROTOCOL_VERSION,
+  WINDOWS_PTY_JOB_OBJECT_DAEMON_PROTOCOL_VERSION,
   PTY_STARTUP_INGRESS_PROTOCOL_VERSION,
   MODE_2031_UNSUBSCRIBE_FACT_PROTOCOL_VERSION,
   supportsMode2031UnsubscribeFact,
@@ -167,6 +169,7 @@ export type KillRequest = {
   payload: {
     sessionId: string
     immediate?: boolean
+    expectedIncarnationId?: string
   }
 }
 

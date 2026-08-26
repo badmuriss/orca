@@ -1,6 +1,10 @@
 import type { ColdRestorePayload } from './cold-restore-payload-cache'
 import { isUnknownRequestTypeError } from './daemon-endpoint-errors'
-import { GET_SIZE_PROTOCOL_VERSION } from './daemon-protocol-version'
+import {
+  GET_SIZE_PROTOCOL_VERSION,
+  PTY_STOP_RECEIPT_DAEMON_PROTOCOL_VERSION,
+  WINDOWS_PTY_JOB_OBJECT_DAEMON_PROTOCOL_VERSION
+} from './daemon-protocol-version'
 import { FinalCheckpointWaitExpiredError } from './daemon-pty-lifecycle-errors'
 import { DaemonPtySessionSpawn } from './daemon-pty-session-spawn'
 import { providerSequenceFromCreateOrAttach } from './daemon-pty-provider-sequence'
@@ -11,9 +15,23 @@ import { SessionNotFoundError, type CreateOrAttachResult, type ListSessionsResul
 import { resolveSafePtyDefaultCwd } from '../providers/pty-default-cwd'
 import type { PtySpawnResult } from '../providers/types'
 import { PtyWriteUnavailableError } from '../providers/pty-write-unavailable-error'
+import { constrainWindowsJobObjectStopReceipt } from '../providers/windows-pty-job-object'
+import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
+import {
+  createPtyStopReceipt,
+  parsePtyStopReceipt,
+  type PtyStopReceipt
+} from '../../shared/pty-stop-receipt'
 export const LIVENESS_PROBE_TIMEOUT_MS = 2_000
 
 const MAX_TOMBSTONES = 1000
+
+function requireStopIncarnation(id: string, ptyIncarnation: string | undefined): string {
+  if (!ptyIncarnation) {
+    throw new Error(`PTY "${id}" stop incarnation is unavailable`)
+  }
+  return ptyIncarnation
+}
 
 export abstract class DaemonPtySessionControl extends DaemonPtySessionSpawn {
   async attach(id: string): Promise<Pick<PtySpawnResult, 'providerSequence'> | void> {
@@ -180,19 +198,23 @@ export abstract class DaemonPtySessionControl extends DaemonPtySessionSpawn {
 
   async shutdown(
     id: string,
-    opts: { immediate?: boolean; keepHistory?: boolean; deadlineMs?: number }
-  ): Promise<void> {
+    opts: {
+      immediate?: boolean
+      keepHistory?: boolean
+      deadlineMs?: number
+      expectedIncarnationId?: string
+    }
+  ): Promise<PtyStopReceipt> {
     if (opts.keepHistory && this.disconnectOnlyPromise) {
       throw new Error('Cannot keep history after daemon disconnect has started')
     }
     const shutdown = this.withHistorySpawnLock(id, () => this.shutdownWithHistoryLock(id, opts))
     if (!opts.keepHistory) {
-      await shutdown
-      return
+      return await shutdown
     }
     this.keepHistoryShutdowns.add(shutdown)
     try {
-      await shutdown
+      return await shutdown
     } finally {
       this.keepHistoryShutdowns.delete(shutdown)
     }
@@ -200,8 +222,13 @@ export abstract class DaemonPtySessionControl extends DaemonPtySessionSpawn {
 
   protected async shutdownWithHistoryLock(
     id: string,
-    opts: { immediate?: boolean; keepHistory?: boolean; deadlineMs?: number }
-  ): Promise<void> {
+    opts: {
+      immediate?: boolean
+      keepHistory?: boolean
+      deadlineMs?: number
+      expectedIncarnationId?: string
+    }
+  ): Promise<PtyStopReceipt> {
     // Why: shutdown can be the first lazy-client operation after restart; connect
     // before killing so a healthy daemon session is not orphaned (#7742). Connect,
     // the final-checkpoint wait, and kill all share the caller's one absolute
@@ -253,11 +280,48 @@ export abstract class DaemonPtySessionControl extends DaemonPtySessionSpawn {
         this.historyManager?.suspendSession(id)
       }
     }
-    await this.client.request(
+    const ptyIncarnation = opts.expectedIncarnationId ?? this.sessionIncarnations.get(id)
+    const rawReceipt = await this.client.request(
       'kill',
-      { sessionId: id, immediate: opts.immediate ?? false },
+      {
+        sessionId: id,
+        immediate: opts.immediate ?? false,
+        ...(ptyIncarnation ? { expectedIncarnationId: ptyIncarnation } : {})
+      },
       remainingDaemonRequestTimeoutMs(opts.deadlineMs)
     )
+    const parsedReceipt =
+      this.protocolVersion >= PTY_STOP_RECEIPT_DAEMON_PROTOCOL_VERSION
+        ? parsePtyStopReceipt(rawReceipt, {
+            executionHostId: LOCAL_EXECUTION_HOST_ID,
+            ptyId: id,
+            ...(ptyIncarnation ? { ptyIncarnation } : {})
+          })
+        : createPtyStopReceipt({
+            executionHostId: LOCAL_EXECUTION_HOST_ID,
+            terminalHandle: id,
+            ptyId: id,
+            ptyIncarnation: requireStopIncarnation(id, ptyIncarnation),
+            root: { pid: null, parentPid: null, processGroupId: null, startedAt: null },
+            descendants: [],
+            observations: [
+              {
+                identity: { pid: null, parentPid: null, processGroupId: null, startedAt: null },
+                status: 'unverifiable',
+                observedAt: new Date().toISOString()
+              }
+            ],
+            verdict: 'capability_limited',
+            processTreeVerified: false,
+            reason: 'The daemon protocol does not support process-tree stop receipts.'
+          })
+    const receipt = constrainWindowsJobObjectStopReceipt(parsedReceipt, {
+      supported: this.protocolVersion >= WINDOWS_PTY_JOB_OBJECT_DAEMON_PROTOCOL_VERSION,
+      isWsl: this.wslDistrosBySessionId.has(id)
+    })
+    if (receipt.verdict === 'live') {
+      return receipt
+    }
     this.activeSessionIds.delete(id)
     this.clearSessionAwaitingDaemonRecovery(id)
     this.dirtySessionVersions.delete(id)
@@ -294,6 +358,7 @@ export abstract class DaemonPtySessionControl extends DaemonPtySessionSpawn {
         }
       }
     }
+    return receipt
   }
 
   ackColdRestore(sessionId: string): void {

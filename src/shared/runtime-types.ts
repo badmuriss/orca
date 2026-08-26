@@ -200,3 +200,12 @@ export type {
   RuntimeMarkdownReadTabResult,
   RuntimeMarkdownSaveTabResult
 } from './mobile-markdown-document'
+export type {
+  RuntimeMaestroWorkspaceCanvasMutation,
+  RuntimeMaestroWorkspaceCanvasMutationResult,
+  RuntimeMaestroWorkspaceCanvasQueryResult,
+  RuntimeMaestroWorkspaceCanvasScope,
+  RuntimeMaestroWorkspaceContentReadResult,
+  RuntimeMaestroWorkspaceTabCommand,
+  RuntimeMaestroWorkspaceTabCommandResponse
+} from './runtime-maestro-contracts'

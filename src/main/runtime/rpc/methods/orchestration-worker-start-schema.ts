@@ -24,6 +24,7 @@ export const WorkerStartParams = z.object({
   agent: OptionalString,
   model: OptionalWorkerLaunchPreference,
   effort: OptionalWorkerLaunchPreference,
+  attemptId: OptionalString,
   retryOf: OptionalString,
   timeoutMs: OptionalFiniteNumber,
   devMode: z.boolean().optional()

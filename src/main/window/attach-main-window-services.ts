@@ -60,6 +60,7 @@ import { isNativeFileDropPayload, type NativeFileDropPayload } from '../../share
 import { requestMobileMarkdownFromRenderer } from './mobile-markdown-request-relay'
 import { requestSessionTabCloseFromRenderer } from './session-tab-close-request-relay'
 import { requestTerminalTabCloseFromRenderer } from './terminal-tab-close-request-relay'
+import { requestMaestroWorkspaceTabCommand } from './maestro-workspace-tab-command-relay'
 import type { ClaudeAccountSelectionTarget } from '../claude-accounts/runtime-selection'
 import { runWorktreeChangeInvalidators } from '../ipc/worktree-change-invalidators'
 import {
@@ -345,6 +346,31 @@ function registerRuntimeWindowLifecycle(
     worktreeRemoteBranchConflict: (event) => send('worktree:remoteBranchConflict', event),
     reposChanged: () => send('repos:changed'),
     automationsChanged: (payload) => send('automations:changed', payload),
+    openMaestroCanvas: ({ executionHostId, workspaceKey }) =>
+      new Promise((resolve, reject) => {
+        const requestId = randomUUID()
+        const timer = setTimeout(() => {
+          ipcMain.removeListener('maestro:canvasOpenReply', handler)
+          reject(new Error('Maestro Canvas open timed out'))
+        }, 10_000)
+        const handler = (
+          event: Electron.IpcMainEvent,
+          reply: { requestId: string; opened: boolean }
+        ): void => {
+          if (event.sender !== mainWindow.webContents || reply.requestId !== requestId) {
+            return
+          }
+          clearTimeout(timer)
+          ipcMain.removeListener('maestro:canvasOpenReply', handler)
+          resolve(reply.opened)
+        }
+        ipcMain.on('maestro:canvasOpenReply', handler)
+        if (!send('ui:openMaestroCanvas', { requestId, executionHostId, workspaceKey })) {
+          clearTimeout(timer)
+          ipcMain.removeListener('maestro:canvasOpenReply', handler)
+          reject(new Error('runtime_unavailable'))
+        }
+      }),
     activateWorktree: (
       repoId,
       worktreeId,
@@ -459,6 +485,7 @@ function registerRuntimeWindowLifecycle(
       })
     },
     renameTerminal: (tabId, title) => send('ui:renameTerminal', { tabId, title }),
+    commandMaestroWorkspaceTab: (command) => requestMaestroWorkspaceTabCommand(mainWindow, command),
     focusTerminal: (tabId, worktreeId, leafId) =>
       send('ui:focusTerminal', { tabId, worktreeId, leafId }),
     focusEditorTab: (tabId, worktreeId) => send('ui:focusEditorTab', { tabId, worktreeId }),

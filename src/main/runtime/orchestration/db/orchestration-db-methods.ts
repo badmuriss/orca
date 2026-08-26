@@ -46,6 +46,7 @@ import type { SchemaMigrateMethods } from './schema/migrate'
 import type { SchemaColumnProbesMethods } from './schema/schema-column-probes'
 import type { TaskStoreMethods } from './tasks/task-store'
 import type { TaskStatusTransitionMethods } from './tasks/task-status-transition'
+import type { TerminalCloseIntentStoreMethods } from './terminal-close-intent-store'
 import type { FederatedWorkerStartReconcileMethods } from './worker-dispatch/federated-worker-start-reconcile'
 import type { WorkerDispatchAbandonMethods } from './worker-dispatch/worker-dispatch-abandon'
 import type { WorkerDispatchAuthorityMethods } from './worker-dispatch/worker-dispatch-authority'
@@ -59,6 +60,11 @@ import type { WorkerTerminalListingMethods } from './worker-terminal/worker-term
 import type { WorkerTerminalReleaseMethods } from './worker-terminal/worker-terminal-release'
 import type { WorkerTerminalResourceStoreMethods } from './worker-terminal/worker-terminal-resource-store'
 import type { WorkerTerminalTransferMethods } from './worker-terminal/worker-terminal-transfer'
+import type { MaestroStoreMethods } from './maestro/maestro-store'
+import type { MaestroCoordinatorHandoffStoreMethods } from './maestro-terminal-lease/maestro-coordinator-handoff-store'
+import type { MaestroTerminalInputStoreMethods } from './maestro-terminal-lease/maestro-terminal-input-store'
+import type { MaestroTerminalLeaseStoreMethods } from './maestro-terminal-lease/maestro-terminal-lease-store'
+import type { MaestroBrowserSurfaceStoreMethods } from './maestro-browser-surface/maestro-browser-surface-store'
 
 export type OrchestrationDbMethods = CreateTablesMethods &
   SchemaMigrateMethods &
@@ -66,6 +72,12 @@ export type OrchestrationDbMethods = CreateTablesMethods &
   MigrateLegacyContractStorageMethods &
   BackfillLegacyQuestionThreadsMethods &
   AdoptLegacyRunMethods &
+  MaestroStoreMethods &
+  MaestroTerminalLeaseStoreMethods &
+  MaestroTerminalInputStoreMethods &
+  MaestroCoordinatorHandoffStoreMethods &
+  MaestroBrowserSurfaceStoreMethods &
+  TerminalCloseIntentStoreMethods &
   MutationReceiptStoreMethods &
   LegacyCompatibilityPrincipalsMethods &
   LegacyCompatibilityCandidatesMethods &

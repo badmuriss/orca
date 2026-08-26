@@ -136,6 +136,29 @@ export const HANDLER_GROUPS: readonly HandlerGroup[] = [
     load: async () => (await import('./handlers/orchestration.js')).ORCHESTRATION_HANDLERS
   },
   {
+    name: 'maestro',
+    keys: [
+      'maestro show',
+      'maestro watch',
+      'maestro apply',
+      'maestro author',
+      'maestro index',
+      'maestro open',
+      'maestro workspace-bootstrap-receipt',
+      'maestro coordinator-handoff',
+      'maestro browser-surface open',
+      'maestro browser-surface focus',
+      'maestro browser-surface capture',
+      'maestro browser-surface retain',
+      'maestro browser-surface release',
+      'maestro delegate',
+      'maestro list',
+      'maestro take',
+      'maestro settle'
+    ],
+    load: async () => (await import('./handlers/maestro.js')).MAESTRO_HANDLERS
+  },
+  {
     name: 'emulator',
     keys: [
       'emulator list',

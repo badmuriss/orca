@@ -141,4 +141,18 @@ describe('mobile RPC allowlist', () => {
       )
     ).toEqual([])
   })
+
+  it('allows the workspace-first Maestro authority without orchestration control', () => {
+    const allowed = mobileRpcAllowlist()
+    expect(
+      [
+        'maestro.list',
+        'maestro.workspaceCanvas.get',
+        'maestro.workspaceCanvas.readContent',
+        'maestro.workspaceCanvas.mutate'
+      ].every((method) => allowed.has(method))
+    ).toBe(true)
+    expect(allowed.has('maestro.projection.get')).toBe(false)
+    expect(allowed.has('orchestration.run')).toBe(false)
+  })
 })

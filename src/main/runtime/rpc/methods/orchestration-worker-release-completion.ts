@@ -1,27 +1,37 @@
 import type { OrchestrationDb } from '../../orchestration/db'
 import type {
-  WorkerTerminalArchiveRow,
   WorkerTerminalArchiveStatus,
   WorkerTerminalResourceRow,
   WorkerTerminalRetainedReason
 } from '../../orchestration/worker-terminal-ownership'
-import {
-  captureWorkerOutputArchive,
-  type WorkerTerminalTailArchive
-} from '../../orchestration/worker-output-archive'
+import { captureWorkerOutputArchive } from '../../orchestration/worker-output-archive'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import { describeUnconfirmedAgentStop } from '../../../../shared/pty-liveness-verdict'
 import { inspectWorkerTerminal } from './orchestration-worker-observation'
 import { orchestrationTimestampToMs } from './orchestration-worker-output'
+import { settleWorkerTerminalTabNotFoundCloseRace } from '../../orchestration/db/worker-terminal/worker-terminal-close-race'
+import {
+  retainedWorkerTerminalReason,
+  summarizeWorkerTerminalArchive,
+  workerTerminalLeaseIsCurrent
+} from '../../orchestration/db/worker-terminal/worker-terminal-release-identity'
 
 export type WorkerReleaseReceipt = {
   dispatchId: string
-  state: 'released' | 'already_released' | 'retained' | 'release_pending' | 'release_unknown'
+  state:
+    | 'released'
+    | 'already_absent'
+    | 'already_released'
+    | 'retained'
+    | 'release_pending'
+    | 'release_unknown'
   reason?: WorkerTerminalRetainedReason
   processAction: 'closed_agent_terminal' | 'closed_exited_terminal' | 'none'
   archive: { source: string | null; status: string | null } | null
   recovery?: string
   lastError?: string
+  closeResponse?: { error: 'tab_not_found'; message: string }
+  inventoryResponse?: { state: 'absent' | 'still_present' | 'unverifiable' }
 }
 
 type WorkerTerminalReleaseArgs = {
@@ -37,47 +47,12 @@ const activeReleaseByRuntime = new WeakMap<
   Map<string, Promise<WorkerReleaseReceipt>>
 >()
 
-export function exposeWorkerTerminalResource(resource: WorkerTerminalResourceRow): {
-  id: string
-  ownershipState: string
-  releaseState: string
-  retainedReason: string | null
-  terminalHandle: string
-  worktreeId: string | null
-  originDispatchId: string
-  ownerDispatchId: string
-  releaseRequestedAt: string | null
-  releaseCompletedAt: string | null
-  releaseError: string | null
-  archive: { source: string | null; status: string | null }
-} {
-  return {
-    id: resource.id,
-    ownershipState: resource.ownership_state,
-    releaseState: resource.release_state,
-    retainedReason: resource.retained_reason,
-    terminalHandle: resource.terminal_handle,
-    worktreeId: resource.worktree_id,
-    originDispatchId: resource.origin_dispatch_id,
-    ownerDispatchId: resource.owner_dispatch_id,
-    releaseRequestedAt: resource.release_requested_at,
-    releaseCompletedAt: resource.release_completed_at,
-    releaseError: resource.release_error,
-    archive: { source: resource.archive_source, status: resource.archive_status }
-  }
-}
+import { archiveSummary } from './orchestration-worker-terminal-resource-view'
 
-export function archiveSummary(
-  resource: WorkerTerminalResourceRow | null
-): { source: string | null; status: string | null } | null {
-  if (!resource) {
-    return null
-  }
-  if (!resource.archive_source && !resource.archive_status) {
-    return null
-  }
-  return { source: resource.archive_source, status: resource.archive_status }
-}
+export {
+  archiveSummary,
+  exposeWorkerTerminalResource
+} from './orchestration-worker-terminal-resource-view'
 
 // Completes a durably requested release: re-prove exact identity, freeze output, close only the
 // exact agent terminal, settle. Shared between the RPC method and the startup reconciler.
@@ -126,6 +101,20 @@ async function completeWorkerTerminalReleaseOnce(
       reason: 'identity_unproven',
       processAction: 'none',
       archive: archiveSummary(retained)
+    }
+  }
+  if (observation.status === 'unverifiable') {
+    const unknown = db.markWorkerTerminalReleaseUnknown(
+      resource.id,
+      observation.reason ?? 'The execution host could not verify the terminal process state.'
+    )
+    return {
+      dispatchId,
+      state: 'release_unknown',
+      processAction: 'none',
+      archive: archiveSummary(unknown),
+      lastError: unknown.release_error ?? undefined,
+      recovery: `Inspect with: orca orchestration worker-show --dispatch ${dispatchId} --json — then repeat worker-release with the same --retry-request. Never substitute a broad terminal close.`
     }
   }
   if (!workerTerminalLeaseIsCurrent(runtime, db, dispatchId, resource)) {
@@ -181,7 +170,7 @@ async function completeWorkerTerminalReleaseOnce(
     archiveSource = captured.kind === 'transcript_pin' ? 'transcript' : 'terminal'
     archiveStatus = captured.status
   } else {
-    const stored = summarizeStoredArchive(archive)
+    const stored = summarizeWorkerTerminalArchive(archive)
     archiveSource ??= stored.source
     archiveStatus ??= stored.status
   }
@@ -196,12 +185,50 @@ async function completeWorkerTerminalReleaseOnce(
     return {
       dispatchId,
       state: 'retained',
-      reason: retainedReason(releasing),
+      reason: retainedWorkerTerminalReason(releasing),
       processAction: 'none',
       archive: archiveSummary(releasing)
     }
   }
   if (!workerTerminalLeaseIsCurrent(runtime, db, dispatchId, releasing)) {
+    const retained = db.revertWorkerTerminalReleaseToRetained(resource.id, 'identity_unproven')
+    return {
+      dispatchId,
+      state: 'retained',
+      reason: 'identity_unproven',
+      processAction: 'none',
+      archive: archiveSummary(retained)
+    }
+  }
+  const closingObservation = await inspectWorkerTerminal(runtime, db, dispatchId)
+  if (closingObservation.status === 'identity_changed') {
+    const retained = db.revertWorkerTerminalReleaseToRetained(resource.id, 'identity_unproven')
+    return {
+      dispatchId,
+      state: 'retained',
+      reason: 'identity_unproven',
+      processAction: 'none',
+      archive: archiveSummary(retained)
+    }
+  }
+  if (closingObservation.status === 'unverifiable') {
+    const unknown = db.markWorkerTerminalReleaseUnknown(
+      resource.id,
+      closingObservation.reason ?? 'The execution host could not verify the terminal process state.'
+    )
+    return {
+      dispatchId,
+      state: 'release_unknown',
+      processAction: 'none',
+      archive: archiveSummary(unknown),
+      lastError: unknown.release_error ?? undefined,
+      recovery: `Inspect with: orca orchestration worker-show --dispatch ${dispatchId} --json — then repeat worker-release with the same --retry-request. Never substitute a broad terminal close.`
+    }
+  }
+  if (
+    !['live', 'exited'].includes(closingObservation.status) ||
+    !workerTerminalLeaseIsCurrent(runtime, db, dispatchId, releasing)
+  ) {
     const retained = db.revertWorkerTerminalReleaseToRetained(resource.id, 'identity_unproven')
     return {
       dispatchId,
@@ -228,6 +255,16 @@ async function completeWorkerTerminalReleaseOnce(
     }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
+    if (/(?:session_)?tab_not_found/.test(reason)) {
+      return settleWorkerTerminalTabNotFoundCloseRace({
+        runtime,
+        db,
+        dispatchId,
+        resource,
+        archive: { source: archiveSource, status: archiveStatus },
+        closeResponse: { error: 'tab_not_found', message: reason }
+      })
+    }
     if (/disposed|not connected|unavailable/i.test(reason)) {
       // Durable intent exists; the owning endpoint is temporarily unreachable. Recovery retries.
       return {
@@ -256,50 +293,7 @@ async function completeWorkerTerminalReleaseOnce(
     dispatchId,
     state: 'released',
     processAction:
-      observation.status === 'exited' ? 'closed_exited_terminal' : 'closed_agent_terminal',
+      closingObservation.status === 'exited' ? 'closed_exited_terminal' : 'closed_agent_terminal',
     archive: archiveSummary(released)
   }
-}
-
-function workerTerminalLeaseIsCurrent(
-  runtime: OrcaRuntimeService,
-  db: OrchestrationDb,
-  dispatchId: string,
-  resource: WorkerTerminalResourceRow
-): boolean {
-  const worker = db.getWorkerDispatch(dispatchId)
-  const authority = runtime.getOrchestrationDispatchAuthority(resource.terminal_handle)
-  return Boolean(
-    worker?.agent_terminal_handle === resource.terminal_handle &&
-    authority &&
-    resource.host_scope === JSON.stringify(authority.hostScope) &&
-    db.isDispatchProcessCurrent({
-      dispatchId,
-      paneKey: runtime.getTerminalPaneKey(resource.terminal_handle),
-      processIncarnation: runtime.getTerminalProcessIncarnation(resource.terminal_handle)
-    }) &&
-    !db.workerTerminalResourceHasIdentityConflict(resource.id)
-  )
-}
-
-function summarizeStoredArchive(archive: WorkerTerminalArchiveRow): {
-  source: 'transcript' | 'terminal'
-  status: Extract<WorkerTerminalArchiveStatus, 'captured' | 'empty'>
-} {
-  if (archive.kind === 'transcript_pin') {
-    return { source: 'transcript', status: 'captured' }
-  }
-  const content = JSON.parse(archive.content) as WorkerTerminalTailArchive
-  const empty = content.lines.every((line) => line.trim() === '')
-  return { source: 'terminal', status: empty ? 'empty' : 'captured' }
-}
-
-function retainedReason(resource: WorkerTerminalResourceRow): WorkerTerminalRetainedReason {
-  if (resource.retained_reason) {
-    return resource.retained_reason as WorkerTerminalRetainedReason
-  }
-  if (resource.ownership_state === 'user_owned') {
-    return 'user_takeover'
-  }
-  return 'identity_unproven'
 }

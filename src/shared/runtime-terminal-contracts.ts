@@ -8,6 +8,8 @@ import type { PtyIncarnationId } from './pty-incarnation'
 import type { RuntimeMobileSessionTabsResult } from './runtime-session-contracts'
 import type { TabGroupLayoutNode } from './tab-types'
 import type { TerminalExitCause } from './terminal-exit-cause'
+import type { MaestroTerminalInputReceipt } from './maestro-terminal-lease'
+import type { PtyStopReceipt } from './pty-stop-receipt'
 import type { TerminalPaneLayoutNode } from './terminal-tab-types'
 import type { TuiAgent } from './tui-agent'
 
@@ -202,6 +204,7 @@ export type RuntimeTerminalSend = {
   accepted: boolean
   bytesWritten: number
   refusedReason?: 'no-agent' | 'permission'
+  deliveryReceipt?: MaestroTerminalInputReceipt
 }
 
 export type RuntimeTerminalAgentStatusState = 'working' | 'permission' | 'idle' | null
@@ -286,6 +289,7 @@ export type RuntimeTerminalClose = {
   tabId: string
   closeMode?: 'tab'
   ptyKilled: boolean
+  ptyStopReceipt?: PtyStopReceipt
   ptyStopVerdict?: 'live' | 'unverifiable'
   ptyStopReason?: string
 }
@@ -309,4 +313,12 @@ export type RuntimeTerminalWait = {
   exitCode: number | null
   exitCause?: TerminalExitCause
   blockedReason?: RuntimeTerminalWaitBlockedReason
+  observation?: {
+    source: 'agent-status' | 'prompt' | 'process-exit' | 'foreground-process' | 'unknown'
+    revision: number | null
+    observedAt: number | null
+    ptyIncarnation: string | null
+  }
+  settlementInferred?: false
+  cleanupAuthorized?: false
 }

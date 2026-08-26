@@ -70,7 +70,11 @@ export async function createExistingWorktreeWorkerTerminal(args: {
     title: `worker-${args.taskId}`,
     // Why: dispatching a worker is background work; it must not pull the sidebar
     // to the worker's workspace while the user is reading somewhere else.
-    surfaceOwner: false
+    surfaceOwner: false,
+    // Why: this terminal IS the orchestration-managed worker's agent process —
+    // the explicit typed signal that injects the bounded ManagedCliContext
+    // before spawn. Never set on a manual agent terminal.
+    orchestrationManagedLaunch: true
   })
   args.effects.push({
     kind: 'terminal',
@@ -145,6 +149,10 @@ export async function createWorkerWorktree(args: {
     startupAgent: args.agent,
     ...(args.launchPreferences ? { startupLaunchPreferences: args.launchPreferences } : {}),
     activate: false,
+    // Why: the worktree's startup terminal IS the orchestration-managed
+    // worker's agent process — thread the same explicit typed signal
+    // createTerminal expects through to its actual spawn boundary.
+    orchestrationManagedLaunch: true,
     lineage: {
       parentWorktree: requestedWorktree === 'new-child' ? coordinatorWorktree.id : undefined,
       noParent: requestedWorktree === 'new-top-level',

@@ -306,7 +306,12 @@ describe('LocalPtyProvider', () => {
       )
       await vi.waitFor(() => expect(prepareMacosTccLoginShellMock).toHaveBeenCalledOnce())
 
-      await provider.shutdown('pending-local-session', { immediate: true })
+      // Why: the spawn never produced a process, so there is no process tree to
+      // report — the stop cancels the pending spawn and says so rather than
+      // inventing a receipt. Callers treat this as already-gone.
+      await expect(provider.shutdown('pending-local-session', { immediate: true })).rejects.toThrow(
+        'pty_stop_receipt_unavailable'
+      )
       finishPreparation()
       await canceledSpawn
       expect(spawnMock).not.toHaveBeenCalled()

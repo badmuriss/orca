@@ -1,9 +1,10 @@
 import type { TuiAgent } from '../../../../shared/tui-agent'
-import { buildDispatchPreamble } from '../../orchestration/preamble'
-import { OrchestrationError } from '../../orchestration/orchestration-error'
+import {
+  buildMaestroTerminalLeaseTitle,
+  type MaestroTerminalLease
+} from '../../../../shared/maestro-terminal-lease'
 import { defineMethod, type RpcMethod } from '../core'
 import { startFederatedWorker } from './orchestration-federated-worker-start'
-import { assertOrchestrationWorktreeCreationSupported } from './orchestration-folder-worktree-placement'
 import { WorkerStartParams } from './orchestration-worker-start-schema'
 import {
   createExistingWorktreeWorkerTerminal,
@@ -18,14 +19,23 @@ import {
   persistWorkerReadinessStage,
   persistWorkerSetupWaitOutcome
 } from './orchestration-worker-setup-gate'
-import { failWorkerStartWithReceipt } from './orchestration-worker-start-receipt'
-import { prepareLocalWorkerStart } from './orchestration-worker-start-validation'
+import { activateWorkerTerminalLease } from './orchestration-worker-start-receipt'
+import {
+  assertWorkerTerminalIncarnation,
+  prepareLocalWorkerStartTopology,
+  resolveWorkerStartTask
+} from './orchestration-worker-start-validation'
+import { recoverWorkerStartFailure } from './orchestration-worker-start-recovery'
 import { resolveDispatchCreator } from './orchestration-dispatch-creator'
-import { resolveOrchestrationCaller } from './orchestration-run-scope'
 import {
   isWorkerStartTimeoutWithinTimerLimit,
   resolveWorkerStartReadinessTimeoutMs
 } from '../../../../shared/orchestration-timing-budgets'
+import {
+  buildWorkerTerminalLaunchProfile,
+  prepareWorkerTerminalTransferAuthority
+} from '../../orchestration/db/worker-terminal/worker-terminal-start-authority'
+import { OrchestrationError } from '../../orchestration/orchestration-error'
 
 export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
   defineMethod({
@@ -33,7 +43,12 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
     params: WorkerStartParams,
     handler: async (
       params,
-      { runtime, orchestrationMutation, orchestrationCompatibilityEvidence }
+      {
+        runtime,
+        orchestrationMutation,
+        orchestrationCompatibilityEvidence,
+        recordMutationReceipt
+      }
     ) => {
       if (!isWorkerStartTimeoutWithinTimerLimit(params.timeoutMs)) {
         throw new OrchestrationError(
@@ -42,27 +57,11 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
         )
       }
       const readinessTimeoutMs = resolveWorkerStartReadinessTimeoutMs(params.timeoutMs)
-      const db = runtime.getOrchestrationDb()
-      // Why: worker-start was the only Run-scoped verb that skipped this, so a
-      // declared --from could name someone else's pane and inherit their depth.
-      const coordinatorPane = resolveOrchestrationCaller(runtime, {
-        callerTerminalHandle: params.from,
+      const { db, run, task } = resolveWorkerStartTask({
+        params,
+        runtime,
         callerEvidence: orchestrationCompatibilityEvidence
       })
-      const run = coordinatorPane ? db.getCurrentRunForPane(coordinatorPane) : undefined
-      if (!run || (params.run && params.run !== run.id)) {
-        throw new OrchestrationError(
-          'consumer_fenced',
-          'worker-start requires the coordinator terminal currently bound to the Task Run.'
-        )
-      }
-      const task = db.getTask(params.task)
-      if (!task || task.run_id !== run.id) {
-        throw new OrchestrationError(
-          'task_not_found',
-          `Task ${params.task} was not found in Run ${run.id}.`
-        )
-      }
 
       if (params.on) {
         return startFederatedWorker({
@@ -74,44 +73,25 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
           orchestrationMutation
         })
       }
-
-      const requestedWorktree = params.worktree ?? 'current'
-      const createsWorktree =
-        requestedWorktree === 'new-child' || requestedWorktree === 'new-top-level'
-      const { agent, launch } = prepareLocalWorkerStart({ params, createsWorktree, runtime })
-
-      const coordinatorTerminal = await runtime.showTerminal(params.from)
-      const creationWorktree = createsWorktree
-        ? await runtime.showManagedWorktree(`id:${coordinatorTerminal.worktreeId}`)
-        : undefined
-      if (creationWorktree) {
-        await assertOrchestrationWorktreeCreationSupported({
-          runtime,
-          repoSelector: params.repo ?? creationWorktree.repoId,
-          existingPlacement: 'current or an exact existing folder workspace'
-        })
-      }
-      let resolvedWorktree = creationWorktree
-        ? undefined
-        : requestedWorktree === 'current'
-          ? await runtime.showManagedTerminalWorkspace(`id:${coordinatorTerminal.worktreeId}`)
-          : await runtime.showManagedTerminalWorkspace(requestedWorktree)
-      let explicitTerminal
-      if (params.terminal) {
-        explicitTerminal = await runtime.showTerminal(params.terminal)
-        if (explicitTerminal.worktreeId !== resolvedWorktree?.id) {
-          throw new OrchestrationError(
-            'terminal_worktree_mismatch',
-            `Terminal ${params.terminal} does not belong to worktree ${resolvedWorktree?.id}.`
-          )
-        }
-        if (!(await runtime.isTerminalRunningAgent(params.terminal))) {
-          throw new OrchestrationError(
-            'agent_unconfigured',
-            `Terminal ${params.terminal} is not running a recognized agent.`
-          )
-        }
-      }
+      const prepared = await prepareLocalWorkerStartTopology({
+        params,
+        runtime,
+        db,
+        runId: run.id,
+        taskId: task.id,
+        coordinatorGeneration: run.consumer_generation,
+        hasDurableMutation: Boolean(orchestrationMutation)
+      })
+      const {
+        requestedWorktree,
+        createsWorktree,
+        creationWorktree,
+        agent,
+        launch,
+        retryPreflight
+      } = prepared
+      let { resolvedWorktree } = prepared
+      const { preflightExecutable } = prepared
 
       const startOptions = {
         worktree: requestedWorktree,
@@ -139,6 +119,15 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
         runtimeEpoch: runtime.getRuntimeId(),
         mutationReceipt: orchestrationMutation
       })
+      const attemptId = params.attemptId ?? started.dispatch.id
+      const leaseTitle = buildMaestroTerminalLeaseTitle({
+        role: 'worker',
+        runId: run.id,
+        taskId: task.id,
+        agent: agent as TuiAgent
+      })
+      let workerLease: MaestroTerminalLease | undefined
+      let leaseTransferReceipt: ReturnType<typeof db.transferMaestroWorkerTerminalLease> | undefined
       const effects: WorkerEffect[] = []
       if (resolvedWorktree) {
         effects.push(
@@ -202,6 +191,13 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
         if (!resolvedWorktree || !terminalHandle) {
           throw new Error('Worker topology did not resolve an agent terminal and worktree.')
         }
+        try {
+          await runtime.renameTerminal(terminalHandle, leaseTitle)
+        } catch (error) {
+          if (!(error instanceof Error) || error.message !== 'runtime_unavailable') {
+            throw error
+          }
+        }
         const setupStage = {
           db,
           dispatchId: started.dispatch.id,
@@ -232,36 +228,54 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
               : `Agent did not become ready (${wait.status}).`
           )
         }
+        const terminal = await runtime.showTerminal(terminalHandle)
+        assertWorkerTerminalIncarnation(runtime, terminalHandle)
         const terminalAuthority = requireWorkerAuthority(runtime, terminalHandle)
-        const capability = db.prepareStartingWorkerAuthority({
+        const authority = prepareWorkerTerminalTransferAuthority({
+          db,
+          terminalHandle,
+          terminalAuthority,
+          retryOf: params.retryOf,
+          retryPreflight,
           dispatchId: started.dispatch.id,
-          handle: terminalHandle,
-          ...terminalAuthority,
           worktreeId: resolvedWorktree.id,
-          effects,
           setupState: setupReceipt.state,
-          terminalOwnership: params.terminal ? 'external' : 'created'
+          externalTerminal: Boolean(params.terminal),
+          effects
         })
 
         failedStage = 'dispatch_input'
-        const preamble = buildDispatchPreamble({
+        const activated = await activateWorkerTerminalLease({
+          db,
+          runtime,
+          runId: run.id,
           canDispatchSubWorkers: started.dispatch.depth < runtime.getNestedWorkerMaxDepth(),
           taskId: task.id,
-          dispatchId: started.dispatch.id,
           taskSpec: task.spec,
+          coordinatorGeneration: run.consumer_generation,
+          dispatchId: started.dispatch.id,
+          attemptId,
+          retryOf: params.retryOf,
+          mutation: orchestrationMutation,
+          terminalHandle,
+          terminal,
+          terminalAuthority,
+          preflightExecutable,
+          retryResourceId: retryPreflight?.resourceId,
+          retryPredecessorLeaseId: authority.predecessorLeaseId,
+          reusableResourceId: authority.reusableResourceId,
+          leaseTitle,
+          launchProfile: buildWorkerTerminalLaunchProfile(launch.receipt.effective),
+          capability: authority.capability,
           coordinatorHandle: params.from,
-          workerHandle: terminalHandle,
-          dispatchCapability: capability,
           devMode: params.devMode,
-          cliCommand: runtime.getTerminalOrchestrationCliCommand(terminalHandle)
+          effects,
+          onLeaseTransfer: (receipt) => {
+            leaseTransferReceipt = receipt
+          }
         })
-        await runtime.sendTerminalAgentPrompt(terminalHandle, preamble)
-        effects.push({
-          kind: 'dispatch_input',
-          role: 'agent',
-          id: terminalHandle,
-          state: 'accepted'
-        })
+        workerLease = activated.workerLease
+        leaseTransferReceipt = activated.transferReceipt
         const worker = db.markWorkerDispatchReady(started.dispatch.id, effects)
         monitorWorkerSetup({
           runtime,
@@ -271,7 +285,7 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
           setupReceipt,
           effects
         })
-        return {
+        const result = {
           runId: run.id,
           taskId: task.id,
           dispatchId: started.dispatch.id,
@@ -282,10 +296,13 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
           timeoutMs: readinessTimeoutMs,
           effects,
           residualResources: [],
+          ...(leaseTransferReceipt ? { leaseTransfer: leaseTransferReceipt } : {}),
           ...(terminalRevealWarning ? { warning: terminalRevealWarning } : {})
         }
+        recordMutationReceipt?.(result)
+        return result
       } catch (error) {
-        return failWorkerStartWithReceipt({
+        return recoverWorkerStartFailure({
           db,
           runId: run.id,
           taskId: task.id,
@@ -293,7 +310,10 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
           failedStage,
           error,
           setup: setupReceipt,
-          launch: launch.receipt
+          launch: launch.receipt,
+          workerLease,
+          leaseTransferReceipt,
+          recordMutationReceipt
         })
       }
     }

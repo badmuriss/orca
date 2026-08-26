@@ -9,6 +9,7 @@ import {
   setLocalPtyProvider,
   unregisterSshPtyProvider
 } from './pty'
+import { exitedPtyStopReceipt } from './pty-ipc-test-constants'
 
 vi.mock('electron', () => import('./pty-ipc-mock-registry').then((m) => m.electronModuleMock()))
 vi.mock('fs', () => import('./pty-ipc-mock-registry').then((m) => m.fsModuleMock()))
@@ -63,7 +64,7 @@ describe('registerPtyHandlers', () => {
       spawn: vi.fn(),
       write: vi.fn(),
       resize: vi.fn(),
-      shutdown: vi.fn(),
+      shutdown: vi.fn(async (id: string) => exitedPtyStopReceipt(id)),
       sendSignal: vi.fn(),
       getCwd: vi.fn(),
       getInitialCwd: vi.fn(),
@@ -108,8 +109,8 @@ describe('registerPtyHandlers', () => {
   )
   it('lists duplicate SSH relay session ids as distinct app sessions', async () => {
     registerPtyHandlers(mainWindow as never)
-    const shutdownA = vi.fn(async () => undefined)
-    const shutdownB = vi.fn(async () => undefined)
+    const shutdownA = vi.fn(async (id: string) => exitedPtyStopReceipt(id))
+    const shutdownB = vi.fn(async (id: string) => exitedPtyStopReceipt(id))
     registerSshPtyProvider('ssh-a', {
       spawn: vi.fn(),
       write: vi.fn(),
@@ -175,14 +176,14 @@ describe('registerPtyHandlers', () => {
     await handlers.get('pty:kill')!(null, { id: 'ssh:ssh-a@@pty-1' })
     await handlers.get('pty:kill')!(null, { id: 'ssh:ssh-b@@pty-1' })
 
-    expect(shutdownA).toHaveBeenCalledWith('ssh:ssh-a@@pty-1', {
-      immediate: true,
-      keepHistory: false
-    })
-    expect(shutdownB).toHaveBeenCalledWith('ssh:ssh-b@@pty-1', {
-      immediate: true,
-      keepHistory: false
-    })
+    expect(shutdownA).toHaveBeenCalledWith(
+      'ssh:ssh-a@@pty-1',
+      expect.objectContaining({ immediate: true, keepHistory: false })
+    )
+    expect(shutdownB).toHaveBeenCalledWith(
+      'ssh:ssh-b@@pty-1',
+      expect.objectContaining({ immediate: true, keepHistory: false })
+    )
   })
   it('reports agent ownership through pty:listSessions so the renderer cannot guess it', async () => {
     registerPtyHandlers(mainWindow as never)
@@ -210,7 +211,7 @@ describe('registerPtyHandlers', () => {
       spawn: vi.fn(),
       write: vi.fn(),
       resize: vi.fn(),
-      shutdown: vi.fn(),
+      shutdown: vi.fn(async (id: string) => exitedPtyStopReceipt(id)),
       sendSignal: vi.fn(),
       getCwd: vi.fn(),
       getInitialCwd: vi.fn(),
@@ -250,7 +251,7 @@ describe('registerPtyHandlers', () => {
       spawn: vi.fn(),
       write: vi.fn(),
       resize: vi.fn(),
-      shutdown: vi.fn(),
+      shutdown: vi.fn(async (id: string) => exitedPtyStopReceipt(id)),
       sendSignal: vi.fn(),
       getCwd: vi.fn(),
       getInitialCwd: vi.fn(),
@@ -278,7 +279,7 @@ describe('registerPtyHandlers', () => {
     expect(sessions.find((s) => s.id === 'legacy-pty')?.agentOwnership).toBe('unknown')
   })
   it('kills app-scoped SSH PTY ids through the parsed provider when ownership is not rebuilt', async () => {
-    const localShutdown = vi.fn()
+    const localShutdown = vi.fn(async (id: string) => exitedPtyStopReceipt(id))
     setLocalPtyProvider({
       spawn: vi.fn(),
       write: vi.fn(),
@@ -301,7 +302,7 @@ describe('registerPtyHandlers', () => {
       getDefaultShell: vi.fn(),
       getProfiles: vi.fn()
     } as never)
-    const sshShutdown = vi.fn(async () => undefined)
+    const sshShutdown = vi.fn(async (id: string) => exitedPtyStopReceipt(id))
     const store = { markSshRemotePtyLease: vi.fn() }
     registerSshPtyProvider('ssh-1', {
       spawn: vi.fn(),
@@ -336,15 +337,15 @@ describe('registerPtyHandlers', () => {
 
     await handlers.get('pty:kill')!(null, { id: 'ssh:ssh-1@@relay-pty' })
 
-    expect(sshShutdown).toHaveBeenCalledWith('ssh:ssh-1@@relay-pty', {
-      immediate: true,
-      keepHistory: false
-    })
+    expect(sshShutdown).toHaveBeenCalledWith(
+      'ssh:ssh-1@@relay-pty',
+      expect.objectContaining({ immediate: true, keepHistory: false })
+    )
     expect(localShutdown).not.toHaveBeenCalled()
     expect(store.markSshRemotePtyLease).toHaveBeenCalledWith('ssh-1', 'relay-pty', 'terminated')
   })
   it('tombstones app-scoped SSH PTY ids instead of falling back local when ownership and provider are absent', async () => {
-    const localShutdown = vi.fn()
+    const localShutdown = vi.fn(async (id: string) => exitedPtyStopReceipt(id))
     setLocalPtyProvider({
       spawn: vi.fn(),
       write: vi.fn(),
@@ -392,7 +393,7 @@ describe('registerPtyHandlers', () => {
       spawn: vi.fn(async () => ({ id: 'remote-pty' })),
       write: vi.fn(),
       resize: vi.fn(),
-      shutdown: vi.fn(),
+      shutdown: vi.fn(async (id: string) => exitedPtyStopReceipt(id)),
       sendSignal: vi.fn(async () => undefined),
       getCwd: vi.fn(),
       getInitialCwd: vi.fn(),
@@ -453,7 +454,7 @@ describe('registerPtyHandlers', () => {
       spawn: vi.fn(),
       write: vi.fn(),
       resize: vi.fn(),
-      shutdown: vi.fn(),
+      shutdown: vi.fn(async (id: string) => exitedPtyStopReceipt(id)),
       sendSignal: vi.fn(),
       getCwd: vi.fn(),
       getInitialCwd: vi.fn(),

@@ -65,7 +65,6 @@ import {
 import { resolveStableForegroundProcess } from './stable-foreground-process'
 import { getAgentForegroundContextPaths } from './agent-foreground-context-paths'
 import { recognizeAgentProcessFromCommandLine } from '../../shared/agent-process-recognition'
-import { killWithDescendantSweep } from '../pty-descendant-termination'
 import { isWindowsPtyJobReadable, readWindowsPtyJobProcessIds } from './windows-pty-job-membership'
 import { readWindowsConsoleAttachedProcessIds } from './windows-console-attached-processes'
 import { terminatePtyJob } from '../windows/windows-pty-job'
@@ -73,6 +72,7 @@ import {
   canRevalidateCachedAgentWithoutScan,
   judgeCachedAgentJobEvidence
 } from './windows-cached-agent-revalidation'
+import { stopPtyProcessTree } from '../daemon/terminal-session-teardown'
 import { forceKillPosixPtyProcessGroups } from '../pty/posix-pty-process-groups'
 import { shouldUseShellReadyStartupDelivery } from '../../shared/codex-startup-delivery'
 import { assertSafeAgentStartupCwd } from './pty-default-cwd'
@@ -95,6 +95,14 @@ import {
 } from '../shell-prompt-readiness-probe'
 import { expandWindowsPathEnvironmentVariables } from '../../shared/windows-environment-expansion'
 import { resolveProcessExitCause, type TerminalExitCause } from '../../shared/terminal-exit-cause'
+import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
+import { createPtyStopReceipt, type PtyStopReceipt } from '../../shared/pty-stop-receipt'
+import {
+  registerWindowsPtyJobObjectOwner,
+  releaseWindowsPtyJobObjectOwner,
+  upgradeWindowsPtyJobObjectStopReceipt,
+  WINDOWS_PTY_JOB_OBJECT_CAPABILITY_VERSION
+} from './windows-pty-job-object'
 
 import {
   getDefaultCwd,
@@ -114,12 +122,15 @@ const ptyIncarnations = new Map<string, string>()
 const ptyAgentSessionIds = new Set<string>()
 // Why: descendant capture is async, so reattach/duplicate shutdown must wait for the original owner, not return a dying PTY.
 type PtyShutdownOperation = {
-  promise: Promise<void>
+  promise: Promise<PtyStopReceipt>
   immediate: boolean
   rootSignalled: boolean
   proc: pty.IPty
+  incarnationId: string
+  terminalHandle: string
 }
 const ptyShutdownOperations = new Map<string, PtyShutdownOperation>()
+const ptyStopReceipts = new Map<string, PtyStopReceipt>()
 type PendingLocalPtySpawn = {
   canceled: boolean
 }
@@ -480,6 +491,7 @@ export class LocalPtyProvider implements IPtyProvider {
     }
     const id = allocatePtyId(reattachId ?? undefined)
     const incarnationId = randomUUID()
+    ptyStopReceipts.delete(id)
 
     const startupAgentRecognition = args.command
       ? recognizeAgentProcessFromCommandLine(args.command)
@@ -866,6 +878,9 @@ export class LocalPtyProvider implements IPtyProvider {
     createPtyPhysicalExit(id)
     ptyReportsChildExitStatus.set(id, spawnResult.reportsChildExitStatus !== false)
     ptyProcesses.set(id, proc)
+    const windowsPtyJobObjectAssigned = registerWindowsPtyJobObjectOwner(id, proc, {
+      isWsl: spawnedShellIsWsl
+    })
     ptyInitialCwd.set(id, cwd)
     if (spawnedWslDistro !== undefined) {
       ptyWslDistroById.set(id, spawnedWslDistro)
@@ -1035,6 +1050,7 @@ export class LocalPtyProvider implements IPtyProvider {
       })
       const wasTerminationRequested = ptyTerminationMode.has(id)
       ptyPhysicalExits.get(id)?.markExited()
+      releaseWindowsPtyJobObjectOwner(id)
       // Why: neutralize proc.kill before destroy — node-pty SIGHUPs on socket 'close', which can race here and signal a reaped/recycled pid.
       if (process.platform !== 'win32') {
         ;(proc as unknown as { kill: (sig?: string) => void }).kill = () => {}
@@ -1089,6 +1105,14 @@ export class LocalPtyProvider implements IPtyProvider {
       id,
       incarnationId,
       pid,
+      ...(windowsPtyJobObjectAssigned
+        ? {
+            windowsPtyJobObject: {
+              version: WINDOWS_PTY_JOB_OBJECT_CAPABILITY_VERSION,
+              assigned: true as const
+            }
+          }
+        : {}),
       ...(spawnedWslDistro !== undefined ? { wslDistro: spawnedWslDistro } : {})
     }
   }
@@ -1141,33 +1165,60 @@ export class LocalPtyProvider implements IPtyProvider {
     return { cols: proc.cols, rows: proc.rows }
   }
 
-  async shutdown(id: string, opts: { immediate?: boolean; keepHistory?: boolean }): Promise<void> {
+  async shutdown(
+    id: string,
+    opts: {
+      immediate?: boolean
+      keepHistory?: boolean
+      expectedIncarnationId?: string
+    }
+  ): Promise<PtyStopReceipt> {
     cancelPendingLocalPtySpawns(id)
     const pending = ptyShutdownOperations.get(id)
     if (pending) {
+      if (opts.expectedIncarnationId && opts.expectedIncarnationId !== pending.incarnationId) {
+        throw new Error('pty_stop_receipt_identity_mismatch')
+      }
       if (opts.immediate === true) {
         pending.immediate = true
         if (pending.rootSignalled && ptyProcesses.get(id) === pending.proc) {
           this.requestTrackedPtyShutdown(id, pending.proc, true)
         }
       }
-      await pending.promise
-      return
+      return await pending.promise
+    }
+    const cached = ptyStopReceipts.get(id)
+    if (cached) {
+      if (!opts.expectedIncarnationId || cached.ptyIncarnation === opts.expectedIncarnationId) {
+        return cached
+      }
+      throw new Error('pty_stop_receipt_identity_mismatch')
     }
     const proc = ptyProcesses.get(id)
     if (!proc) {
-      return
+      throw new Error('pty_stop_receipt_unavailable')
+    }
+    const incarnationId = ptyIncarnations.get(id)
+    if (
+      !incarnationId ||
+      (opts.expectedIncarnationId && opts.expectedIncarnationId !== incarnationId)
+    ) {
+      throw new Error('pty_stop_receipt_identity_mismatch')
     }
     const entry: PtyShutdownOperation = {
-      promise: Promise.resolve(),
+      promise: Promise.resolve(undefined as never),
       immediate: opts.immediate === true,
       rootSignalled: false,
-      proc
+      proc,
+      incarnationId,
+      terminalHandle: ptyTerminalHandle.get(id) ?? id
     }
     entry.promise = this.shutdownTrackedPty(id, proc, entry)
     ptyShutdownOperations.set(id, entry)
     try {
-      await entry.promise
+      const receipt = await entry.promise
+      ptyStopReceipts.set(id, receipt)
+      return receipt
     } finally {
       if (ptyShutdownOperations.get(id) === entry) {
         ptyShutdownOperations.delete(id)
@@ -1179,7 +1230,7 @@ export class LocalPtyProvider implements IPtyProvider {
     id: string,
     proc: pty.IPty,
     operation: PtyShutdownOperation
-  ): Promise<void> {
+  ): Promise<PtyStopReceipt> {
     const physicalExit = ptyPhysicalExits.get(id)
     const signalRoot = (): void => {
       // Why: natural exit can race the sweep — never signal after this PTY loses ownership.
@@ -1191,27 +1242,24 @@ export class LocalPtyProvider implements IPtyProvider {
       operation.rootSignalled = true
       this.requestTrackedPtyShutdown(id, proc, operation.immediate)
     }
-    if (ptyAgentSessionIds.has(id)) {
-      // Why: POSIX needs a pre-kill descendant snapshot; Windows tree-kills only when the
-      // identity probe returns `own` so agent/MCP orphans cannot hold the worktree cwd
-      // (#10004). `unknown`/`foreign`/`absent` skip taskkill and rely on root close alone.
-      await killWithDescendantSweep(proc.pid, signalRoot, {
-        ownsRoot: () => ptyProcesses.get(id) === proc,
-        terminateOwnedTree: () => terminatePtyJob(proc)
-      })
-    } else if (process.platform === 'win32' && operation.immediate) {
-      // Why: a plain shell's ConPTY teardown doesn't reap orphaned children (useConptyDll
-      // skips the console reap), so a live `pnpm i`/`node` keeps the ConPTY console alive and
-      // holds the worktree cwd. Tree kill runs only when the OS identity probe returns `own`;
-      // otherwise root close alone, and detached children may block physical stop (#10004).
-      await killWithDescendantSweep(proc.pid, signalRoot, {
-        ownsRoot: () => ptyProcesses.get(id) === proc,
-        terminateOwnedTree: () => terminatePtyJob(proc)
-      })
-    } else {
-      signalRoot()
-    }
-    await waitForPtyPhysicalExit(id, physicalExit)
+    const evidence = await stopPtyProcessTree(proc.pid, signalRoot, {
+      ownsRoot: () => ptyProcesses.get(id) === proc,
+      terminateOwnedTree: () => terminatePtyJob(proc)
+    })
+    await waitForPtyPhysicalExit(id, physicalExit).catch(() => undefined)
+    const fallbackReceipt = createPtyStopReceipt({
+      executionHostId: LOCAL_EXECUTION_HOST_ID,
+      terminalHandle: operation.terminalHandle,
+      ptyId: id,
+      ptyIncarnation: operation.incarnationId,
+      root: evidence.root,
+      descendants: evidence.descendants,
+      observations: evidence.observations,
+      verdict: evidence.verdict,
+      processTreeVerified: evidence.processTreeVerified,
+      ...(evidence.reason ? { reason: evidence.reason } : {})
+    })
+    return upgradeWindowsPtyJobObjectStopReceipt(id, fallbackReceipt)
   }
 
   private requestTrackedPtyShutdown(id: string, proc: pty.IPty, immediate: boolean): void {

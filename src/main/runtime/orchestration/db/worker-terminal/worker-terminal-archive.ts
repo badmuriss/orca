@@ -6,6 +6,11 @@ import type {
 } from '../../worker-terminal-ownership'
 import { OrchestrationError } from '../../orchestration-error'
 import type { OrchestrationDb } from '../orchestration-db'
+import {
+  markLinkedWorkerLeaseReleased,
+  markLinkedWorkerLeaseReleaseUnknown,
+  retainLinkedWorkerLease
+} from './worker-terminal-lease-lifecycle'
 
 export function storeWorkerTerminalArchive(
   this: OrchestrationDb,
@@ -107,6 +112,7 @@ export function settleWorkerTerminalRelease(
        WHERE id = ? AND release_state IN ('requested', 'releasing', 'unknown')`
     )
     .run(resourceId)
+  markLinkedWorkerLeaseReleased(this, resourceId)
   return this.getWorkerTerminalResource(resourceId) as WorkerTerminalResourceRow
 }
 
@@ -122,6 +128,7 @@ export function markWorkerTerminalReleaseUnknown(
        WHERE id = ? AND release_state IN ('requested', 'releasing')`
     )
     .run(reason, resourceId)
+  markLinkedWorkerLeaseReleaseUnknown(this, resourceId)
   return this.getWorkerTerminalResource(resourceId) as WorkerTerminalResourceRow
 }
 
@@ -137,6 +144,7 @@ export function revertWorkerTerminalReleaseToRetained(
        WHERE id = ? AND release_state IN ('requested', 'releasing')`
     )
     .run(reason, resourceId)
+  retainLinkedWorkerLease(this, resourceId)
   return this.getWorkerTerminalResource(resourceId) as WorkerTerminalResourceRow
 }
 
@@ -184,6 +192,7 @@ export function retainWorkerTerminalResource(
       return { disposition: 'release_committed', resource: updated }
     }
     this.db.prepare('DELETE FROM worker_terminal_archives WHERE dispatch_id = ?').run(dispatchId)
+    retainLinkedWorkerLease(this, resource.id)
     this.db.exec('COMMIT')
     return { disposition: 'retained', resource: updated }
   } catch (error) {

@@ -7,7 +7,7 @@ export const YOLO_TUI_AGENT_ARGS: Partial<Record<TuiAgent, string>> = {
   claude: '--dangerously-skip-permissions',
   'claude-agent-teams': '--dangerously-skip-permissions',
   openclaude: '--dangerously-skip-permissions',
-  codex: '--dangerously-bypass-approvals-and-sandbox',
+  codex: '--yolo',
   gemini: '--yolo',
   antigravity: '--dangerously-skip-permissions',
   aider: '--yes-always',
@@ -43,6 +43,11 @@ function normalizeArgs(value: string | null | undefined): string {
   return value?.trim() ?? ''
 }
 
+function containsArgsSequence(args: string, expected: string): boolean {
+  const escaped = expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')
+  return new RegExp(`(^|\\s)${escaped}(?=\\s|$)`).test(args)
+}
+
 function sameEnv(
   left: Record<string, string> | null | undefined,
   right: Record<string, string> | null | undefined
@@ -59,7 +64,7 @@ function resolveAgentPermissionMode(args: string, yoloArgs: string): AgentPermis
   if (!args) {
     return 'manual'
   }
-  return args === yoloArgs ? 'yolo' : 'mixed'
+  return containsArgsSequence(args, yoloArgs) ? 'yolo' : 'mixed'
 }
 
 function resolveAgentEnvPermissionMode(

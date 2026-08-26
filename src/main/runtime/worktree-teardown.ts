@@ -5,7 +5,9 @@ import { isPathInsideOrEqual } from '../../shared/cross-platform-path'
 import { splitWorktreeId, splitWorktreeIdForFilesystem } from '../../shared/worktree/id'
 import { mapWithConcurrency } from '../../shared/map-with-concurrency'
 import {
+  getWorktreeTeardownExecutionHostId,
   isUnstoppedPtyRemovalError,
+  stopPtyForWorktreeRemoval,
   WORKTREE_TEARDOWN_FORCE_HINT,
   WORKTREE_TEARDOWN_TIMEOUT_PREFIX
 } from '../../shared/worktree/removal'
@@ -155,6 +157,7 @@ export async function killAllProcessesForWorktree(
             sweepProviderByPrefix(
               worktreeId,
               deps.localProvider,
+              getWorktreeTeardownExecutionHostId(deps),
               deadline,
               stopPty,
               deps.onPtyStopped,
@@ -262,6 +265,7 @@ export async function killAllProcessesForWorktree(
 async function sweepProviderByPrefix(
   worktreeId: string,
   provider: IPtyProvider,
+  executionHostId: ReturnType<typeof getWorktreeTeardownExecutionHostId>,
   deadline: number,
   stopPty: (
     ptyId: string,
@@ -306,15 +310,14 @@ async function sweepProviderByPrefix(
         return 0
       }
       const stopResult = await stopPty(session.id, async () => {
-        if (Date.now() >= deadline) {
-          return false
-        }
-        try {
-          await provider.shutdown(session.id, { immediate: true, deadlineMs: rpcDeadline })
-          return Date.now() < deadline
-        } catch {
-          return false
-        }
+        return await stopPtyForWorktreeRemoval(provider, {
+          ptyId: session.id,
+          executionHostId,
+          deadline,
+          rpcDeadline,
+          ...(session.terminalHandle ? { terminalHandle: session.terminalHandle } : {}),
+          ...(session.incarnationId ? { incarnationId: session.incarnationId } : {})
+        })
       })
       if (stopResult.owner && Date.now() < deadline) {
         clearStoppedPtyState(session.id, onPtyStopped)
@@ -346,15 +349,12 @@ async function sweepRegistryForWorktree(
         return 0
       }
       const stopResult = await stopPty(entry.ptyId, async () => {
-        if (Date.now() >= deadline) {
-          return false
-        }
-        try {
-          await localProvider.shutdown(entry.ptyId, { immediate: true, deadlineMs: rpcDeadline })
-          return Date.now() < deadline
-        } catch {
-          return false
-        }
+        return await stopPtyForWorktreeRemoval(localProvider, {
+          ptyId: entry.ptyId,
+          executionHostId: 'local',
+          deadline,
+          rpcDeadline
+        })
       })
       if (stopResult.owner && Date.now() < deadline) {
         clearStoppedPtyState(entry.ptyId, onPtyStopped)

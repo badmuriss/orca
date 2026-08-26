@@ -116,9 +116,9 @@ const tabContentTypeSchema = z.enum([
   'conflict-review',
   'check-details',
   'browser',
-  'simulator'
+  'simulator',
+  'maestro'
 ])
-
 const workspaceVisibleTabTypeSchema = z.enum(['terminal', 'editor', 'browser', 'simulator'])
 
 const executionHostIdSchema = z.custom<ExecutionHostId>(
@@ -152,6 +152,9 @@ const tabSchema = z.object({
   lastFocusedAt: z.number().finite().nonnegative().optional().catch(undefined),
   isPreview: z.boolean().optional(),
   isPinned: z.boolean().optional(),
+  systemRole: z.literal('workspace-maestro').optional(),
+  maestroExecutionHostId: z.string().min(1).optional(),
+  maestroWorkspaceKey: z.string().min(1).optional(),
   // Why: persist the per-tab native-chat view mode so 'chat' survives reload /
   // session restore. `.catch('terminal')` tolerates unknown future values (a
   // newer build that wrote an unrecognized mode) by degrading to the safe
@@ -310,10 +313,6 @@ export const workspaceSessionStateSchema: z.ZodType<WorkspaceSessionState> = z.o
   )
 })
 
-export type ParsedWorkspaceSession =
-  | { ok: true; value: WorkspaceSessionState }
-  | { ok: false; error: string }
-
 /** Why: keep the error compact — a zod issue dump is noisy and most of the time
  *  only the first divergent field is actionable for debugging. */
 export function describeWorkspaceSessionError(error: z.ZodError): string {
@@ -342,7 +341,7 @@ export function safeParseWorkspaceSession(
 
 /** Validate raw JSON as a WorkspaceSessionState. Returns a discriminated union
  *  so callers can fall back to defaults on failure without a try/catch. */
-export function parseWorkspaceSession(raw: unknown): ParsedWorkspaceSession {
+export function parseWorkspaceSession(raw: unknown) {
   const result = safeParseWorkspaceSession(raw)
   if (!result) {
     return { ok: false, error: WORKSPACE_SESSION_UNVALIDATABLE }
