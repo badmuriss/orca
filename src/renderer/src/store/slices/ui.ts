@@ -960,6 +960,9 @@ export type UISlice = {
   /** Transient: the in-window Agent Dashboard companion drawer is open. Not persisted. */
   agentDashboardDrawerOpen: boolean
   setAgentDashboardDrawerOpen: (open: boolean) => void
+  /** Transient: the global summary-only Maestro navigator is open. */
+  maestroNavigatorOpen: boolean
+  setMaestroNavigatorOpen: (open: boolean) => void
   statusBarItems: StatusBarItem[]
   toggleStatusBarItem: (item: StatusBarItem) => void
   statusBarVisible: boolean
@@ -2299,6 +2302,8 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
 
   agentDashboardDrawerOpen: false,
   setAgentDashboardDrawerOpen: (open) => set({ agentDashboardDrawerOpen: open }),
+  maestroNavigatorOpen: false,
+  setMaestroNavigatorOpen: (open) => set({ maestroNavigatorOpen: open }),
   statusBarVisible: true,
   setStatusBarVisible: (v) => {
     window.api.ui.set({ statusBarVisible: v }).catch(console.error)

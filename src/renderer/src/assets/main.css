@@ -81,6 +81,8 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-terminal-pane-surface-on-dark: var(--terminal-pane-surface-on-dark);
+  --color-terminal-pane-body-on-dark-fg: var(--terminal-pane-body-on-dark-fg);
   --color-terminal-pane-title-on-dark-fg: var(--terminal-pane-title-on-dark-fg);
   --color-terminal-pane-title-on-dark-input-fg: var(--terminal-pane-title-on-dark-input-fg);
   --color-terminal-pane-title-on-dark-placeholder: var(--terminal-pane-title-on-dark-placeholder);
@@ -208,6 +210,8 @@
   --sidebar-accent-foreground: #171717;
   --sidebar-border: #e5e5e5;
   --sidebar-ring: #a1a1a1;
+  --terminal-pane-surface-on-dark: rgb(0 0 0 / 0.95);
+  --terminal-pane-body-on-dark-fg: rgb(255 255 255 / 0.86);
   --terminal-pane-title-on-dark-fg: rgb(255 255 255 / 0.52);
   --terminal-pane-title-on-dark-input-fg: rgb(255 255 255 / 0.7);
   --terminal-pane-title-on-dark-placeholder: rgb(255 255 255 / 0.38);
@@ -320,6 +324,8 @@
   --sidebar-accent-foreground: #fafafa;
   --sidebar-border: rgb(255 255 255 / 0.07);
   --sidebar-ring: #525252;
+  --terminal-pane-surface-on-dark: rgb(0 0 0 / 0.95);
+  --terminal-pane-body-on-dark-fg: rgb(255 255 255 / 0.86);
   --terminal-pane-title-on-dark-fg: rgb(255 255 255 / 0.52);
   --terminal-pane-title-on-dark-input-fg: rgb(255 255 255 / 0.7);
   --terminal-pane-title-on-dark-placeholder: rgb(255 255 255 / 0.38);

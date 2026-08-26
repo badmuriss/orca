@@ -7,7 +7,6 @@ import { getEditorDisplayLabel } from '@/components/editor/editor-labels'
 import { normalizeRelativePath } from '@/lib/path'
 import { getBrowserTabLabel } from './BrowserTab'
 import type { DropIndicator } from './drop-indicator'
-import { reconcileTabOrder } from './reconcile-order'
 import { resolveTabIndicatorEdges } from '../tab-group/tab-insertion'
 import type { HoveredTabInsertion } from '../tab-group/useTabDragSplit'
 
@@ -40,6 +39,7 @@ export type TabBarItem =
       isPinned: boolean
       data: Tab
     }
+  | { type: 'maestro'; id: string; unifiedTabId: string; isPinned: boolean; data: Tab }
 
 export function getTabDragLabel(item: TabBarItem, generatedTitlesEnabled: boolean): string {
   if (item.type === 'terminal') {
@@ -48,8 +48,8 @@ export function getTabDragLabel(item: TabBarItem, generatedTitlesEnabled: boolea
   if (item.type === 'browser') {
     return getBrowserTabLabel(item.data)
   }
-  if (item.type === 'simulator') {
-    return item.data.label || 'Mobile Emulator'
+  if (item.type === 'simulator' || item.type === 'maestro') {
+    return item.data.label || (item.type === 'maestro' ? 'Maestro' : 'Mobile Emulator')
   }
   return getEditorDisplayLabel(item.data)
 }
@@ -93,12 +93,45 @@ export function createUnifiedTabLookup(tabs: readonly Tab[], groupId: string): M
   return lookup
 }
 
+function reconcileRenderableTabOrder({
+  tabBarOrder,
+  terminalIds,
+  editorFileIds,
+  browserTabIds,
+  simulatorTabIds,
+  maestroTabIds
+}: {
+  tabBarOrder?: string[]
+  terminalIds: readonly string[]
+  editorFileIds: readonly string[]
+  browserTabIds: readonly string[]
+  simulatorTabIds: readonly string[]
+  maestroTabIds: readonly string[]
+}): string[] {
+  const renderableIds = [
+    ...terminalIds,
+    ...editorFileIds,
+    ...browserTabIds,
+    ...simulatorTabIds,
+    ...maestroTabIds
+  ]
+  const validIds = new Set(renderableIds)
+  const ids: string[] = []
+  for (const id of [...(tabBarOrder ?? []), ...renderableIds]) {
+    if (validIds.has(id) && !ids.includes(id)) {
+      ids.push(id)
+    }
+  }
+  return ids
+}
+
 export function buildOrderedTabItems({
   tabBarOrder,
   terminalIds,
   editorFileIds,
   browserTabIds,
   simulatorTabIds,
+  maestroTabIds,
   terminalMap,
   editorMap,
   browserMap,
@@ -109,18 +142,20 @@ export function buildOrderedTabItems({
   editorFileIds: string[]
   browserTabIds: string[]
   simulatorTabIds: string[]
+  maestroTabIds: string[]
   terminalMap: Map<string, TerminalTab & { unifiedTabId?: string }>
   editorMap: Map<string, OpenFile & { tabId?: string }>
   browserMap: Map<string, BrowserTabState & { tabId?: string }>
   unifiedTabByVisibleId: Map<string, Tab>
 }): TabBarItem[] {
-  const ids = reconcileTabOrder(
+  const ids = reconcileRenderableTabOrder({
     tabBarOrder,
     terminalIds,
     editorFileIds,
     browserTabIds,
-    simulatorTabIds
-  )
+    simulatorTabIds,
+    maestroTabIds
+  })
   const items: TabBarItem[] = []
   for (const id of ids) {
     const terminal = terminalMap.get(id)
@@ -159,14 +194,24 @@ export function buildOrderedTabItems({
       })
       continue
     }
-    const simulatorTab = unifiedTabByVisibleId.get(id)
-    if (simulatorTab?.contentType === 'simulator') {
+    const nativeTab = unifiedTabByVisibleId.get(id)
+    if (nativeTab?.contentType === 'simulator') {
       items.push({
         type: 'simulator',
         id,
-        unifiedTabId: simulatorTab.id,
-        isPinned: simulatorTab.isPinned === true,
-        data: simulatorTab
+        unifiedTabId: nativeTab.id,
+        isPinned: nativeTab.isPinned === true,
+        data: nativeTab
+      })
+      continue
+    }
+    if (nativeTab?.contentType === 'maestro') {
+      items.push({
+        type: 'maestro',
+        id,
+        unifiedTabId: nativeTab.id,
+        isPinned: nativeTab.isPinned === true,
+        data: nativeTab
       })
     }
   }
@@ -194,6 +239,7 @@ export function findActiveVisibleTabId(
     activeFileId?: string | null
     activeBrowserTabId?: string | null
     activeSimulatorTabId?: string | null
+    activeMaestroTabId?: string | null
     activeTabType?: WorkspaceVisibleTabType
   }
 ): string | null {
@@ -209,6 +255,9 @@ export function findActiveVisibleTabId(
     }
     if (item.type === 'simulator') {
       return active.activeTabType === 'simulator' && item.id === active.activeSimulatorTabId
+    }
+    if (item.type === 'maestro') {
+      return active.activeTabType === 'editor' && item.id === active.activeMaestroTabId
     }
     return (
       (active.activeTabType === 'editor' || active.activeTabType === 'simulator') &&

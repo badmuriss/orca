@@ -6,6 +6,7 @@ export type VisibleTabRef = {
   type: 'terminal' | 'editor' | 'browser' | 'simulator'
   id: string
   tabId?: string
+  activation?: 'maestro'
 }
 
 export type ActiveTabNavOrderIds = {
@@ -13,6 +14,7 @@ export type ActiveTabNavOrderIds = {
   editorIds?: string[]
   browserIds?: string[]
   simulatorIds?: string[]
+  maestroIds?: string[]
 }
 
 /**
@@ -30,6 +32,7 @@ export function getGroupVisibleTabOrder(
   editorEntityIds: ReadonlySet<string>,
   browserEntityIds: ReadonlySet<string>,
   simulatorTabIds: ReadonlySet<string> = new Set(),
+  maestroTabIds: ReadonlySet<string> = new Set(),
   preserveTypeCollisions = false
 ): VisibleTabRef[] {
   const tabsById = new Map(groupTabs.map((t) => [t.id, t]))
@@ -46,6 +49,11 @@ export function getGroupVisibleTabOrder(
     }
     if (tab.contentType === 'simulator') {
       return simulatorTabIds.has(tab.id) ? { type: 'simulator', id: tab.id, tabId: tab.id } : null
+    }
+    if (tab.contentType === 'maestro') {
+      return maestroTabIds.has(tab.id)
+        ? { type: 'editor', id: tab.id, tabId: tab.id, activation: 'maestro' }
+        : null
     }
     return editorEntityIds.has(tab.entityId)
       ? { type: 'editor', id: tab.entityId, tabId: tab.id }
@@ -167,6 +175,11 @@ export function getActiveTabNavOrder(
     (state.unifiedTabsByWorktree[worktreeId] ?? [])
       .filter((tab) => tab.contentType === 'simulator')
       .map((tab) => tab.id)
+  const maestroIds =
+    ids.maestroIds ??
+    (state.unifiedTabsByWorktree[worktreeId] ?? [])
+      .filter((tab) => tab.contentType === 'maestro')
+      .map((tab) => tab.id)
 
   const activeGroupId = state.activeGroupIdByWorktree[worktreeId]
   const group = activeGroupId
@@ -189,7 +202,8 @@ export function getActiveTabNavOrder(
       groupTerminalIds,
       new Set(editorIds),
       new Set(browserIds),
-      new Set(simulatorIds)
+      new Set(simulatorIds),
+      new Set(maestroIds)
     )
   }
 
@@ -197,7 +211,7 @@ export function getActiveTabNavOrder(
   const visibleIds = reconcileTabOrder(
     state.tabBarOrderByWorktree[worktreeId],
     terminalIds,
-    editorIds,
+    [...editorIds, ...maestroIds],
     browserIds,
     simulatorIds
   )
@@ -205,6 +219,7 @@ export function getActiveTabNavOrder(
   const editorIdSet = new Set(editorIds)
   const browserIdSet = new Set(browserIds)
   const simulatorIdSet = new Set(simulatorIds)
+  const maestroIdSet = new Set(maestroIds)
   const result: VisibleTabRef[] = []
   for (const id of visibleIds) {
     if (terminalIdSet.has(id)) {
@@ -213,6 +228,8 @@ export function getActiveTabNavOrder(
       result.push({ type: 'editor', id })
     } else if (browserIdSet.has(id)) {
       result.push({ type: 'browser', id })
+    } else if (maestroIdSet.has(id)) {
+      result.push({ type: 'editor', id, tabId: id, activation: 'maestro' })
     } else if (simulatorIdSet.has(id)) {
       result.push({ type: 'simulator', id })
     }

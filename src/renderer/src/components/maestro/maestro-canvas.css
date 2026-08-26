@@ -1,0 +1,162 @@
+/* Board and window tokens. Every value derives from main.css, so theme parity is automatic. */
+
+[data-maestro-canvas] {
+  --maestro-dot: color-mix(in srgb, var(--foreground) 14%, transparent);
+  --maestro-rule: color-mix(in srgb, var(--foreground) 7%, transparent);
+  --maestro-chrome: color-mix(in srgb, var(--foreground) 4%, var(--card));
+  --maestro-screen: var(--terminal-pane-surface-on-dark);
+  --maestro-screen-fg: var(--terminal-pane-body-on-dark-fg);
+  --maestro-screen-muted: var(--terminal-pane-title-on-dark-fg);
+  --maestro-screen-rule: var(--terminal-pane-title-on-dark-separator);
+  --maestro-tone: var(--muted-foreground);
+  --maestro-tone-surface: var(--card);
+  --maestro-tone-border: var(--border);
+}
+
+/* Annotation tones reuse the mix recipe of `--status-success-background` / `-border`. */
+[data-maestro-tone='blocker'] {
+  --maestro-tone: var(--destructive);
+}
+[data-maestro-tone='warning'] {
+  --maestro-tone: var(--agent-question-text);
+}
+[data-maestro-tone='decision'] {
+  --maestro-tone: var(--status-success);
+}
+[data-maestro-tone='highlight'] {
+  --maestro-tone: var(--annotation-highlight);
+}
+[data-maestro-tone='observation'] {
+  --maestro-tone: var(--muted-foreground);
+}
+
+[data-maestro-tone]:not([data-maestro-tone='observation']) {
+  --maestro-tone-surface: color-mix(in srgb, var(--maestro-tone) 10%, var(--card));
+  --maestro-tone-border: color-mix(in srgb, var(--maestro-tone) 28%, var(--border));
+  --maestro-chrome: color-mix(in srgb, var(--maestro-tone) 18%, var(--card));
+}
+
+/* Elevation stays on STYLEGUIDE's tiers: subtle lift at rest, focus ring for emphasis. */
+.maestro-window {
+  display: flex;
+  flex-direction: column;
+  block-size: 100%;
+  inline-size: 100%;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--maestro-tone-border);
+  background: var(--maestro-tone-surface);
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  outline: none;
+  text-align: start;
+}
+
+.maestro-window[data-motion='animated'] {
+  transition: border-color 140ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .maestro-window:hover {
+    border-color: color-mix(in srgb, var(--foreground) 22%, var(--maestro-tone-border));
+  }
+}
+
+.maestro-window[data-selected='true'] {
+  border-color: color-mix(in srgb, var(--ring) 72%, var(--maestro-tone-border));
+}
+
+.maestro-window:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--background),
+    0 0 0 4px var(--ring);
+}
+
+.maestro-window-chrome {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  block-size: 26px;
+  flex: none;
+  padding-inline: 8px;
+  border-block-end: 1px solid var(--maestro-tone-border);
+  background: var(--maestro-chrome);
+}
+
+.maestro-window-body {
+  display: flex;
+  min-block-size: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.maestro-window-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  block-size: 22px;
+  flex: none;
+  padding-inline: 8px;
+  border-block-start: 1px solid var(--maestro-tone-border);
+  color: var(--muted-foreground);
+}
+
+/* Fade the last 20px so a clipped row reads as "scroll for more", not "unfinished".
+   `#000` is an opaque mask alpha stop, not a colour role — same idiom as main.css. */
+.maestro-scroll-fade {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent 100%);
+}
+
+/* Terminal-backed windows render their body as a screen. */
+.maestro-screen {
+  background: var(--maestro-screen);
+  color: var(--maestro-screen-fg);
+}
+
+.maestro-screen-rule {
+  border-color: var(--maestro-screen-rule);
+}
+
+.maestro-screen-muted {
+  color: var(--maestro-screen-muted);
+}
+
+/* Selection chrome lives in the SVG layer so it can sit outside the window's own clip. */
+.maestro-selection-frame {
+  fill: none;
+  stroke: var(--ring);
+  pointer-events: none;
+}
+
+.maestro-handle {
+  fill: var(--background);
+  stroke: var(--ring);
+  cursor: var(--maestro-handle-cursor, nwse-resize);
+}
+
+.maestro-handle:hover {
+  fill: var(--ring);
+}
+
+/* A filled chip, because a hairline outline disappears against --card. */
+.maestro-port {
+  fill: var(--muted);
+  stroke: var(--border);
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.maestro-port:hover,
+.maestro-port:focus-visible {
+  fill: var(--accent);
+  stroke: var(--foreground);
+  color: var(--foreground);
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .maestro-window[data-motion='animated'] {
+    transition: none;
+  }
+}

@@ -196,6 +196,8 @@ export function closeTerminalTab(
   const currentTerminalTabIds = precomputedCloseState
     ? null
     : getWorktreeTerminalTabIds(state, owningWorktreeId)
+  const wasActiveWorktree = state.activeWorktreeId === owningWorktreeId
+  const activeWorkspaceExecutionHostId = state.activeWorkspaceExecutionHostId
   const terminalCountBeforeClose =
     precomputedCloseState?.terminalCountBeforeClose ?? currentTerminalTabIds!.length
   if (terminalCountBeforeClose <= 1) {
@@ -211,21 +213,43 @@ export function closeTerminalTab(
         ? { precomputedRetirementPlan: options.precomputedRetirementPlan }
         : {})
     })
-    if (state.activeWorktreeId === owningWorktreeId) {
+    let currentState = useAppStore.getState()
+    if (
+      wasActiveWorktree &&
+      (currentState.activeWorktreeId === owningWorktreeId || currentState.activeWorktreeId === null)
+    ) {
       // Why: only deactivate the worktree when no tabs of any kind remain.
       // Editor files are a separate tab type; closing the last terminal tab
       // should switch to the editor view instead of tearing down the workspace.
-      const worktreeFile = state.openFiles.find((f) => f.worktreeId === owningWorktreeId)
+      const hasSurvivingContent =
+        currentState.openFiles.some((file) => file.worktreeId === owningWorktreeId) ||
+        (currentState.browserTabsByWorktree?.[owningWorktreeId] ?? []).length > 0 ||
+        (currentState.unifiedTabsByWorktree[owningWorktreeId] ?? []).length > 0
+      if (currentState.activeWorktreeId === null && hasSurvivingContent) {
+        currentState.setActiveWorktree(
+          owningWorktreeId,
+          activeWorkspaceExecutionHostId ?? undefined
+        )
+        currentState = useAppStore.getState()
+      }
+      const worktreeFile = currentState.openFiles.find(
+        (file) => file.worktreeId === owningWorktreeId
+      )
       if (worktreeFile) {
-        state.setActiveFile(worktreeFile.id)
-        state.setActiveTabType('editor')
+        currentState.setActiveFile(worktreeFile.id)
+        currentState.setActiveTabType('editor')
       } else {
-        const browserTab = (state.browserTabsByWorktree?.[owningWorktreeId] ?? [])[0]
+        const browserTab = (currentState.browserTabsByWorktree?.[owningWorktreeId] ?? [])[0]
         if (browserTab) {
-          state.setActiveBrowserTab(browserTab.id)
-          state.setActiveTabType('browser')
+          currentState.setActiveBrowserTab(browserTab.id)
+          currentState.setActiveTabType('browser')
         } else {
-          state.setActiveWorktree(null)
+          const survivingTab = (currentState.unifiedTabsByWorktree[owningWorktreeId] ?? [])[0]
+          if (survivingTab) {
+            currentState.activateTab(survivingTab.id, { worktreeId: owningWorktreeId })
+          } else {
+            currentState.setActiveWorktree(null)
+          }
         }
       }
     }

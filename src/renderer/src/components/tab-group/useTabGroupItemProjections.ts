@@ -132,5 +132,13 @@ export function useTabGroupItemProjections({
     [group, groupTabs]
   )
 
-  return { group, groupTabs, activeTab, terminalTabs, editorItems, browserItems, tabBarOrder }
+  return {
+    group,
+    groupTabs,
+    activeTab,
+    terminalTabs,
+    editorItems,
+    browserItems,
+    tabBarOrder
+  }
 }

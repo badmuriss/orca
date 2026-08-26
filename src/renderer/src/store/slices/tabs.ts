@@ -12,6 +12,7 @@ import type {
 import type { TerminalTab } from '../../../../shared/terminal-tab-types'
 import type { TuiAgent } from '../../../../shared/tui-agent'
 import type { WorkspaceSessionState } from '../../../../shared/workspace-session-state-types'
+import { normalizeWorkspaceMaestroTabs } from '../../../../shared/workspace-session-salvage'
 import { emitNativeChatToggled } from '@/lib/native-chat-telemetry'
 import {
   dedupeTabOrder,
@@ -36,7 +37,11 @@ import {
 import { createBrowserUuid } from '@/lib/browser-uuid'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
-import { folderWorkspaceKey } from '../../../../shared/workspace-scope'
+import {
+  folderWorkspaceKey,
+  isWorkspaceKey,
+  worktreeWorkspaceKey
+} from '../../../../shared/workspace-scope'
 import { getActiveExecutionHostIdForWorktree } from '@/lib/unified-tab-host-ownership'
 import {
   addAdditionalValidWorkspaceKeys,
@@ -46,6 +51,7 @@ import {
   buildValidWorktreeIdsForSessionHydration,
   collectPersistedWorktreeIdsForSessionHydration
 } from './degraded-repo-worktree-validity'
+import { scheduleRuntimeGraphSync } from '@/runtime/sync-runtime-graph'
 
 export type TabSplitDirection = 'left' | 'right' | 'up' | 'down'
 
@@ -83,6 +89,9 @@ export type TabsSlice = {
         | 'color'
         | 'isPreview'
         | 'isPinned'
+        | 'systemRole'
+        | 'maestroExecutionHostId'
+        | 'maestroWorkspaceKey'
       > & {
         targetGroupId: string
         activate: boolean
@@ -110,6 +119,9 @@ export type TabsSlice = {
         | 'color'
         | 'isPreview'
         | 'isPinned'
+        | 'systemRole'
+        | 'maestroExecutionHostId'
+        | 'maestroWorkspaceKey'
       > & {
         activate: boolean
         recordInteraction: boolean
@@ -168,7 +180,12 @@ export type TabsSlice = {
   moveUnifiedTabToGroup: (
     tabId: string,
     targetGroupId: string,
-    opts?: { index?: number; activate?: boolean; recordInteraction?: boolean }
+    opts?: {
+      index?: number
+      activate?: boolean
+      recordInteraction?: boolean
+      allowSystemTransfer?: boolean
+    }
   ) => boolean
   dropUnifiedTab: (
     tabId: string,
@@ -192,6 +209,8 @@ export type TabsSlice = {
         | 'customLabel'
         | 'color'
         | 'isPinned'
+        | 'maestroExecutionHostId'
+        | 'maestroWorkspaceKey'
       >
     >
   ) => Tab | null
@@ -484,9 +503,11 @@ function deriveActiveSurfaceForWorktree(
       activeUnifiedTab.contentType === 'conflict-review' ||
       activeUnifiedTab.contentType === 'check-details'
         ? activeUnifiedTab.entityId
-        : fileStillOpen
-          ? restoredFileId
-          : null
+        : activeUnifiedTab.contentType === 'maestro'
+          ? null
+          : fileStillOpen
+            ? restoredFileId
+            : null
     activeBrowserTabId =
       activeUnifiedTab.contentType === 'browser'
         ? activeUnifiedTab.entityId
@@ -626,9 +647,21 @@ export type WorktreeTabModelReconciliation = {
 }
 
 export function projectWorktreeTabModelReconciliation(
-  state: AppState,
-  worktreeId: string
+  inputState: AppState,
+  worktreeId: string,
+  executionHostId?: string
 ): WorktreeTabModelReconciliation {
+  const workspaceKey = isWorkspaceKey(worktreeId) ? worktreeId : worktreeWorkspaceKey(worktreeId)
+  const expectedHost =
+    executionHostId ??
+    (inputState.activeWorkspaceKey === workspaceKey
+      ? inputState.activeWorkspaceExecutionHostId
+      : null) ??
+    inputState.unifiedTabsByWorktree[worktreeId]?.find(
+      (tab) => tab.contentType === 'maestro' && tab.maestroWorkspaceKey === workspaceKey
+    )?.maestroExecutionHostId ??
+    'local'
+  const state = inputState
   const unifiedTabs = state.unifiedTabsByWorktree[worktreeId] ?? []
   const groups = state.groupsByWorktree[worktreeId] ?? []
   const runtimeTerminalTabs = state.tabsByWorktree[worktreeId] ?? []
@@ -704,6 +737,9 @@ export function projectWorktreeTabModelReconciliation(
   const liveBrowserIds = new Set(
     (state.browserTabsByWorktree[worktreeId] ?? []).map((browserTab) => browserTab.id)
   )
+  const expectedMaestroWorkspaceKey = isWorkspaceKey(worktreeId)
+    ? worktreeId
+    : worktreeWorkspaceKey(worktreeId)
 
   const isRenderableTab = (tab: Tab): boolean => {
     if (tab.contentType === 'terminal') {
@@ -714,6 +750,11 @@ export function projectWorktreeTabModelReconciliation(
     }
     if (tab.contentType === 'simulator') {
       return true
+    }
+    if (tab.contentType === 'maestro') {
+      return Boolean(
+        tab.maestroExecutionHostId && tab.maestroWorkspaceKey === expectedMaestroWorkspaceKey
+      )
     }
     return liveEditorIds.has(tab.entityId)
   }
@@ -819,12 +860,39 @@ export function projectWorktreeTabModelReconciliation(
     }
   }
 
+  if (worktreeId !== FLOATING_TERMINAL_WORKTREE_ID) {
+    const projected = { ...state, ...patch } as AppState
+    const projectedTabs = projected.unifiedTabsByWorktree[worktreeId] ?? []
+    const projectedGroups = projected.groupsByWorktree[worktreeId] ?? []
+    const maestroTabs = projectedTabs.filter((tab) => tab.contentType === 'maestro')
+    const maestro = maestroTabs[0]
+    const primaryGroup = projectedGroups[0]
+    const normalized =
+      maestroTabs.length === 1 &&
+      maestro?.systemRole === 'workspace-maestro' &&
+      maestro.isPinned &&
+      maestro.groupId === primaryGroup?.id &&
+      maestro.maestroExecutionHostId === expectedHost &&
+      maestro.maestroWorkspaceKey === workspaceKey &&
+      primaryGroup?.tabOrder[0] === maestro.id
+        ? null
+        : normalizeWorkspaceMaestroTabs(projected, new Set([worktreeId]), {
+            key: workspaceKey,
+            executionHostId: expectedHost
+          })
+    if (normalized) {
+      patch = { ...patch, ...normalized }
+    }
+  }
+  const finalTabs = patch.unifiedTabsByWorktree?.[worktreeId] ?? validTabs
+  const finalGroups = patch.groupsByWorktree?.[worktreeId] ?? nextGroups
+  const finalActiveGroupId = patch.activeGroupIdByWorktree?.[worktreeId] ?? nextActiveGroupId
   return {
     patch,
-    renderableTabCount: validTabs.length,
+    renderableTabCount: finalTabs.length,
     activeRenderableTabId:
-      nextGroups.find((group) => group.id === nextActiveGroupId)?.activeTabId ??
-      nextGroups.find((group) => group.activeTabId !== null)?.activeTabId ??
+      finalGroups.find((group) => group.id === finalActiveGroupId)?.activeTabId ??
+      finalGroups.find((group) => group.activeTabId !== null)?.activeTabId ??
       null
   }
 }
@@ -837,14 +905,27 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
   layoutByWorktree: {},
 
   createUnifiedTab: (worktreeId, contentType, init) => {
-    const id = init?.id ?? createBrowserUuid()
+    if (contentType === 'maestro') {
+      const existing = (get().unifiedTabsByWorktree[worktreeId] ?? []).find(
+        (tab) => tab.systemRole === 'workspace-maestro' || tab.contentType === 'maestro'
+      )
+      if (existing) {
+        return existing
+      }
+    }
+    const id =
+      contentType === 'maestro' && init?.maestroExecutionHostId && init.maestroWorkspaceKey
+        ? `workspace-maestro:${encodeURIComponent(init.maestroExecutionHostId)}:${encodeURIComponent(init.maestroWorkspaceKey)}`
+        : (init?.id ?? createBrowserUuid())
     let created!: Tab
     set((state) => {
       const { group, groupsByWorktree, activeGroupIdByWorktree } = ensureGroup(
         state.groupsByWorktree,
         state.activeGroupIdByWorktree,
         worktreeId,
-        init?.targetGroupId ?? state.activeGroupIdByWorktree[worktreeId]
+        contentType === 'maestro'
+          ? state.groupsByWorktree[worktreeId]?.[0]?.id
+          : (init?.targetGroupId ?? state.activeGroupIdByWorktree[worktreeId])
       )
       const existingTabs = state.unifiedTabsByWorktree[worktreeId] ?? []
 
@@ -875,22 +956,33 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
         ...(executionHostId ? { executionHostId } : {}),
         contentType,
         label:
-          init?.label ?? (contentType === 'terminal' ? `Terminal ${existingTabs.length + 1}` : id),
+          contentType === 'maestro'
+            ? 'Maestro'
+            : (init?.label ??
+              (contentType === 'terminal' ? `Terminal ${existingTabs.length + 1}` : id)),
         ...(init?.generatedLabel !== undefined ? { generatedLabel: init.generatedLabel } : {}),
         ...(init?.quickCommandLabel !== undefined
           ? { quickCommandLabel: init.quickCommandLabel }
           : {}),
-        customLabel: init?.customLabel ?? null,
-        color: init?.color ?? null,
-        sortOrder: nextOrder.length,
+        customLabel: contentType === 'maestro' ? null : (init?.customLabel ?? null),
+        color: contentType === 'maestro' ? null : (init?.color ?? null),
+        sortOrder: contentType === 'maestro' ? 0 : nextOrder.length,
         createdAt,
         // Why: creating an active tab is a focus event; Cmd+J recency reads lastFocusedAt.
         ...(shouldActivate ? { lastFocusedAt: createdAt } : {}),
-        isPreview: init?.isPreview,
-        isPinned: init?.isPinned
+        isPreview: contentType === 'maestro' ? false : init?.isPreview,
+        isPinned: contentType === 'maestro' ? true : init?.isPinned,
+        ...(contentType === 'maestro' ? { systemRole: 'workspace-maestro' as const } : {}),
+        ...(init?.maestroExecutionHostId
+          ? { maestroExecutionHostId: init.maestroExecutionHostId }
+          : {}),
+        ...(init?.maestroWorkspaceKey ? { maestroWorkspaceKey: init.maestroWorkspaceKey } : {})
       }
 
-      nextOrder = dedupeTabOrder([...nextOrder, created.id])
+      nextOrder =
+        contentType === 'maestro'
+          ? [created.id, ...nextOrder.filter((tabId) => tabId !== created.id)]
+          : dedupeTabOrder([...nextOrder, created.id])
       const nextActiveTabId = shouldActivate ? created.id : (group.activeTabId ?? created.id)
       const sanitizedRecent = sanitizeRecentTabIds(group.recentTabIds, nextOrder)
       // Why: automation-created browser tabs must paint without stealing the visible group selection from the user's current tab.
@@ -925,6 +1017,9 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
   },
 
   createUnifiedTabInSplit: (worktreeId, contentType, target, init) => {
+    if (contentType === 'maestro') {
+      return null
+    }
     const id = init?.id ?? createBrowserUuid()
     const newGroupId = createBrowserUuid()
     let created: Tab | null = null
@@ -963,7 +1058,11 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
         // Why: creating an active tab is a focus event; Cmd+J recency reads lastFocusedAt.
         ...(shouldActivate ? { lastFocusedAt: createdAt } : {}),
         isPreview: init?.isPreview,
-        isPinned: init?.isPinned
+        isPinned: init?.isPinned,
+        ...(init?.maestroExecutionHostId
+          ? { maestroExecutionHostId: init.maestroExecutionHostId }
+          : {}),
+        ...(init?.maestroWorkspaceKey ? { maestroWorkspaceKey: init.maestroWorkspaceKey } : {})
       }
       const newGroup: TabGroup = {
         id: newGroupId,
@@ -1127,6 +1226,9 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
       return null
     }
     const { tab, worktreeId } = found
+    if (tab.systemRole === 'workspace-maestro') {
+      return null
+    }
     const group = findGroupForTab(state.groupsByWorktree, worktreeId, tab.groupId)
     if (!group) {
       return null
@@ -1276,7 +1378,13 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
           continue
         }
         // Why: dedupe at the store boundary so each tab keeps one canonical position and later group ops don't branch on duplicate ids.
-        const nextTabOrder = dedupeTabOrder(tabIds)
+        const systemTabId = (state.unifiedTabsByWorktree[worktreeId] ?? []).find(
+          (tab) => tab.groupId === groupId && tab.systemRole === 'workspace-maestro'
+        )?.id
+        const deduped = dedupeTabOrder(tabIds)
+        const nextTabOrder = systemTabId
+          ? [systemTabId, ...deduped.filter((id) => id !== systemTabId)]
+          : deduped
         reordered = true
         const orderMap = new Map(nextTabOrder.map((id, index) => [id, index]))
         return {
@@ -1301,7 +1409,12 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
   },
 
   setTabLabel: (tabId, label) => {
-    set((state) => patchTab(state.unifiedTabsByWorktree, tabId, { label }) ?? {})
+    set((state) => {
+      const found = findTabAndWorktree(state.unifiedTabsByWorktree, tabId)
+      return found?.tab.systemRole === 'workspace-maestro'
+        ? {}
+        : (patchTab(state.unifiedTabsByWorktree, tabId, { label }) ?? {})
+    })
   },
 
   setTabViewMode: (tabId, mode) => {
@@ -1344,19 +1457,30 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
   },
 
   setRenamingTabId: (tabId) => {
-    set({ renamingTabId: tabId })
+    set({
+      renamingTabId: tabId && get().getTab(tabId)?.systemRole === 'workspace-maestro' ? null : tabId
+    })
   },
 
   setTabCustomLabel: (tabId, label, opts) => {
-    const exists = get().getTab(tabId) !== null
+    const tab = get().getTab(tabId)
+    const exists = tab !== null && tab.systemRole !== 'workspace-maestro'
+    if (!exists || tab.customLabel === label) {
+      return
+    }
     set((state) => patchTab(state.unifiedTabsByWorktree, tabId, { customLabel: label }) ?? {})
+    scheduleRuntimeGraphSync()
     if (exists && opts?.recordInteraction !== false) {
       get().recordFeatureInteraction?.('terminal-tabs')
     }
   },
 
   setUnifiedTabColor: (tabId, color) => {
-    const exists = get().getTab(tabId) !== null
+    const tab = get().getTab(tabId)
+    const exists = tab !== null && tab.systemRole !== 'workspace-maestro'
+    if (!exists) {
+      return
+    }
     set((state) => patchTab(state.unifiedTabsByWorktree, tabId, { color }) ?? {})
     if (exists) {
       get().recordFeatureInteraction?.('terminal-tabs')
@@ -1371,6 +1495,9 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
         return {}
       }
       const { tab, worktreeId } = found
+      if (tab.systemRole === 'workspace-maestro') {
+        return {}
+      }
       const tabs = (state.unifiedTabsByWorktree[worktreeId] ?? []).map((candidate) =>
         candidate.id === tabId ? { ...candidate, isPinned: true, isPreview: false } : candidate
       )
@@ -1402,7 +1529,11 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
   },
 
   unpinTab: (tabId) => {
-    const exists = get().getTab(tabId) !== null
+    const existingTab = get().getTab(tabId)
+    const exists = existingTab !== null && existingTab.systemRole !== 'workspace-maestro'
+    if (!exists) {
+      return
+    }
     set((state) => {
       const found = findTabAndWorktree(state.unifiedTabsByWorktree, tabId)
       if (!found) {
@@ -1702,6 +1833,9 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
         return {}
       }
       const { tab, worktreeId } = foundTab
+      if (tab.systemRole === 'workspace-maestro' && !opts?.allowSystemTransfer) {
+        return {}
+      }
       if (tab.groupId === targetGroupId) {
         return {}
       }
@@ -1716,8 +1850,18 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
       const sourceOrder = dedupeTabOrder(dedupedSourceGroupOrder.filter((id) => id !== tabId))
       // Why: defensive dedupe so target order can't grow a duplicate id (stale state); see dropUnifiedTab for the same guard.
       const targetOrder = dedupeTabOrder(targetGroup.tabOrder.filter((id) => id !== tabId))
+      const minimumTargetIndex =
+        tab.systemRole === 'workspace-maestro'
+          ? 0
+          : targetOrder.some((id) =>
+                (state.unifiedTabsByWorktree[worktreeId] ?? []).some(
+                  (candidate) => candidate.id === id && candidate.systemRole === 'workspace-maestro'
+                )
+              )
+            ? 1
+            : 0
       const targetIndex = Math.max(
-        0,
+        minimumTargetIndex,
         Math.min(opts?.index ?? targetOrder.length, targetOrder.length)
       )
       targetOrder.splice(targetIndex, 0, tabId)
@@ -1816,6 +1960,9 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
       }
 
       const { tab, worktreeId } = foundTab
+      if (tab.systemRole === 'workspace-maestro') {
+        return {}
+      }
       const sourceGroup = findGroupForTab(state.groupsByWorktree, worktreeId, tab.groupId)
       const targetGroup = foundTarget.group
       if (!sourceGroup) {
@@ -1885,8 +2032,15 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
         nextGroups.find((group) => group.id === resolvedTargetGroupId) ?? targetGroup
       // Why: target order may already hold this tab id (racey write / same-group split); dedupe first or React hits a duplicate key.
       const targetOrder = dedupeTabOrder(destinationGroup.tabOrder.filter((id) => id !== tabId))
+      const minimumTargetIndex = targetOrder.some((id) =>
+        (state.unifiedTabsByWorktree[worktreeId] ?? []).some(
+          (candidate) => candidate.id === id && candidate.systemRole === 'workspace-maestro'
+        )
+      )
+        ? 1
+        : 0
       const targetIndex = Math.max(
-        0,
+        minimumTargetIndex,
         Math.min(target.index ?? targetOrder.length, targetOrder.length)
       )
       targetOrder.splice(targetIndex, 0, tabId)
@@ -1985,6 +2139,9 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
       return null
     }
     const { tab, worktreeId } = foundTab
+    if (tab.systemRole === 'workspace-maestro') {
+      return null
+    }
     return get().createUnifiedTab(worktreeId, tab.contentType, {
       entityId: init?.entityId ?? tab.entityId,
       executionHostId: tab.executionHostId,
@@ -1994,6 +2151,8 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
       customLabel: init?.customLabel ?? tab.customLabel,
       color: init?.color ?? tab.color,
       isPinned: init?.isPinned ?? tab.isPinned,
+      maestroExecutionHostId: init?.maestroExecutionHostId ?? tab.maestroExecutionHostId,
+      maestroWorkspaceKey: init?.maestroWorkspaceKey ?? tab.maestroWorkspaceKey,
       id: init?.id,
       targetGroupId
     })
@@ -2020,7 +2179,11 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
       if (!item) {
         continue
       }
-      get().moveUnifiedTabToGroup(item.id, targetGroupId, { recordInteraction: false })
+      get().moveUnifiedTabToGroup(item.id, targetGroupId, {
+        index: item.systemRole === 'workspace-maestro' ? 0 : undefined,
+        recordInteraction: false,
+        allowSystemTransfer: item.systemRole === 'workspace-maestro'
+      })
     }
     get().closeEmptyGroup(worktreeId, groupId)
     get().recordFeatureInteraction?.('terminal-panes')
@@ -2079,7 +2242,16 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
       validWorktreeIds.add(folderWorkspaceKey(workspace.id))
     }
     addAdditionalValidWorkspaceKeys(validWorktreeIds, options)
-    const hydrated = buildHydratedTabState(session, validWorktreeIds)
+    const maestroWorkspaceIds = new Set(validWorktreeIds)
+    maestroWorkspaceIds.delete(FLOATING_TERMINAL_WORKTREE_ID)
+    const hydrated = normalizeWorkspaceMaestroTabs(
+      buildHydratedTabState(session, validWorktreeIds),
+      maestroWorkspaceIds,
+      {
+        key: session.activeWorkspaceKey ?? null,
+        executionHostId: session.activeWorkspaceExecutionHostId ?? null
+      }
+    )
     if (!options?.replaceWorkspaceKeys) {
       set(hydrated)
       return

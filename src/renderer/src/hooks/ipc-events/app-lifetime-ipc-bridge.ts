@@ -12,6 +12,7 @@ import { createDirectSshBridgeRuntime } from './direct-ssh-bridge-runtime'
 import { registerDirectSshStateIpcBridge } from './direct-ssh-state-ipc-bridge'
 import { registerMobileAndTerminalCloseIpcBridge } from './mobile-terminal-close-ipc-bridge'
 import { registerMobileDriverIpcBridge } from './mobile-driver-ipc-bridge'
+import { registerMaestroWorkspaceIpcBridge } from './maestro-workspace-ipc-bridge'
 import { registerProjectCatalogIpcBridge } from './project-catalog-ipc-bridge'
 import { registerRateLimitIpcBridge } from './rate-limit-ipc-bridge'
 import { registerRemoteWorkspaceIpcBridge } from './remote-workspace-ipc-bridge'
@@ -92,6 +93,7 @@ export function installAppLifetimeIpcEvents(
   registerTerminalUiRoutingIpcBridge(unsubs)
   registerSessionTabIpcBridge(unsubs)
   registerMobileAndTerminalCloseIpcBridge(unsubs, backgroundWakeDispatcher.request)
+  registerMaestroWorkspaceIpcBridge(unsubs)
   registerUpdaterStatusIpcBridge(unsubs)
   registerBrowserStateIpcBridge(unsubs, isRuntimeEnvironmentActive)
   registerContentCreationIpcBridge(unsubs, isRuntimeEnvironmentActive)

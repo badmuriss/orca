@@ -343,7 +343,12 @@
             "36761d9604": "Unknown keybinding action \"{{value0}}\" was ignored.",
             "d2e43e426a": "{{value0}} must be an object.",
             "fb290366b2": "Unavailable on web.",
-            "76122208ca": "Shortcut for \"{{value0}}\" was ignored: {{value1}}"
+            "76122208ca": "Shortcut for \"{{value0}}\" was ignored: {{value1}}",
+            "test": {
+              "harness": {
+                "225db77b97": "WebSocket"
+              }
+            }
           }
         },
         "runtime": {
@@ -376,7 +381,14 @@
           "f963485d37": "Row not found",
           "a967f23983": "Project view not loaded",
           "87020f6605": "Row has no owner/repo/number — cannot patch underlying item",
-          "d49ef4b944": "Failed to save issue-source preference"
+          "d49ef4b944": "Failed to save issue-source preference",
+          "slice": {
+            "test": {
+              "harness": {
+                "28fd2d1802": "Test PR"
+              }
+            }
+          }
         },
         "sparse": {
           "presets": {
@@ -451,7 +463,14 @@
           },
           "createdWithoutParentNesting": "Created without nesting under \"{{value0}}\"",
           "createdWithoutParentNestingUnnamed": "Created without nesting under the selected parent",
-          "createdWithoutParentNestingDetail": "The parent workspace was no longer available. You can set it from the workspace menu."
+          "createdWithoutParentNestingDetail": "The parent workspace was no longer available. You can set it from the workspace menu.",
+          "slice": {
+            "test": {
+              "fixtures": {
+                "e851268bd6": "Terminal"
+              }
+            }
+          }
         },
         "repos": {
           "2975400634": "Update Orca server to open non-Git folders on this runtime.",
@@ -570,6 +589,15 @@
               "15cbedc3e3": "Install the Orca CLI before running agent skill setup.",
               "windowsPathUnknown": "Orca could not check your Windows user PATH",
               "refreshCliRegistration": "Refresh CLI registration status and try again."
+            }
+          }
+        },
+        "background": {
+          "session": {
+            "test": {
+              "state": {
+                "d9fa6e0979": "Terminal 1"
+              }
             }
           }
         }
@@ -933,6 +961,16 @@
         "preview": {
           "pairedOutsideWorktree": "Files outside the workspace can't be previewed on a paired server yet."
         }
+      },
+      "cmd": {
+        "j": {
+          "evaluation": {
+            "fixture": {
+              "699e9ef186": "Rank palette results by evidence",
+              "6347cd6e36": "Reconnect drops after host sleep"
+            }
+          }
+        }
       }
     },
     "hooks": {
@@ -1096,6 +1134,15 @@
         "events": {
           "browserStateIpcBridge": {
             "docPreviewLinkFailed": "Could not open this link in Orca Browser."
+          },
+          "terminal": {
+            "create": {
+              "test": {
+                "harness": {
+                  "94ec7b52f7": "The workspace is not connected to a remote Orca host."
+                }
+              }
+            }
           }
         }
       }
@@ -3221,6 +3268,19 @@
           "TerminalQuickCommandsSubmenu": {
             "3ccc7981bb": "Host unavailable",
             "54f29b7c0d": "Loading host…"
+          },
+          "remote": {
+            "runtime": {
+              "pty": {
+                "transport": {
+                  "test": {
+                    "harness": {
+                      "34e5ecd501": "Terminal"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -3427,6 +3487,13 @@
                   "8a580f88cf": "iphone",
                   "7ecdc5ef08": "ipad",
                   "14965cc123": "mobile"
+                }
+              }
+            },
+            "bar": {
+              "item": {
+                "surface": {
+                  "7c7f7a31c1": "Close {{value0}}"
                 }
               }
             }
@@ -5781,6 +5848,11 @@
                 "a128d7006b": "{{value0}} {{value1}} child {{value2}}",
                 "289a1d2ca7": "Expand {{value0}}. {{value1}}",
                 "0c1debfe84": "Collapse {{value0}}"
+              }
+            },
+            "meta": {
+              "row": {
+                "5c970dfb3b": "sidebar"
               }
             }
           },
@@ -8931,7 +9003,12 @@
             "d6c0a9e2f4": "grok",
             "c5b9f8d1e3": "xai",
             "usagePercentageDisplayTitle": "Usage percentages",
-            "usagePercentageDisplayDescription": "Choose whether provider limits show the percentage used or remaining."
+            "usagePercentageDisplayDescription": "Choose whether provider limits show the percentage used or remaining.",
+            "3a0e3a9fdc": "Idioma",
+            "5f4779d525": "言語",
+            "0b03f507c2": "언어",
+            "ab96f8a4b9": "語言",
+            "b6035a3def": "语言"
           }
         },
         "auto": {
@@ -10239,6 +10316,22 @@
               "7c7056940a": "shell",
               "713c4a2f92": "Choose the default shell for new terminal panes on Windows.",
               "13715f9d23": "Default Shell"
+            }
+          },
+          "advanced": {
+            "platform": {
+              "search": {
+                "7d383cc610": "ghostty",
+                "77faf8be39": "Ghostty"
+              }
+            }
+          },
+          "pane": {
+            "appearance": {
+              "search": {
+                "1f4decdd74": "ghostty",
+                "e0cc1b7b47": "Ghostty"
+              }
             }
           }
         },
@@ -13290,6 +13383,363 @@
           }
         }
       },
+      "maestro": {
+        "delegation": {
+          "title": "Delegate work",
+          "description": "Create a coordinator-owned intent for this Maestro workspace.",
+          "statusDescription": "Intent status remains visible until the coordinator reports an outcome.",
+          "pending": "Pending coordinator action",
+          "failed": "Launch failed",
+          "unknown": "Outcome unknown",
+          "permissionReason": "Permission mode is owned by Orca settings and cannot be changed by a Canvas request."
+        },
+        "canvas": {
+          "createAtPointer": "Create at pointer",
+          "newNote": "New Markdown note",
+          "delegate": "Delegate work",
+          "linkSelected": "Link selected nodes",
+          "escapeCloses": "Escape closes this menu"
+        },
+        "navigator": {
+          "title": "Maestro",
+          "open": "Open Maestro navigator",
+          "close": "Close navigator",
+          "description": "Canvas summaries stay isolated by host and workspace.",
+          "search": "Search Canvases",
+          "recent": "Recent",
+          "count": "{{value0}} Canvases",
+          "navigate": "to navigate",
+          "loading": "Loading Canvas summaries…",
+          "discovering": "Discovering hosts…",
+          "empty": "No Canvases yet",
+          "emptyDetail": "Open Maestro for this workspace to create its first isolated Canvas.",
+          "createCurrent": "Open Canvas here",
+          "noMatches": "No matching Canvases",
+          "noMatchesDetail": "Clear the search or recent filter to see other workspaces.",
+          "unavailable": "Unavailable",
+          "unknown": "Progress unavailable",
+          "noRun": "No active run",
+          "tasks": "{{value0}} tasks",
+          "cleanup": "{{value0}} cleanup",
+          "offline": "Offline",
+          "offlineDetail": "Saved Canvases stay unavailable until this host reconnects."
+        },
+        "empty": {
+          "detail": "Start a Harness run in this workspace to use Maestro.",
+          "title": "No Canvas run"
+        },
+        "loading": {
+          "detail": "Connecting to this workspace.",
+          "title": "Loading Canvas"
+        },
+        "tab": {
+          "canvas": "Canvas",
+          "title": "Maestro"
+        },
+        "unavailable": {
+          "detail": "This runtime does not support Maestro yet.",
+          "title": "Canvas unavailable"
+        },
+        "MaestroAgentCard": {
+          "b055fc74ef": "provider unavailable",
+          "507110281e": "terminal"
+        },
+        "MaestroBrowserSurfaceCard": {
+          "2ba6712735": "Capture unavailable",
+          "110bc89855": "Loading exact capture…",
+          "dafd169e10": "Exact Browser evidence for {{value0}}"
+        },
+        "MaestroBrowserSurfaceInspector": {
+          "342e3db0e5": "Focus Browser",
+          "aef68f2fad": "Capture provenance",
+          "a261236b8b": "Preview unavailable. Orca has not observed a readable native capture.",
+          "7579e0f758": "Loading the exact native page capture…",
+          "d9eb86791b": "Immutable Browser capture for {{value0}}, {{value1}}",
+          "cebbb01aba": "Close inspector",
+          "217bcb6b08": "Selected browser surface inspector"
+        },
+        "MaestroCanvas": {
+          "0b14203c57": "Maestro graph",
+          "db4f814789": "Maestro Canvas",
+          "dfb4b73506": "New context note"
+        },
+        "MaestroCanvasContextMenu": {
+          "39dbcc63a2": "Close Canvas actions",
+          "c7031493af": "Canvas actions"
+        },
+        "MaestroCanvasEmptyState": {
+          "f93d8dff2c": "Right click to create",
+          "4b44eb07fc": "Right-click the board to write a note, delegate work, or link two nodes. Drag to pan, scroll to zoom.",
+          "3fd1b69d1a": "No graph nodes are available for this run."
+        },
+        "MaestroCanvasScene": {
+          "8d2e9babc2": "Link target {{value0}}",
+          "1bc8e47d6d": "Link source {{value0}}"
+        },
+        "MaestroCanvasToolbar": {
+          "3a69c6faea": "Link",
+          "da1fe029ea": "Redo Canvas change",
+          "7aa3ad1f39": "Undo Canvas change",
+          "5a4c153d12": "Reset canvas",
+          "4c8ba1a671": "Fit",
+          "c186efc73f": "Fit graph to view",
+          "0af1d86c6d": "Zoom in",
+          "5a41848f1b": "Zoom out",
+          "c693b89965": "Search graph"
+        },
+        "MaestroDelegationDialog": {
+          "b5b77b323f": "Request delegation",
+          "147af37bf7": "Recording…",
+          "f3765f5ffb": "Cancel",
+          "ca0ee0fa44": "Recording intent…",
+          "b6eaaff3fd": "{{value0}} context",
+          "f2090c17ef": "empty Canvas point",
+          "1108a01d05": "Context:",
+          "269b350c81": "Choose placement",
+          "a92f91ea07": "Placement",
+          "7d6e846aeb": "Permission mode:",
+          "253920d152": "Catalog default",
+          "0d738f593a": "Effort",
+          "9d99fd1447": "Model",
+          "9cef2ecee3": "No agent selected",
+          "d78ff4efd7": "Choose agent",
+          "1e7527e118": "Agent",
+          "bbfb324e1c": "Exact check command",
+          "46f9a0c89d": "Check",
+          "a66f3758c4": "One bounded path per line",
+          "362db169f3": "Paths",
+          "973416c02d": "No active attempt",
+          "86520d2816": "Active parent attempt",
+          "1549a55fe2": "Choose active task",
+          "02994d9cc5": "Active parent task",
+          "dff88c6b20": "Describe the bounded work",
+          "206b73828c": "Purpose",
+          "d1517e8a1f": "Lane",
+          "b8f0076fd9": "Role",
+          "65c5088c96": "Close",
+          "ee7d77fcca": "Review and retry"
+        },
+        "MaestroInspector": {
+          "86a4c83b9e": "Close details",
+          "ce7c7a38f1": "Selected node details"
+        },
+        "MaestroLinkEditor": {
+          "2f5f703049": "Create link",
+          "0a3b3b984f": "Cancel",
+          "d1bc2aacb0": "Direction",
+          "1fb0a10d14": "Link type",
+          "6f54ae4959": "Type",
+          "50c3db1eb8": "Choose a target handle on the graph.",
+          "26809967ba": "Create typed link",
+          "8118170fef": "Typed link editor"
+        },
+        "MaestroNoteEditor": {
+          "bbb45243b5": "Save",
+          "80de284c29": "Link context",
+          "effcf5f478": "Not linked to execution context",
+          "5ea8b506fd": "Pinned context",
+          "88f76301f2": "Note Markdown",
+          "3c3d3d0ee3": "bytes",
+          "28189ff86e": "Preview",
+          "91a28339b1": "Edit",
+          "df300192fd": "Markdown view",
+          "ecfca8d7c5": "Annotation attention level",
+          "a8567bc727": "Attention level",
+          "2c902d3f85": "Note title",
+          "3292b88350": "Title",
+          "7f8fbea5c4": "Dismiss note editor",
+          "caff65eb90": "Saved",
+          "647a89bdc6": "Unsaved",
+          "1650714d92": "Revision {{value0}} · {{value1}}",
+          "2c2ccad051": "New note · Unsaved",
+          "c588409bdb": "Edit context note",
+          "834ca7c7cb": "Maestro note editor"
+        },
+        "MaestroPortalCard": {
+          "8e22ddb454": "To",
+          "3cab640f4c": "From",
+          "f670154dd7": "Close portal details",
+          "75f8033b6e": "Workspace portal details"
+        },
+        "MaestroResourceSummary": {
+          "14df314a05": "Inspect resources",
+          "09d91661fe": "Maestro resource health",
+          "7cf52666f9": "Browser",
+          "3e2cb0c38d": "Workers",
+          "d0721ab875": "Daemons",
+          "4a4811e97a": "Memory",
+          "34bb881d47": "Resources normal",
+          "27e7fddd87": "Unverifiable",
+          "c0fef126d7": "Resource pressure"
+        },
+        "MaestroRunProgressCard": {
+          "009bdbeb88": "Material findings",
+          "80618689c6": "Blockers",
+          "73465740fa": "Next",
+          "91fed35a6b": "Now",
+          "12ccc97e23": "Run progress",
+          "227ced42eb": "Run {{value0}}: outcome_unknown",
+          "9b8a4ac64d": "Harness run progress is unavailable for this peer revision.",
+          "5f0a1c73b2": "Run {{value0}}: {{value1}}"
+        },
+        "MaestroRunProgressSections": {
+          "6d3c6821de": "Durations are diagnostic, not a score.",
+          "61a0381a43": "Tokens/cache",
+          "7b11de96b6": "Carry-forward",
+          "1daad2527a": "Blocking findings",
+          "1cc17146bb": "Done",
+          "cc260e8bf2": "Attempts",
+          "966711c7fa": "Start failures",
+          "0fea6f352a": "Audit",
+          "d33a9d44cc": "Worker wait",
+          "c7814962cc": "Check",
+          "4746760469": "Implementation",
+          "99f4a74105": "Dispatches",
+          "f62113aebd": "Mode",
+          "23648fe872": "Coordination",
+          "a8684d065b": "Cleanup",
+          "4e2a49a36b": "Run progress {{value0}}%{{value1}}",
+          "866b7f329f": "Pending",
+          "c9930a1fc2": "Failed",
+          "ad65ccc061": "Blocked",
+          "48c2389c39": "Input",
+          "23dda8f5bd": "Running"
+        },
+        "MaestroTerminalInspector": {
+          "7319972f55": "Output is unavailable; Orca has not observed a live terminal.",
+          "5186f6dd27": "The terminal is still tracked here; open its own pane to read the session.",
+          "20e06b842f": "Terminal output could not attach.",
+          "3caf3aed74": "Close inspector",
+          "580c184989": "Selected terminal inspector",
+          "97c9366d3b": "Handoff and release",
+          "21bfe95a10": "Release terminal",
+          "d1944a3f67": "Retain"
+        },
+        "maestro": {
+          "annotation": {
+            "tone": {
+              "b4f98f49a1": "Blocker",
+              "d052036308": "Warning",
+              "2af310a116": "Decision",
+              "c87ad9fa13": "Post-it",
+              "39ef8efa3f": "Observation"
+            }
+          },
+          "delegation": {
+            "view": {
+              "model": {
+                "dd468641e0": "Outcome unknown",
+                "2337211cb4": "Request rejected",
+                "ab396719e8": "Launch failed",
+                "2e65c5fa58": "Worker accepted",
+                "7306623353": "Pending coordinator action",
+                "52a26b08d4": "Requesting delegation",
+                "1838ae6a74": "Ready to request"
+              }
+            }
+          },
+          "projection": {
+            "view": {
+              "model": {
+                "7069181975": "Run progress"
+              }
+            }
+          },
+          "terminal": {
+            "lifecycle": {
+              "view": {
+                "model": {
+                  "15596ab484": "Retained",
+                  "2503a9a8bf": "The current coordinator stays retained until newer authority is durable.",
+                  "03b72fbebc": "Successor starting",
+                  "145d2970ee": "Orca cannot prove process exit and will not close this terminal.",
+                  "65ef9ee048": "Owner unverifiable",
+                  "5ce44b1249": "Process tree closed. Bounded history remains available.",
+                  "c9f09ac88a": "Released"
+                }
+              }
+            }
+          }
+        },
+        "MaestroWorkspaceBrowserPreview": {
+          "791294b80c": "Exact page capture unavailable",
+          "3e7cc4bc3a": "Capturing the exact existing page…",
+          "0b65d32766": "Exact Browser page {{value0}}"
+        },
+        "MaestroWorkspaceCanvas": {
+          "1605610d90": "Open a Terminal, Browser, or content tab. A Harness Run is optional.",
+          "402ed16622": "No workspace resources yet",
+          "5036690f36": "This action is unavailable from the workspace authority.",
+          "d4bfd06870": "The outcome is unknown. The window remains until authority confirms it.",
+          "d4d2b3932b": "The action was cancelled. The window remains open.",
+          "ac3e558e63": "Authority unavailable. Last-known resources remain unverifiable.",
+          "0299b5276f": "Reset viewport",
+          "4a1926ece1": "Fit resources",
+          "954805c1ea": "Zoom in",
+          "5d7ccb0d24": "Zoom out",
+          "5b9e1f9a97": "Content",
+          "c3974f3c70": "Blocked",
+          "dc516693a9": "Warning",
+          "dea05670e3": "Decision",
+          "3474e6c93b": "Observation",
+          "0629ccb9e6": "Annotation tone",
+          "d3ff26728c": "Annotation text",
+          "f51285f4d4": "Semantic note",
+          "85e5a5ca61": "Browser",
+          "3fbda457b1": "Terminal",
+          "48149211a4": "Retry",
+          "799110bdc4": "The workspace authority is unreachable. No resource was treated as exited.",
+          "1dd7a6a069": "Update the remote Orca host to view this workspace.",
+          "a45c57a610": "Workspace Canvas unavailable",
+          "0e5b5d9947": "Loading workspace resources…"
+        },
+        "MaestroWorkspaceContentPreview": {
+          "caadff40f7": "Loading exact content…",
+          "803e2cdc3b": "Exact content preview is unavailable.",
+          "6ecef4bd09": "· revision"
+        },
+        "MaestroWorkspaceHarnessOverlay": {
+          "cf7d032f54": "· revision",
+          "e829b7596d": "Exact Harness reference",
+          "87f572fa85": "Material findings",
+          "e10ca067b6": "Blocked",
+          "37f99eccba": "Next",
+          "281b32e47d": "Active",
+          "3246b484f4": "Run",
+          "10512fc509": "Harness run {{value0}}",
+          "3c305a1143": "Harness progress is unverifiable."
+        },
+        "MaestroWorkspaceInspector": {
+          "f1039bab27": "No links touch this surface.",
+          "fc7696c2e4": "Hide",
+          "6343e83ffa": "Accept",
+          "f7bb7c2d65": "Suggestion",
+          "12d8dff31e": "Why:",
+          "07e9ddcb64": "Automatic",
+          "18cd6acc47": "Remove",
+          "812d58dbea": "Manual",
+          "45b377c6c0": "Links",
+          "fbd2b43c53": "Exact identity",
+          "ca5941a55e": "Link from this surface",
+          "5e4708a68d": "Rename",
+          "d719df1c6d": "Tab title",
+          "66a9bf23e0": "Actions",
+          "53ee8b1fd9": "Close"
+        },
+        "MaestroWorkspaceWindow": {
+          "14b6f795aa": "Resize {{value0}}",
+          "7f9b469dba": "Close exact tab",
+          "e825702fbf": "Focus exact tab",
+          "5669ee8b7f": "Link to this surface",
+          "37f9e2104d": "Terminal output is {{value0}}.",
+          "1ac69faf69": "Select this window to attach its single interactive preview.",
+          "c6b6befac1": "The exact terminal remains available in its own tab.",
+          "52cce7f247": "Terminal output could not attach."
+        },
+        "MaestroSurface": {
+          "ee4d1c1e27": "Workspace Canvas scope is unavailable."
+        }
+      },
       "mobile": {
         "MobileHero": {
           "a8fb43cf1c": "Continue",
@@ -13587,6 +14037,17 @@
             "109870e023": "Maximize",
             "b5686fee1e": "Restore",
             "1e502f1284": "Open"
+          },
+          "floating": {
+            "terminal": {
+              "panel": {
+                "test": {
+                  "fixtures": {
+                    "00cde6717e": "Mobile Emulator"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -15222,6 +15683,23 @@
                 }
               }
             }
+          },
+          "stream": {
+            "remote": {
+              "remote": {
+                "browser": {
+                  "stream": {
+                    "lifecycle": {
+                      "test": {
+                        "harness": {
+                          "471387f8f8": "Example"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "profile": {
@@ -15792,7 +16270,12 @@
           "beb2c19173": "Unread",
           "5651b216c6": "Unknown project",
           "22b22034bc": "Standalone terminal unavailable in Activity.",
-          "afdc2139a8": "Agent terminal closed. Open a new terminal in this workspace to continue."
+          "afdc2139a8": "Agent terminal closed. Open a new terminal in this workspace to continue.",
+          "test": {
+            "fixtures": {
+              "43a827f6a7": "Claude"
+            }
+          }
         },
         "ActivityTitlebarControls": {
           "f915168c8e": "unread",

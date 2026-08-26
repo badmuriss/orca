@@ -121,7 +121,7 @@ export function useTabGroupTabCloseCommands({
         if (!plan.closesLocally || plan.localCloseReason === 'cleanup') {
           return
         }
-      } else if (item.contentType === 'simulator') {
+      } else if (item.contentType === 'simulator' || item.contentType === 'maestro') {
         closeUnifiedTab(item.id)
       } else {
         const canCloseTab = closeEditorIfUnreferenced(item.entityId, item.id)
@@ -165,7 +165,7 @@ export function useTabGroupTabCloseCommands({
           closeBrowserItem(item, runtimeEnvironmentId)
         } else if (item.contentType === 'terminal') {
           closeTab(item.entityId)
-        } else if (item.contentType === 'simulator') {
+        } else if (item.contentType === 'simulator' || item.contentType === 'maestro') {
           closeUnifiedTab(item.id)
         } else {
           const canCloseTab = closeEditorIfUnreferenced(item.entityId, item.id)

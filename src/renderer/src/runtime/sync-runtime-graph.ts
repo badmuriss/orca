@@ -1743,6 +1743,7 @@ function buildMobileSessionGroupProjection(
       editorIds,
       browserIds,
       new Set(),
+      new Set(),
       true
     )
     if (visibleOrder.length === 0) {
@@ -2038,7 +2039,10 @@ function buildMobileMarkdownTab(
       ? (inputs.openFilesById?.get(file.markdownPreviewSourceFileId) ?? file)
       : file
   const draftVersion = inputs.editorDraftVersionByFileId.get(sourceFile.id)
-  const title = file.relativePath.split(/[\\/]/).pop() || file.relativePath || 'Markdown'
+  const title = resolveUnifiedTabTitle(
+    unifiedTab,
+    file.relativePath.split(/[\\/]/).pop() || file.relativePath || 'Markdown'
+  )
   const unifiedTabId = unifiedTab?.id
 
   return {
@@ -2067,7 +2071,10 @@ function buildMobileFileTab(
   file: AppState['openFiles'][number],
   unifiedTab?: Tab
 ): RuntimeMobileSessionFileTab {
-  const title = file.relativePath.split(/[\\/]/).pop() || file.relativePath || 'File'
+  const title = resolveUnifiedTabTitle(
+    unifiedTab,
+    file.relativePath.split(/[\\/]/).pop() || file.relativePath || 'File'
+  )
   const diffSource = isMobileFileDiffSource(file.diffSource) ? file.diffSource : undefined
   const unifiedTabId = unifiedTab?.id
 
@@ -2138,8 +2145,10 @@ function buildMobileBrowserTab(
 ): RuntimeMobileSessionBrowserTab {
   const pages = inputs.pagesByBrowserWorkspaceId.get(workspace.id) ?? []
   const activePage = pages.find((page) => page.id === workspace.activePageId) ?? pages[0] ?? null
-  const title =
+  const title = resolveUnifiedTabTitle(
+    unifiedTab,
     activePage?.title || workspace.title || activePage?.url || workspace.url || 'Browser'
+  )
   const unifiedTabId = unifiedTab?.id
 
   return {
@@ -2163,6 +2172,10 @@ function buildMobileBrowserTab(
       ? isUnifiedTabActiveInActiveGroup(inputs, unifiedTabId)
       : inputs.activeBrowserWorkspaceId === workspace.id
   }
+}
+
+function resolveUnifiedTabTitle(unifiedTab: Tab | undefined, fallback: string): string {
+  return unifiedTab?.customLabel?.trim() || fallback
 }
 
 function isUnifiedTabActiveInActiveGroup(

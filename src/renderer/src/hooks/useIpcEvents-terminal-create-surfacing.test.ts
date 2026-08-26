@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { makePaneKey } from '../../../shared/stable-pane-id'
 import { setupTerminalCreateSurfacing } from './ipc-events-terminal-create-test-harness'
+import {
+  BACKGROUND_SPLIT_LAYOUT,
+  FOCUSED_SPLIT_LAYOUT,
+  SOURCE_LEAF_LAYOUT
+} from './ipc-events-terminal-create-test-layouts'
 
 describe('useIpcEvents updater integration', () => {
   it('surfaces terminal creates without stealing focus unless requested', async () => {
@@ -241,9 +246,9 @@ describe('useIpcEvents updater integration', () => {
     expect(recordWorktreeVisit).not.toHaveBeenCalled()
     expect(setActiveTabType).not.toHaveBeenCalled()
     expect(setActiveTab).not.toHaveBeenCalled()
-    expect(revealWorktreeInSidebar).toHaveBeenCalledWith('wt-2')
-    expect(focusRuntimeTerminalSurface).toHaveBeenCalledWith('tab-new', undefined)
-    expect(focusTerminalTabSurface).toHaveBeenCalledWith('tab-new', undefined)
+    expect(revealWorktreeInSidebar).not.toHaveBeenCalled()
+    expect(focusRuntimeTerminalSurface).not.toHaveBeenCalled()
+    expect(focusTerminalTabSurface).not.toHaveBeenCalled()
     expect(dispatchEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'orca-background-mount-terminal-worktree',
@@ -538,6 +543,8 @@ describe('useIpcEvents updater integration', () => {
     setActiveTabType.mockClear()
     setActiveTab.mockClear()
     revealWorktreeInSidebar.mockClear()
+    focusRuntimeTerminalSurface.mockClear()
+    focusTerminalTabSurface.mockClear()
     createTerminalListenerRef.current({
       worktreeId: 'wt-2',
       ptyId: 'pty-bg-2',
@@ -554,7 +561,9 @@ describe('useIpcEvents updater integration', () => {
     expect(setActiveWorktree).not.toHaveBeenCalled()
     expect(setActiveTabType).not.toHaveBeenCalled()
     expect(setActiveTab).not.toHaveBeenCalled()
-    expect(revealWorktreeInSidebar).toHaveBeenCalledWith('wt-2')
+    expect(revealWorktreeInSidebar).not.toHaveBeenCalled()
+    expect(focusRuntimeTerminalSurface).not.toHaveBeenCalled()
+    expect(focusTerminalTabSurface).not.toHaveBeenCalled()
 
     createTab.mockClear()
     setActiveView.mockClear()
@@ -719,14 +728,7 @@ describe('useIpcEvents updater integration', () => {
       'wt-2': [{ id: 'tab-existing', ptyId: 'pty-bg', title: 'Terminal 1' }]
     }
     storeState.ptyIdsByTabId = { 'tab-existing': ['pty-bg'] }
-    storeState.terminalLayoutsByTabId = {
-      'tab-existing': {
-        root: { type: 'leaf', leafId: 'leaf-source' },
-        activeLeafId: 'leaf-source',
-        expandedLeafId: null,
-        ptyIdsByLeafId: { 'leaf-source': 'pty-bg' }
-      }
-    }
+    storeState.terminalLayoutsByTabId = { 'tab-existing': SOURCE_LEAF_LAYOUT }
     createTab.mockClear()
     updateTabPtyId.mockClear()
     setTabLayout.mockClear()
@@ -808,39 +810,9 @@ describe('useIpcEvents updater integration', () => {
     })
 
     expect(updateTabPtyId).toHaveBeenCalledWith('tab-existing', 'pty-split-background')
-    expect(setTabLayout).toHaveBeenCalledWith('tab-existing', {
-      root: {
-        type: 'split',
-        direction: 'vertical',
-        first: { type: 'leaf', leafId: 'leaf-source' },
-        second: { type: 'leaf', leafId: 'leaf-split-background' },
-        ratio: 0.5
-      },
-      activeLeafId: 'leaf-source',
-      expandedLeafId: null,
-      ptyIdsByLeafId: {
-        'leaf-source': 'pty-bg',
-        'leaf-split-background': 'pty-split-background'
-      }
-    })
-
-    const splitLayout = {
-      root: {
-        type: 'split',
-        direction: 'vertical',
-        first: { type: 'leaf', leafId: 'leaf-source' },
-        second: { type: 'leaf', leafId: 'leaf-split' },
-        ratio: 0.5
-      },
-      activeLeafId: 'leaf-split',
-      expandedLeafId: null,
-      ptyIdsByLeafId: {
-        'leaf-source': 'pty-bg',
-        'leaf-split': 'pty-split'
-      }
-    }
+    expect(setTabLayout).toHaveBeenCalledWith('tab-existing', BACKGROUND_SPLIT_LAYOUT)
     storeState.ptyIdsByTabId = { 'tab-existing': ['pty-bg', 'pty-split'] }
-    storeState.terminalLayoutsByTabId = { 'tab-existing': splitLayout }
+    storeState.terminalLayoutsByTabId = { 'tab-existing': FOCUSED_SPLIT_LAYOUT }
     updateTabPtyId.mockClear()
     setTabLayout.mockClear()
     createTerminalListenerRef.current({
@@ -851,6 +823,36 @@ describe('useIpcEvents updater integration', () => {
     })
 
     expect(updateTabPtyId).toHaveBeenCalledWith('tab-existing', 'pty-split')
-    expect(setTabLayout).toHaveBeenCalledWith('tab-existing', splitLayout)
+    expect(setTabLayout).toHaveBeenCalledWith('tab-existing', FOCUSED_SPLIT_LAYOUT)
+    if (!requestTerminalCreateListenerRef.current) {
+      throw new Error('Expected request-terminal-create listener to be registered')
+    }
+    createTab.mockClear()
+    setActiveView.mockClear()
+    setActiveWorktree.mockClear()
+    revealWorktreeInSidebar.mockClear()
+    focusTerminalTabSurface.mockClear()
+    replyTerminalCreate.mockClear()
+
+    requestTerminalCreateListenerRef.current({
+      requestId: 'request-background-terminal',
+      worktreeId: 'wt-1',
+      source: 'runtime-session',
+      activate: false
+    })
+
+    expect(createTab).toHaveBeenCalledWith('wt-1', undefined, undefined, {
+      activate: false,
+      recordInteraction: false
+    })
+    expect(replyTerminalCreate).toHaveBeenCalledWith({
+      requestId: 'request-background-terminal',
+      tabId: 'tab-new',
+      title: undefined
+    })
+    expect(setActiveView).not.toHaveBeenCalled()
+    expect(setActiveWorktree).not.toHaveBeenCalled()
+    expect(revealWorktreeInSidebar).not.toHaveBeenCalled()
+    expect(focusTerminalTabSurface).not.toHaveBeenCalled()
   })
 })

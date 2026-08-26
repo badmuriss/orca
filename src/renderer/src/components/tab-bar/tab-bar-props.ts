@@ -40,10 +40,12 @@ export type TabBarProps = {
   activeFileId?: string | null
   activeBrowserTabId?: string | null
   activeSimulatorTabId?: string | null
+  activeMaestroTabId?: string | null
   activeTabType?: WorkspaceVisibleTabType
   onActivateFile?: (fileId: string) => void
   onCloseFile?: (fileId: string) => void
   onActivateBrowserTab?: (tabId: string) => void
+  onActivateMaestro?: (tabId: string) => void
   onCloseBrowserTab?: (tabId: string) => void
   onDuplicateBrowserTab?: (tabId: string) => void
   onCloseAllFiles?: () => void

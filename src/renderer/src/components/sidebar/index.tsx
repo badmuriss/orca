@@ -23,6 +23,7 @@ const WorktreeVisibilityDialog = lazyWithRetry(() => import('./WorktreeVisibilit
 const OrcaYamlTrustDialog = lazyWithRetry(() => import('./OrcaYamlTrustDialog'))
 const ForgetSshWorkspaceDialog = lazyWithRetry(() => import('./ForgetSshWorkspaceDialog'))
 const AgentDashboardSidebarHost = lazyWithRetry(() => import('./AgentDashboardSidebarHost'))
+const MaestroNavigatorSidebarHost = lazyWithRetry(() => import('./MaestroNavigatorSidebarHost'))
 
 const MIN_WIDTH = 220
 const MAX_WIDTH = 500
@@ -206,6 +207,14 @@ function Sidebar({
           />
         </React.Suspense>
       ) : null}
+      <React.Suspense fallback={null}>
+        <MaestroNavigatorSidebarHost
+          workspaceBoardOpen={workspaceBoardOpen}
+          closeWorkspaceBoard={closeWorkspaceBoard}
+          leftSidebarStyle={leftSidebarStyle}
+          statusBarVisible={statusBarVisible}
+        />
+      </React.Suspense>
     </TooltipProvider>
   )
 }

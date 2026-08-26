@@ -48,6 +48,7 @@ import {
   closeTerminalTabsToRight
 } from './terminal-tab-actions'
 import { createNewTerminalTab } from './terminal-tab-create'
+import { createTestStore, makeWorktree, seedStore } from '@/store/slices/store-test-helpers'
 
 describe('createNewTerminalTab', () => {
   beforeEach(() => {
@@ -443,6 +444,7 @@ describe('closeTerminalTab', () => {
       browserTabsByWorktree: {},
       closeTab,
       closeUnifiedTab,
+      activateTab: vi.fn(),
       setActiveTab: vi.fn(),
       setActiveWorktree: vi.fn()
     })
@@ -451,6 +453,45 @@ describe('closeTerminalTab', () => {
 
     expect(closeTab).toHaveBeenCalledWith('terminal-entity-1', { reason: undefined })
     expect(closeUnifiedTab).not.toHaveBeenCalled()
+  })
+
+  it('keeps the Maestro workspace active after closing its last normal tab', () => {
+    const store = createTestStore()
+    seedStore(store, {
+      worktreesByRepo: { repo1: [makeWorktree({ id: 'wt-1', repoId: 'repo1' })] },
+      activeWorktreeId: 'wt-1',
+      activeWorkspaceKey: 'worktree:wt-1',
+      activeWorkspaceExecutionHostId: 'local'
+    })
+    const terminal = store.getState().createTab('wt-1')
+    store.getState().reconcileWorktreeTabModel('wt-1')
+    getStateMock.mockImplementation(() => store.getState())
+
+    closeTerminalTab(terminal.id)
+
+    const state = store.getState()
+    expect(state.activeWorktreeId).toBe('wt-1')
+    expect(state.activeWorkspaceKey).toBe('worktree:wt-1')
+    expect(state.activeWorkspaceExecutionHostId).toBe('local')
+    expect(state.tabsByWorktree['wt-1']).toEqual([])
+    expect(state.unifiedTabsByWorktree['wt-1']).toHaveLength(1)
+    const maestroTab = state.unifiedTabsByWorktree['wt-1'][0]
+    expect(maestroTab.systemRole).toBe('workspace-maestro')
+    expect(state.getActiveTab('wt-1')?.id).toBe(maestroTab.id)
+
+    const created = store.getState().createTab('wt-1')
+    const recreated = store.getState()
+    expect(recreated.activeWorktreeId).toBe('wt-1')
+    expect(recreated.activeWorkspaceKey).toBe('worktree:wt-1')
+    expect(recreated.activeWorkspaceExecutionHostId).toBe('local')
+    expect(recreated.tabsByWorktree['wt-1']).toEqual([created])
+    expect(recreated.unifiedTabsByWorktree['wt-1']).toHaveLength(2)
+    expect(
+      recreated.unifiedTabsByWorktree['wt-1'].filter(
+        (tab) => tab.systemRole === 'workspace-maestro'
+      )
+    ).toHaveLength(1)
+    expect(recreated.getActiveTab('wt-1')?.entityId).toBe(created.id)
   })
 
   it('activates the next unified terminal tab when closing the active unified-only tab', () => {
@@ -575,6 +616,7 @@ describe('closeTerminalTab', () => {
       browserTabsByWorktree: {},
       closeTab: vi.fn(),
       closeUnifiedTab: vi.fn(),
+      activateTab: vi.fn(),
       setActiveTab: vi.fn(),
       setActiveWorktree: vi.fn(),
       requestPinnedTabCloseConfirm: vi.fn(),
