@@ -402,15 +402,7 @@ describe('agent prompt submission runtime', () => {
   it('does not treat an unchanged newer working status as submission evidence', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000)
-    const { runtime, handle, writes } = await createPromptRuntime((runtime, data) => {
-      if (data === '\r') {
-        runtime.onPtyData(
-          'pty-prompt',
-          '\x1b]9999;{"state":"working","agentType":"aider"}\x07',
-          Date.now()
-        )
-      }
-    })
+    const { runtime, handle, writes } = await createPromptRuntime(() => undefined)
     runtime.onPtyData('pty-prompt', '\x1b]0;Codex waiting for permission\x07', Date.now())
     vi.setSystemTime(2_000)
     runtime.onPtyData(
@@ -424,6 +416,77 @@ describe('agent prompt submission runtime', () => {
     await vi.runAllTimersAsync()
 
     await rejected
+    expect(writes.filter((data) => data === '\r')).toHaveLength(1)
+  })
+
+  // Why (#16095): a still-working agent can never produce a `→working` edge, so the old predicate
+  // was unsatisfiable for every follow-up prompt; pane output after Enter is the evidence left.
+  it('accepts pane output after Enter while the agent is already working', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    const { runtime, handle, writes } = await createPromptRuntime((runtime, data) => {
+      if (data === '\r') {
+        runtime.onPtyData('pty-prompt', 'queued for the current turn', Date.now())
+      }
+    })
+    runtime.onPtyData(
+      'pty-prompt',
+      '\x1b]9999;{"state":"working","agentType":"aider"}\x07',
+      Date.now()
+    )
+
+    const submission = runtime.sendTerminalAgentPrompt(handle, 'review this')
+    await vi.runAllTimersAsync()
+
+    await expect(submission).resolves.toMatchObject({ accepted: true })
+    expect(writes.filter((data) => data === '\r')).toHaveLength(1)
+  })
+
+  it('accepts a hook working status with no window and no title coverage', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    let handle = ''
+    let hookState: 'done' | 'working' = 'done'
+    const writes: string[] = []
+    // Why: hook rows reach the runtime through this provider, which has no window and no OSC title —
+    // the same path a headless `orca serve` host and a minimized desktop window take.
+    const runtime = new OrcaRuntimeService(makeStore() as never, undefined, {
+      getAgentStatusSnapshot: () => [
+        {
+          paneKey: 'prompt-pane',
+          terminalHandle: handle,
+          state: hookState,
+          prompt: '',
+          agentType: 'kimi',
+          connectionId: null,
+          receivedAt: Date.now(),
+          stateStartedAt: Date.now()
+        }
+      ]
+    })
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-prompt' }),
+      write: (_ptyId, data) => {
+        writes.push(data)
+        if (data === '\r') {
+          vi.setSystemTime(3_000)
+          hookState = 'working'
+        }
+        return true
+      },
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    handle = (
+      await runtime.createTerminal(`path:${AGENT_PROMPT_TEST_WORKTREE_PATH}`, {
+        launchAgent: 'kimi'
+      })
+    ).handle
+
+    const submission = runtime.sendTerminalAgentPrompt(handle, 'review this')
+    await vi.runAllTimersAsync()
+
+    await expect(submission).resolves.toMatchObject({ accepted: true })
     expect(writes.filter((data) => data === '\r')).toHaveLength(1)
   })
 

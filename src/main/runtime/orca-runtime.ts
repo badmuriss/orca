@@ -104,6 +104,7 @@ import {
 } from '../../shared/agent-prompt-injection'
 import {
   type AgentPromptActivity,
+  resolveAgentPromptEffectTimeoutMs,
   verifyAgentPromptSubmission
 } from './agent-prompt-submission-verification'
 import {
@@ -19836,6 +19837,7 @@ export class OrcaRuntimeService {
     await verifyAgentPromptSubmission({
       baseline,
       readActivity: () => this.getAgentPromptActivity(handle, ptyId),
+      timeoutMs: resolveAgentPromptEffectTimeoutMs(this.getPtyAgent(ptyId)),
       signal: options.signal
     })
     return 1
@@ -19892,8 +19894,17 @@ export class OrcaRuntimeService {
       generation: this.getPtyLifecycleGeneration(ptyId),
       permissionSequence: this.agentPromptPermissionSequenceByPtyId.get(ptyId) ?? 0,
       workingSequence: lifecycle?.workingSequence ?? 0,
+      // Why: hook status is the only turn-start signal agents without title coverage have, and it
+      // reaches here without the window-gated synthetic title frame (#16095).
+      explicitWorkingAt: explicit?.status === 'working' ? explicit.updatedAt : null,
+      outputSequence: this.getPtyOutputSequence(ptyId),
       status
     }
+  }
+
+  private getPtyAgent(ptyId: string): TuiAgent | null {
+    const pty = this.ptysById.get(ptyId)
+    return pty?.launchAgent ?? pty?.foregroundAgent ?? null
   }
 
   private assertAgentPromptPermissionSafe(
