@@ -73,7 +73,7 @@ export function runElectronViteDevSupervisor({ nodePath, electronViteCli, args, 
       }
     })
     nextChild.on('error', handleChildError)
-    nextChild.on('exit', (code, signal) => {
+    nextChild.on('close', (code, signal) => {
       if (forcedKillTimer) {
         clearTimeout(forcedKillTimer)
         forcedKillTimer = null
