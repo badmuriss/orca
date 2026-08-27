@@ -1,13 +1,17 @@
 import { spawn } from 'node:child_process'
 import { inspectLinuxDevGpuOutput } from './linux-dev-gpu-retry.mjs'
 
+const GPU_RESTART_DELAY_MS = 250
+const ATTEMPT_OUTPUT_SETTLE_MS = 50
+const CHILD_TERMINATION_TIMEOUT_MS = 5000
+
 export function runElectronViteDevSupervisor({ nodePath, electronViteCli, args, env }) {
-  let isShuttingDown = false
-  let forcedKillTimer = null
-  let child = null
-  let gpuLaunchFailures = 0
+  let activeAttempt = null
   let gpuFallbackRetryStarted = false
-  let gpuFallbackRetryRequested = false
+  let gpuLaunchFailures = 0
+  let isShuttingDown = false
+  let restartTimer = null
+  let shutdownSignal = null
 
   function signalExitCode(signal) {
     if (signal === 'SIGINT') {
@@ -19,12 +23,12 @@ export function runElectronViteDevSupervisor({ nodePath, electronViteCli, args, 
     return 1
   }
 
-  function terminateChild(signal) {
-    if (!child?.pid) {
+  function signalAttempt(attempt, signal) {
+    if (!attempt.child.pid) {
       return
     }
     if (process.platform === 'win32') {
-      const taskkill = spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], {
+      const taskkill = spawn('taskkill', ['/pid', String(attempt.child.pid), '/t', '/f'], {
         stdio: 'ignore',
         windowsHide: true
       })
@@ -32,7 +36,7 @@ export function runElectronViteDevSupervisor({ nodePath, electronViteCli, args, 
       return
     }
     try {
-      process.kill(-child.pid, signal)
+      process.kill(-attempt.child.pid, signal)
     } catch (error) {
       const code = error && typeof error === 'object' && 'code' in error ? error.code : null
       if (code !== 'ESRCH') {
@@ -41,21 +45,105 @@ export function runElectronViteDevSupervisor({ nodePath, electronViteCli, args, 
     }
   }
 
-  function handleChildError(error) {
-    if (forcedKillTimer) {
-      clearTimeout(forcedKillTimer)
+  function clearAttemptTimers(attempt) {
+    if (attempt.decisionTimer) {
+      clearTimeout(attempt.decisionTimer)
+      attempt.decisionTimer = null
     }
-    console.error(error)
-    process.exit(1)
+    if (attempt.forcedKillTimer) {
+      clearTimeout(attempt.forcedKillTimer)
+      attempt.forcedKillTimer = null
+    }
+  }
+
+  function terminateAttempt(attempt, signal) {
+    if (attempt.terminationStarted) {
+      return
+    }
+    attempt.terminationStarted = true
+    signalAttempt(attempt, signal)
+    attempt.forcedKillTimer = setTimeout(() => {
+      signalAttempt(attempt, 'SIGKILL')
+    }, CHILD_TERMINATION_TIMEOUT_MS)
+  }
+
+  function finishAttempt(attempt) {
+    if (attempt !== activeAttempt) {
+      return
+    }
+    clearAttemptTimers(attempt)
+
+    if (isShuttingDown) {
+      signalAttempt(attempt, 'SIGKILL')
+      activeAttempt = null
+      process.exitCode = signalExitCode(shutdownSignal ?? attempt.signal ?? 'SIGINT')
+      return
+    }
+
+    if (attempt.gpuFallbackRetryRequested && !gpuFallbackRetryStarted) {
+      gpuFallbackRetryStarted = true
+      signalAttempt(attempt, 'SIGKILL')
+      activeAttempt = null
+      env.ORCA_DEV_GPU_FALLBACK = '1'
+      restartTimer = setTimeout(() => {
+        restartTimer = null
+        spawnDevChild()
+      }, GPU_RESTART_DELAY_MS)
+      return
+    }
+
+    activeAttempt = null
+    if (attempt.spawnError) {
+      console.error(attempt.spawnError)
+      process.exitCode = 1
+      return
+    }
+    process.exitCode = attempt.signal ? signalExitCode(attempt.signal) : (attempt.exitCode ?? 1)
+  }
+
+  function scheduleAttemptFinish(attempt) {
+    if (attempt !== activeAttempt || (!attempt.closed && !attempt.spawnError)) {
+      return
+    }
+    if (attempt.decisionTimer) {
+      clearTimeout(attempt.decisionTimer)
+    }
+    attempt.decisionTimer = setTimeout(() => finishAttempt(attempt), ATTEMPT_OUTPUT_SETTLE_MS)
+  }
+
+  function requestGpuFallback(attempt) {
+    if (attempt !== activeAttempt || gpuFallbackRetryStarted || attempt.gpuFallbackRetryRequested) {
+      return
+    }
+    attempt.gpuFallbackRetryRequested = true
+    console.error(
+      '[gpu-fallback] GPU startup is failing; restarting this dev run once with software rendering.'
+    )
+    terminateAttempt(attempt, 'SIGTERM')
   }
 
   function spawnDevChild() {
+    if (isShuttingDown) {
+      return
+    }
     const nextChild = spawn(nodePath, [electronViteCli, ...args], {
       stdio: ['inherit', 'pipe', 'pipe'],
       env,
       detached: process.platform !== 'win32'
     })
-    child = nextChild
+    const attempt = {
+      child: nextChild,
+      closed: false,
+      decisionTimer: null,
+      exitCode: null,
+      forcedKillTimer: null,
+      gpuFallbackRetryRequested: false,
+      signal: null,
+      spawnError: null,
+      terminationStarted: false
+    }
+    activeAttempt = attempt
+
     nextChild.stdout.pipe(process.stdout)
     nextChild.stderr.on('data', (chunk) => {
       process.stderr.write(chunk)
@@ -64,32 +152,19 @@ export function runElectronViteDevSupervisor({ nodePath, electronViteCli, args, 
       }
       const inspection = inspectLinuxDevGpuOutput(chunk.toString(), gpuLaunchFailures)
       gpuLaunchFailures = inspection.failures
-      if (!gpuFallbackRetryRequested && inspection.retry) {
-        gpuFallbackRetryRequested = true
-        console.error(
-          '[gpu-fallback] GPU startup is failing; restarting this dev run once with software rendering.'
-        )
-        terminateChild('SIGTERM')
+      if (inspection.retry) {
+        requestGpuFallback(attempt)
       }
     })
-    nextChild.on('error', handleChildError)
+    nextChild.on('error', (error) => {
+      attempt.spawnError = error
+      scheduleAttemptFinish(attempt)
+    })
     nextChild.on('close', (code, signal) => {
-      if (forcedKillTimer) {
-        clearTimeout(forcedKillTimer)
-        forcedKillTimer = null
-      }
-      if (isShuttingDown) {
-        process.exit(signalExitCode(signal ?? 'SIGINT'))
-        return
-      }
-      if (gpuFallbackRetryRequested && !gpuFallbackRetryStarted) {
-        gpuFallbackRetryStarted = true
-        gpuFallbackRetryRequested = false
-        env.ORCA_DEV_GPU_FALLBACK = '1'
-        setTimeout(spawnDevChild, 250)
-        return
-      }
-      process.exit(signal ? signalExitCode(signal) : (code ?? 1))
+      attempt.closed = true
+      attempt.exitCode = code
+      attempt.signal = signal
+      scheduleAttemptFinish(attempt)
     })
   }
 
@@ -98,8 +173,16 @@ export function runElectronViteDevSupervisor({ nodePath, electronViteCli, args, 
       return
     }
     isShuttingDown = true
-    terminateChild(signal)
-    forcedKillTimer = setTimeout(() => terminateChild('SIGKILL'), 5000)
+    shutdownSignal = signal
+    if (restartTimer) {
+      clearTimeout(restartTimer)
+      restartTimer = null
+    }
+    if (!activeAttempt) {
+      process.exitCode = signalExitCode(signal)
+      return
+    }
+    terminateAttempt(activeAttempt, signal)
   }
 
   process.on('SIGINT', () => beginShutdown('SIGINT'))
