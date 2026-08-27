@@ -31,8 +31,6 @@ const callbacks = {
   onLinkPointerDown: vi.fn(),
   onFocus: vi.fn(),
   onClose: vi.fn(),
-  onMove: vi.fn(),
-  onResize: vi.fn(),
   onMoveCommit: vi.fn(),
   onResizeCommit: vi.fn(),
   onUpdateAnnotationTone: vi.fn()
@@ -129,7 +127,6 @@ describe('MaestroWorkspaceWindow', () => {
     fireEvent.pointerUp(header!, { pointerId: 1, clientX: 40, clientY: 20 })
 
     expect(callbacks.onSelect).toHaveBeenCalledOnce()
-    expect(callbacks.onMove).not.toHaveBeenCalled()
     expect(callbacks.onMoveCommit).not.toHaveBeenCalled()
   })
 
@@ -154,8 +151,40 @@ describe('MaestroWorkspaceWindow', () => {
     fireEvent.pointerMove(header!, { pointerId: 1, clientX: 30, clientY: 40 })
     fireEvent.pointerUp(header!, { pointerId: 1, clientX: 30, clientY: 40 })
 
-    expect(callbacks.onMove).toHaveBeenCalledWith({ x: 40, y: 60 })
+    const windowElement = document.querySelector<HTMLElement>('[data-maestro-workspace-surface]')
+    const preview = document.querySelector<HTMLElement>('[data-maestro-workspace-gesture-preview]')
+    expect(windowElement?.style.transform).toBe('')
+    expect(preview?.style.transform).toBe('translate(40px, 60px)')
     expect(callbacks.onMoveCommit).toHaveBeenCalledWith({ x: 40, y: 60 })
+  })
+
+  it('previews resize on a lightweight outline before committing the window size', () => {
+    render(
+      <TooltipProvider>
+        <MaestroWorkspaceWindow
+          {...callbacks}
+          surfaceKey="terminal-1"
+          surface={terminal()}
+          placement={placement}
+          selected={false}
+          pending={false}
+          linkTarget={false}
+          runtimeTarget={{ kind: 'local' }}
+          worldZoom={0.5}
+        />
+      </TooltipProvider>
+    )
+    const resize = screen.getByRole('button', { name: 'Resize Build' })
+    fireEvent.pointerDown(resize, { pointerId: 1, clientX: 10, clientY: 10 })
+    fireEvent.pointerMove(resize, { pointerId: 1, clientX: 26, clientY: 21 })
+
+    const windowElement = document.querySelector<HTMLElement>('[data-maestro-workspace-surface]')
+    const preview = document.querySelector<HTMLElement>('[data-maestro-workspace-gesture-preview]')
+    fireEvent.pointerUp(resize, { pointerId: 1, clientX: 26, clientY: 21 })
+
+    expect(windowElement?.style.transform).toBe('')
+    expect(preview?.style.transform).toBe('scale(1.1, 1.1)')
+    expect(callbacks.onResizeCommit).toHaveBeenCalledWith({ x: 32, y: 22 })
   })
 
   it('renders the exact existing Browser page through the capture preview', () => {

@@ -49,11 +49,15 @@ type WindowLayerProps = {
   onSelectedKeyChange: (surfaceKey: string | null) => void
   topology: CanvasAgentTopology
   optimisticPlacements: MutableRefObject<Record<string, MaestroWorkspaceWindowPlacement>>
+  automaticallyPlacedSurfaceKeys: MutableRefObject<Set<string>>
   worldStyle: React.CSSProperties
   worldZoom?: number
   viewport: MaestroCanvasViewport
   canvasSize: MaestroCanvasSize
-  onRevealPlacement: (placement: MaestroWorkspaceWindowPlacement) => void
+  onRevealPlacement: (
+    placement: MaestroWorkspaceWindowPlacement,
+    reserveInspector?: boolean
+  ) => void
   onManualLinkCreated: (sourceKey: string, targetKey: string) => void
 }
 
@@ -181,14 +185,20 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
             selected
           })
           previewModesRef.current[surfaceKey] = previewMode
-          const updatePlacement = (
-            update: (current: MaestroWorkspaceWindowPlacement) => MaestroWorkspaceWindowPlacement
-          ): void =>
-            props.setPlacements((current) => {
-              const next = update(current[surfaceKey]!)
-              props.optimisticPlacements.current[surfaceKey] = next
-              return { ...current, [surfaceKey]: next }
+          const commitPlacement = (
+            action: 'move' | 'resize',
+            next: MaestroWorkspaceWindowPlacement
+          ): void => {
+            props.automaticallyPlacedSurfaceKeys.current.delete(surfaceKey)
+            props.optimisticPlacements.current[surfaceKey] = next
+            props.setPlacements((current) => ({ ...current, [surfaceKey]: next }))
+            void mutate({
+              action: 'set-placement',
+              surface_id: surface.id,
+              placement: next,
+              idempotency_key: maestroWorkspaceMutationKey(action, surface.id.unified_tab_id)
             })
+          }
           const key = (action: string, identity = surface.id.unified_tab_id) =>
             maestroWorkspaceMutationKey(action, identity)
           return (
@@ -220,6 +230,7 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
                 props.onSelectedKeyChange(surfaceKey)
                 setInspectorKey(surfaceKey)
                 setEditingKey(surfaceKey)
+                props.onRevealPlacement(placement, true)
               }}
               onLinkPointerDown={(event) => beginLink(surfaceKey, event)}
               onFocus={() =>
@@ -236,25 +247,11 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
                   idempotency_key: key('close')
                 })
               }
-              onMove={(delta) => updatePlacement((current) => moveWorkspaceWindow(current, delta))}
-              onResize={(delta) =>
-                updatePlacement((current) => resizeWorkspaceWindow(current, delta))
-              }
               onMoveCommit={(delta) =>
-                void mutate({
-                  action: 'set-placement',
-                  surface_id: surface.id,
-                  placement: moveWorkspaceWindow(placement, delta),
-                  idempotency_key: key('move')
-                })
+                commitPlacement('move', moveWorkspaceWindow(placement, delta))
               }
               onResizeCommit={(delta) =>
-                void mutate({
-                  action: 'set-placement',
-                  surface_id: surface.id,
-                  placement: resizeWorkspaceWindow(placement, delta),
-                  idempotency_key: key('resize')
-                })
+                commitPlacement('resize', resizeWorkspaceWindow(placement, delta))
               }
               onUpdateAnnotationTone={(tone) =>
                 void mutate({

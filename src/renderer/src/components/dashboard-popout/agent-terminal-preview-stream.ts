@@ -9,9 +9,18 @@ import type {
 import { activateOrcaTerminalUnicodeProvider } from '../../../../shared/terminal-unicode-provider'
 import { syncPreviewTerminalLigatures } from './preview-terminal-ligatures'
 import { replayPreviewConnectionSnapshot } from './preview-terminal-snapshot-replay'
+import type { TerminalPreviewLivePayload } from './agent-terminal-preview-scheduling'
 
-type TerminalPreviewStreamListener = (payload: TerminalPreviewDataPayload) => void
-type TerminalPreviewLivePayload = Extract<TerminalPreviewDataPayload, { type: 'data' }>
+export {
+  connectAgentTerminalPreview,
+  createAgentTerminalPreviewResizeScheduler,
+  createPassiveAgentTerminalLiveQueue,
+  retainAgentTerminalPreviewConnection,
+  scheduleAgentTerminalPreviewFrameTask,
+  type TerminalPreviewLivePayload
+} from './agent-terminal-preview-scheduling'
+
+type TerminalPreviewStreamListener = (payload: TerminalPreviewDataPayload) => void | Promise<void>
 
 const listenersByPtyId = new Map<string, Set<TerminalPreviewStreamListener>>()
 let disposeGlobalListener: (() => void) | null = null
@@ -71,7 +80,6 @@ export function preparePassiveAgentTerminalOutput(
 }
 
 export function createAgentTerminalPreviewWriter(args: {
-  ptyId: string
   getTerminal: () => Terminal | null
   isDisposed: () => boolean
   onParsedWrite: () => void
@@ -79,11 +87,15 @@ export function createAgentTerminalPreviewWriter(args: {
   kittyKeyboardModes: TerminalKittyKeyboardModeTracker
   isReplaying: () => boolean
   replay: (connection: TerminalPreviewConnectResult) => void
+  releasePending: () => void
   writeBarrier: (onDone: () => void) => void
-  writeLive: (payload: TerminalPreviewLivePayload) => void
+  writeLive: (payload: TerminalPreviewLivePayload) => Promise<void>
 } {
   const kittyKeyboardModes = new TerminalKittyKeyboardModeTracker()
-  const pendingLivePayloads: TerminalPreviewLivePayload[] = []
+  const pendingLivePayloads: {
+    payload: TerminalPreviewLivePayload
+    resolve: () => void
+  }[] = []
   let replayDepth = 0
   const write = (chunk: string, onDone?: () => void, live = false): void => {
     if (live) {
@@ -98,21 +110,18 @@ export function createAgentTerminalPreviewWriter(args: {
       onDone?.()
     })
   }
-  const writeLive = (payload: TerminalPreviewLivePayload): void => {
-    if (!args.getTerminal()) {
-      pendingLivePayloads.push(payload)
-      return
-    }
-    write(
-      payload.data,
-      () => {
-        if (!args.isDisposed()) {
-          void window.api.terminalPreview.ack(args.ptyId, payload.bytes)
-        }
-      },
-      true
-    )
-  }
+  const writeLive = (payload: TerminalPreviewLivePayload): Promise<void> =>
+    new Promise<void>((resolve) => {
+      if (args.isDisposed()) {
+        resolve()
+        return
+      }
+      if (!args.getTerminal()) {
+        pendingLivePayloads.push({ payload, resolve })
+        return
+      }
+      write(payload.data, resolve, true)
+    })
   return {
     kittyKeyboardModes,
     isReplaying: () => replayDepth > 0,
@@ -123,8 +132,13 @@ export function createAgentTerminalPreviewWriter(args: {
         kittyKeyboardModes,
         write: (chunk, live) => write(chunk, undefined, live)
       })
-      for (const payload of pendingLivePayloads.splice(0)) {
-        writeLive(payload)
+      for (const pending of pendingLivePayloads.splice(0)) {
+        write(pending.payload.data, pending.resolve, true)
+      }
+    },
+    releasePending: () => {
+      for (const pending of pendingLivePayloads.splice(0)) {
+        pending.resolve()
       }
     },
     writeBarrier: (onDone) => write('', onDone),
@@ -135,10 +149,23 @@ export function createAgentTerminalPreviewWriter(args: {
 function dispatchTerminalPreviewPayload(payload: TerminalPreviewDataPayload): void {
   const listeners = listenersByPtyId.get(payload.ptyId)
   if (!listeners) {
+    if (payload.type === 'data') {
+      void window.api.terminalPreview.ack(payload.ptyId, payload.bytes)
+    }
     return
   }
+  const deliveries: Promise<void>[] = []
   for (const listener of listeners) {
-    listener(payload)
+    try {
+      deliveries.push(Promise.resolve(listener(payload)))
+    } catch {
+      deliveries.push(Promise.resolve())
+    }
+  }
+  if (payload.type === 'data') {
+    void Promise.allSettled(deliveries).then(() =>
+      window.api.terminalPreview.ack(payload.ptyId, payload.bytes)
+    )
   }
 }
 

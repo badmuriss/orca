@@ -113,6 +113,18 @@ describe('workspace Canvas store', () => {
     ).toThrow('reused with another payload')
   })
 
+  it('reconciles a new Browser at a readable Canvas size', () => {
+    reconcileStoredWorkspaceCanvas(database, {
+      scope,
+      expected_revision: 0,
+      idempotency_key: 'reconcile-browser',
+      snapshot: snapshot(1)
+    })
+
+    const placement = readWorkspaceCanvasDocument(database, scope).document.placements[surfaceKey]
+    expect(placement?.size).toEqual({ width: 680, height: 480 })
+  })
+
   it('retains unavailable geometry across restart and ignores older snapshots', () => {
     reconcileStoredWorkspaceCanvas(database, {
       scope,

@@ -5,7 +5,11 @@ import { createElement } from 'react'
 import { act, cleanup, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TerminalPreviewDataPayload } from '../../../../shared/terminal-preview'
-import { subscribeAgentTerminalPreviewStream } from './agent-terminal-preview-stream'
+import {
+  createPassiveAgentTerminalLiveQueue,
+  scheduleAgentTerminalPreviewFrameTask,
+  subscribeAgentTerminalPreviewStream
+} from './agent-terminal-preview-stream'
 
 type PreviewTerminal = {
   options: Record<string, unknown>
@@ -126,8 +130,9 @@ describe('agent terminal preview stream', () => {
 
   afterEach(() => {
     cleanup()
-    vi.clearAllMocks()
     vi.unstubAllGlobals()
+    vi.useRealTimers()
+    vi.clearAllMocks()
   })
 
   it('routes payloads only to listeners for the exact PTY', () => {
@@ -153,7 +158,7 @@ describe('agent terminal preview stream', () => {
     expect(disposeGlobalListener).toHaveBeenCalledOnce()
   })
 
-  it('fans one PTY payload out to every exact listener', () => {
+  it('fans one PTY payload out to every exact listener', async () => {
     const firstListener = vi.fn()
     const secondListener = vi.fn()
     const disposeFirst = subscribeAgentTerminalPreviewStream('pty-1', firstListener)
@@ -163,6 +168,25 @@ describe('agent terminal preview stream', () => {
 
     expect(firstListener).toHaveBeenCalledExactlyOnceWith({ type: 'resync', ptyId: 'pty-1' })
     expect(secondListener).toHaveBeenCalledExactlyOnceWith({ type: 'resync', ptyId: 'pty-1' })
+    disposeFirst()
+    disposeSecond()
+  })
+
+  it('acknowledges one PTY payload once after every exact listener settles', async () => {
+    let releaseFirst!: () => void
+    let releaseSecond!: () => void
+    const firstListener = vi.fn(() => new Promise<void>((resolve) => (releaseFirst = resolve)))
+    const secondListener = vi.fn(() => new Promise<void>((resolve) => (releaseSecond = resolve)))
+    const disposeFirst = subscribeAgentTerminalPreviewStream('pty-1', firstListener)
+    const disposeSecond = subscribeAgentTerminalPreviewStream('pty-1', secondListener)
+
+    emit?.({ type: 'data', ptyId: 'pty-1', data: 'shared', bytes: 6 })
+    releaseFirst()
+    await Promise.resolve()
+    expect(ack).not.toHaveBeenCalled()
+    releaseSecond()
+    await waitFor(() => expect(ack).toHaveBeenCalledExactlyOnceWith('pty-1', 6))
+
     disposeFirst()
     disposeSecond()
   })
@@ -178,6 +202,67 @@ describe('agent terminal preview stream', () => {
     expect(onData).toHaveBeenCalledTimes(2)
     disposeSecond()
     expect(disposeGlobalListener).toHaveBeenCalledTimes(2)
+  })
+
+  it('mounts one passive terminal per animation frame and skips cancelled work', () => {
+    const frames: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.push(callback)
+      return frames.length
+    })
+    const first = vi.fn()
+    const cancelled = vi.fn()
+    const third = vi.fn()
+
+    scheduleAgentTerminalPreviewFrameTask(first)
+    const cancelSecond = scheduleAgentTerminalPreviewFrameTask(cancelled)
+    scheduleAgentTerminalPreviewFrameTask(third)
+    cancelSecond()
+
+    expect(frames).toHaveLength(1)
+    frames.shift()!(0)
+    expect(first).toHaveBeenCalledOnce()
+    expect(cancelled).not.toHaveBeenCalled()
+    expect(third).not.toHaveBeenCalled()
+    expect(frames).toHaveLength(1)
+
+    frames.shift()!(16)
+    expect(cancelled).not.toHaveBeenCalled()
+    expect(third).toHaveBeenCalledOnce()
+    expect(frames).toHaveLength(0)
+  })
+
+  it('flushes every ready passive queue in one animation frame', async () => {
+    vi.useFakeTimers()
+    const frames: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.push(callback)
+      return frames.length
+    })
+    const firstWrite = vi.fn(async () => undefined)
+    const secondWrite = vi.fn(async () => undefined)
+    const first = createPassiveAgentTerminalLiveQueue({
+      ptyId: 'pty-first',
+      intervalMs: 20,
+      isDisposed: () => false,
+      write: firstWrite
+    })
+    const second = createPassiveAgentTerminalLiveQueue({
+      ptyId: 'pty-second',
+      intervalMs: 20,
+      isDisposed: () => false,
+      write: secondWrite
+    })
+
+    const firstDone = first.write({ type: 'data', ptyId: 'pty-first', data: 'one', bytes: 3 })
+    const secondDone = second.write({ type: 'data', ptyId: 'pty-second', data: 'two', bytes: 3 })
+    await vi.advanceTimersByTimeAsync(20)
+
+    expect(frames).toHaveLength(1)
+    frames.shift()!(16)
+    await Promise.all([firstDone, secondDone])
+    expect(firstWrite).toHaveBeenCalledOnce()
+    expect(secondWrite).toHaveBeenCalledOnce()
   })
 
   it('renders live output passively without interactive terminal ownership', async () => {
@@ -207,13 +292,56 @@ describe('agent terminal preview stream', () => {
     act(() => emit?.({ type: 'data', ptyId: 'pty-1', data: 'live', bytes: 4 }))
     expect(terminal.write).toHaveBeenCalledWith('live', expect.any(Function))
     act(() => terminal.writeCallbacks.splice(0).forEach((callback) => callback()))
-    expect(ack).toHaveBeenCalledExactlyOnceWith('pty-1', 4)
+    await waitFor(() => expect(ack).toHaveBeenCalledExactlyOnceWith('pty-1', 4))
     expect(input).not.toHaveBeenCalled()
     expect(fit).not.toHaveBeenCalled()
 
     view.unmount()
     expect(unsubscribe).toHaveBeenCalledExactlyOnceWith('pty-1')
     expect(terminal.dispose).toHaveBeenCalledOnce()
+  })
+
+  it('keeps a shared PTY connection until its final preview releases it', async () => {
+    const first = render(
+      createElement(AgentTerminalPreview, { ptyId: 'pty-shared', mode: 'passive' })
+    )
+    const second = render(
+      createElement(AgentTerminalPreview, { ptyId: 'pty-shared', mode: 'passive' })
+    )
+    await waitFor(() => expect(terminalHarness.instances).toHaveLength(2))
+    expect(connect).toHaveBeenCalledOnce()
+
+    first.unmount()
+    expect(unsubscribe).not.toHaveBeenCalled()
+    second.unmount()
+    expect(unsubscribe).toHaveBeenCalledExactlyOnceWith('pty-shared')
+  })
+
+  it('batches passive Canvas output while acknowledging each exact payload', async () => {
+    render(
+      createElement(AgentTerminalPreview, {
+        ptyId: 'pty-batched',
+        mode: 'passive',
+        liveRefreshIntervalMs: 20
+      })
+    )
+    await waitFor(() => expect(terminalHarness.instances).toHaveLength(1))
+    const terminal = terminalHarness.instances[0]!
+    act(() => terminal.writeCallbacks.splice(0).forEach((callback) => callback()))
+    terminal.write.mockClear()
+
+    act(() => {
+      emit?.({ type: 'data', ptyId: 'pty-batched', data: 'one', bytes: 3 })
+      emit?.({ type: 'data', ptyId: 'pty-batched', data: 'two', bytes: 3 })
+    })
+    expect(terminal.write).not.toHaveBeenCalled()
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 30)))
+    await waitFor(() =>
+      expect(terminal.write).toHaveBeenCalledExactlyOnceWith('onetwo', expect.any(Function))
+    )
+    act(() => terminal.writeCallbacks.splice(0).forEach((callback) => callback()))
+    await waitFor(() => expect(ack).toHaveBeenCalledTimes(2))
+    expect(ack).toHaveBeenCalledWith('pty-batched', 3)
   })
 
   it('fits passive output after snapshots, not live writes, and cancels teardown work', async () => {

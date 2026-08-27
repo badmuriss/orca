@@ -6,7 +6,6 @@ import {
   maestroBoardGridStep,
   panMaestroViewport,
   revealMaestroCanvasBounds,
-  zoomMaestroViewportAtPointer,
   type MaestroCanvasBounds,
   type MaestroCanvasInsets,
   type MaestroCanvasSize,
@@ -15,6 +14,7 @@ import {
 import type { MaestroWorkspaceWindowPlacement } from './maestro-workspace-window-layout'
 import { useMaestroViewportElementStyles } from './useMaestroViewportElementStyles'
 import { useMaestroViewportPersistence } from './useMaestroViewportPersistence'
+import { useMaestroViewportWheel } from './useMaestroViewportWheel'
 
 const DEFAULT_VIEWPORT: MaestroCanvasViewport = { center: { x: 0, y: 0 }, zoom: 1 }
 const VIEWPORT_REVEAL_DURATION_MS = 320
@@ -90,22 +90,32 @@ export function useMaestroWorkspaceViewport(params: {
     }
   }, [])
 
+  const { cancelWheelFrame, onWheel } = useMaestroViewportWheel({
+    viewportRef,
+    size,
+    setViewport,
+    cancelAnimation,
+    viewportStyles,
+    persistence
+  })
   useEffect(() => () => cancelAnimation(false), [cancelAnimation])
 
   const update = useCallback(
     (next: MaestroCanvasViewport): void => {
       cancelAnimation(false)
+      cancelWheelFrame(false)
       viewportRef.current = next
       setViewport(next)
       viewportStyles.apply(next)
       persistence.commit(next)
     },
-    [cancelAnimation, persistence, viewportStyles]
+    [cancelAnimation, cancelWheelFrame, persistence, viewportStyles]
   )
 
   const animateTo = useCallback(
     (next: MaestroCanvasViewport): void => {
       cancelAnimation(false)
+      cancelWheelFrame(false)
       const start = viewportRef.current
       const unchanged =
         start.center.x === next.center.x &&
@@ -142,38 +152,7 @@ export function useMaestroWorkspaceViewport(params: {
       }
       animationFrameRef.current = requestAnimationFrame(frame)
     },
-    [cancelAnimation, persistence, update, viewportStyles]
-  )
-
-  const onWheel = useCallback(
-    (event: React.WheelEvent<HTMLElement>): void => {
-      if (event.target !== event.currentTarget) {
-        return
-      }
-      event.preventDefault()
-      const bounds = event.currentTarget.getBoundingClientRect()
-      const current = viewportRef.current
-      const scrollDelta =
-        Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX
-      const next = event.shiftKey
-        ? {
-            ...current,
-            center: { ...current.center, x: current.center.x + scrollDelta / current.zoom }
-          }
-        : event.ctrlKey || event.metaKey
-          ? {
-              ...current,
-              center: { ...current.center, y: current.center.y + scrollDelta / current.zoom }
-            }
-          : zoomMaestroViewportAtPointer(
-              current,
-              size,
-              { x: event.clientX - bounds.left, y: event.clientY - bounds.top },
-              current.zoom * Math.exp(-scrollDelta * 0.002)
-            )
-      update(next)
-    },
-    [size, update]
+    [cancelAnimation, cancelWheelFrame, persistence, update, viewportStyles]
   )
 
   const onPointerDown = useCallback(
@@ -182,10 +161,11 @@ export function useMaestroWorkspaceViewport(params: {
         return
       }
       cancelAnimation(true)
+      cancelWheelFrame(true)
       pan.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY }
       event.currentTarget.setPointerCapture(event.pointerId)
     },
-    [cancelAnimation]
+    [cancelAnimation, cancelWheelFrame]
   )
   const onPointerMove = useCallback(
     (event: React.PointerEvent<HTMLElement>): void => {

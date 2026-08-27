@@ -23,6 +23,10 @@ function relationEndpoint(
   return `${relation.sourceSurfaceId}\0${relation.targetSurfaceId}`
 }
 
+function unorderedEndpoint(source: string, target: string): string {
+  return source < target ? `${source}\0${target}` : `${target}\0${source}`
+}
+
 function topologyLines(topology: CanvasAgentTopology): LinkLine[] {
   const semanticEndpoints = new Set(
     topology.relations
@@ -51,7 +55,11 @@ function linkLines(
   optimisticManualLinks: readonly OptimisticMaestroManualLink[]
 ): LinkLine[] {
   const topologyLinks = topologyLines(topology)
-  const topologyEndpoints = new Set(topologyLinks.map((link) => `${link.source}\0${link.target}`))
+  const delegatedPairs = new Set(
+    topologyLinks
+      .filter((link) => link.kind === 'delegates')
+      .map((link) => unorderedEndpoint(link.source, link.target))
+  )
   return [
     ...document.manual_links.map((link) => ({
       id: link.id,
@@ -74,7 +82,7 @@ function linkLines(
       .filter(
         (link) =>
           link.link_type !== 'parent-child' ||
-          !topologyEndpoints.has(`${link.source_surface_key}\0${link.target_surface_key}`)
+          !delegatedPairs.has(unorderedEndpoint(link.source_surface_key, link.target_surface_key))
       )
       .map((link) => ({
         id: link.id,
@@ -199,13 +207,21 @@ export const MaestroWorkspaceLinks = memo(function MaestroWorkspaceLinks({
             key={`${link.provenance}:${link.id}`}
             data-link-provenance={link.provenance}
             data-link-kind={link.kind}
+            data-link-source={link.source}
+            data-link-target={link.target}
             data-link-selected={incident ? 'true' : undefined}
           >
             <title>{presentation.label ?? 'Coordinates'}</title>
             <path
               d={geometry.path}
               fill="none"
-              stroke={incident ? 'var(--ring)' : 'var(--muted-foreground)'}
+              stroke={
+                incident
+                  ? 'var(--ring)'
+                  : link.kind === 'delegates'
+                    ? 'color-mix(in srgb, var(--ring) 48%, var(--muted-foreground))'
+                    : 'var(--muted-foreground)'
+              }
               strokeWidth={presentation.width}
               strokeDasharray={presentation.dash}
               opacity={opacity}

@@ -65,16 +65,47 @@ describe('Maestro workspace topology layout', () => {
       preferredPlacement: placement(0, 0, 180, 140)
     })
 
-    const result = layout(
-      [beta, node('coordinator', { isCoordinator: true }), alpha],
-      { coordinator: coordinatorPlacement }
-    )
+    const result = layout([beta, node('coordinator', { isCoordinator: true }), alpha], {
+      coordinator: coordinatorPlacement
+    })
 
     expect(result.placements.coordinator).toBe(coordinatorPlacement)
     expect(result.automaticallyPlacedSurfaceKeys).toEqual(['worker-alpha', 'worker-beta'])
     expect(result.placements['worker-alpha'].position).toEqual({ x: 28, y: 396 })
-    expect(result.placements['worker-beta'].position).toEqual({ x: 272, y: 396 })
+    expect(result.placements['worker-beta'].position).toEqual({ x: 292, y: 396 })
     expect(result.collisionScanExhaustedSurfaceKeys).toEqual([])
+  })
+
+  it('fills a compact two-column child grid as siblings arrive incrementally', () => {
+    const coordinatorPlacement = placement(100, 80, 320, 220, 7)
+    const children = ['one', 'two', 'three', 'four'].map((surfaceKey, index) =>
+      node(surfaceKey, {
+        parentSurfaceKey: 'coordinator',
+        functionLabel: `Function ${index + 1}`,
+        preferredPlacement: placement(0, 0, 220, 140)
+      })
+    )
+    const nodes = [node('coordinator', { isCoordinator: true }), ...children]
+    let existing: Readonly<Record<string, MaestroWorkspaceWindowPlacement>> = {
+      coordinator: coordinatorPlacement
+    }
+
+    for (const child of children) {
+      const result = layout(
+        nodes.filter(
+          (candidate) =>
+            candidate.surfaceKey === 'coordinator' ||
+            children.indexOf(candidate) <= children.indexOf(child)
+        ),
+        existing
+      )
+      existing = { ...existing, [child.surfaceKey]: result.placements[child.surfaceKey] }
+    }
+
+    expect(existing.one.position).toEqual({ x: 8, y: 396 })
+    expect(existing.two.position).toEqual({ x: 292, y: 396 })
+    expect(existing.three.position).toEqual({ x: 8, y: 600 })
+    expect(existing.four.position).toEqual({ x: 292, y: 600 })
   })
 
   it('orders roots coordinator-first and reproduces geometry across input permutations', () => {
@@ -163,8 +194,14 @@ describe('Maestro workspace topology layout', () => {
       southEast: placement(0, 0, 4096, 4096, 4)
     }
 
-    const first = layout([node('new-surface', { preferredPlacement: placement(0, 0, 160, 96) })], blockers)
-    const second = layout([node('new-surface', { preferredPlacement: placement(0, 0, 160, 96) })], blockers)
+    const first = layout(
+      [node('new-surface', { preferredPlacement: placement(0, 0, 160, 96) })],
+      blockers
+    )
+    const second = layout(
+      [node('new-surface', { preferredPlacement: placement(0, 0, 160, 96) })],
+      blockers
+    )
 
     expect(first).toEqual(second)
     expect(first.placements['new-surface'].position).toEqual({ x: -230, y: -38 })

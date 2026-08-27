@@ -18,6 +18,7 @@ import { translate } from '@/i18n/i18n'
 import type { MaestroWorkspacePresencePhase } from './maestro-workspace-presence'
 import type { MaestroWorkspacePreviewMode } from './maestro-workspace-visibility'
 import { MaestroWorkspaceSurfacePreview } from './MaestroWorkspaceSurfacePreview'
+import { maestroTerminalSurfacePaneKey } from './maestro-agent-terminal-bindings'
 
 type MaestroWorkspaceWindowProps = {
   surfaceKey: string
@@ -38,8 +39,6 @@ type MaestroWorkspaceWindowProps = {
   onLinkPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => void
   onFocus: () => void
   onClose: () => void
-  onMove: (delta: { x: number; y: number }) => void
-  onResize: (delta: { x: number; y: number }) => void
   onMoveCommit: (delta: { x: number; y: number }) => void
   onResizeCommit: (delta: { x: number; y: number }) => void
   onUpdateAnnotationTone: (tone: 'decision' | 'warning' | 'blocked' | 'observation') => void
@@ -59,26 +58,37 @@ const SURFACE_ICON = {
 function startPointerGesture(
   event: React.PointerEvent,
   worldZoom: number,
-  onDelta: (delta: { x: number; y: number }) => void,
+  placement: MaestroWorkspaceWindowPlacement,
+  kind: 'move' | 'resize',
   onCommit: (delta: { x: number; y: number }) => void
 ): void {
   event.preventDefault()
   event.stopPropagation()
   const target = event.currentTarget
+  const windowElement = target.closest<HTMLElement>('[data-maestro-workspace-surface]')
+  if (!windowElement) {
+    return
+  }
+  const gesturePreview = windowElement.querySelector<HTMLElement>(
+    '[data-maestro-workspace-gesture-preview]'
+  )
   const origin = { x: event.clientX, y: event.clientY }
   const total = { x: 0, y: 0 }
-  const pending = { x: 0, y: 0 }
   let moveFrame: number | null = null
   target.setPointerCapture(event.pointerId)
-  const flushMove = (): void => {
+  const paintGesture = (): void => {
     moveFrame = null
-    if (pending.x === 0 && pending.y === 0) {
+    if (!gesturePreview) {
       return
     }
-    const delta = { ...pending }
-    pending.x = 0
-    pending.y = 0
-    onDelta(delta)
+    gesturePreview.style.opacity = '1'
+    if (kind === 'move') {
+      gesturePreview.style.transform = `translate(${total.x}px, ${total.y}px)`
+    } else {
+      const width = Math.max(240, placement.size.width + total.x)
+      const height = Math.max(150, placement.size.height + total.y)
+      gesturePreview.style.transform = `scale(${width / placement.size.width}, ${height / placement.size.height})`
+    }
   }
   const move: EventListener = (moveEvent): void => {
     if (!(moveEvent instanceof PointerEvent)) {
@@ -90,10 +100,8 @@ function startPointerGesture(
     }
     total.x += delta.x
     total.y += delta.y
-    pending.x += delta.x
-    pending.y += delta.y
     if (moveFrame === null) {
-      moveFrame = requestAnimationFrame(flushMove)
+      moveFrame = requestAnimationFrame(paintGesture)
     }
     origin.x = moveEvent.clientX
     origin.y = moveEvent.clientY
@@ -105,10 +113,16 @@ function startPointerGesture(
     if (moveFrame !== null) {
       cancelAnimationFrame(moveFrame)
     }
-    flushMove()
+    paintGesture()
     if (total.x !== 0 || total.y !== 0) {
       onCommit(total)
     }
+    requestAnimationFrame(() => {
+      if (gesturePreview) {
+        gesturePreview.style.opacity = ''
+        gesturePreview.style.transform = ''
+      }
+    })
   }
   target.addEventListener('pointermove', move)
   target.addEventListener('pointerup', finish)
@@ -133,8 +147,6 @@ export function MaestroWorkspaceWindow({
   onLinkPointerDown,
   onFocus,
   onClose,
-  onMove,
-  onResize,
   onMoveCommit,
   onResizeCommit,
   onUpdateAnnotationTone,
@@ -179,6 +191,9 @@ export function MaestroWorkspaceWindow({
       data-maestro-preview-mode={previewMode}
       data-maestro-agent-role={agentRole}
       data-maestro-agent-function={normalizedFunction}
+      data-maestro-terminal-pane-key={
+        surface.binding.kind === 'terminal' ? maestroTerminalSurfacePaneKey(surface) : undefined
+      }
       aria-busy={presencePhase === 'entering'}
       tabIndex={0}
       onFocus={(event) => {
@@ -197,7 +212,7 @@ export function MaestroWorkspaceWindow({
           className="flex h-10 shrink-0 cursor-move items-center gap-2 border-b border-border/80 bg-muted/35 px-2.5"
           onPointerDown={(event) => {
             onSelect()
-            startPointerGesture(event, worldZoom, onMove, onMoveCommit)
+            startPointerGesture(event, worldZoom, placement, 'move', onMoveCommit)
           }}
         >
           <span className="flex size-5 shrink-0 items-center justify-center rounded-md border border-border/70 bg-background/70">
@@ -303,6 +318,8 @@ export function MaestroWorkspaceWindow({
             surface={surface}
             runtimeTarget={runtimeTarget}
             previewMode={previewMode}
+            agentFunctionLabel={normalizedFunction}
+            agentRole={agentRole}
             onUpdateAnnotationTone={onUpdateAnnotationTone}
             onUpdateAnnotationContent={onUpdateAnnotationContent}
           />
@@ -341,8 +358,13 @@ export function MaestroWorkspaceWindow({
         )}
         onPointerDown={(event) => {
           onSelect()
-          startPointerGesture(event, worldZoom, onResize, onResizeCommit)
+          startPointerGesture(event, worldZoom, placement, 'resize', onResizeCommit)
         }}
+      />
+      <div
+        className="pointer-events-none absolute inset-0 z-20 origin-top-left rounded-xl border border-ring/70 bg-ring/[0.03] opacity-0 shadow-sm will-change-transform"
+        data-maestro-workspace-gesture-preview
+        aria-hidden
       />
       {presencePhase !== 'present' ? (
         <div className="maestro-workspace-smoke" aria-hidden>

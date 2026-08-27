@@ -15,7 +15,6 @@ import type { MaestroTerminalLease } from '../../../../shared/maestro-terminal-l
 import {
   joinMaestroWorkspaceBrowserReceipts,
   joinMaestroWorkspaceParentChildReceipts,
-  joinMaestroWorkspaceTerminalReceipts,
   latestMaestroWorkspaceReceiptTimestamp,
   type MaestroWorkspaceLinkReceiptEndpoint
 } from './maestro-workspace-link-receipt-join'
@@ -26,21 +25,6 @@ type AutomaticLinkKind = Pick<
   WorkspaceAutomaticLink,
   'link_type' | 'authority_kind' | 'explanation_code'
 >
-
-export type MaestroWorkspaceFormalTerminalRelation = {
-  sourceSurfaceId: string
-  targetSurfaceId: string
-  kind: 'delegates' | 'depends-on' | 'reports-to' | 'context-for'
-  provenance: 'orca-orchestration'
-  runId: string
-  authorityId: string
-  authorityRevision: number
-  observedAt: string
-  sourceFunctionLabel?: string
-  targetFunctionLabel?: string
-  sourceRole: MaestroTerminalLease['role']
-  targetRole: MaestroTerminalLease['role']
-}
 
 const AUTOMATIC_EDGE_KINDS: Readonly<Partial<Record<string, AutomaticLinkKind>>> = {
   executes: {
@@ -58,15 +42,6 @@ const AUTOMATIC_EDGE_KINDS: Readonly<Partial<Record<string, AutomaticLinkKind>>>
     authority_kind: 'parent-child-receipt',
     explanation_code: 'parent-child'
   }
-}
-
-const FORMAL_TERMINAL_EDGE_KINDS: Readonly<
-  Partial<Record<string, MaestroWorkspaceFormalTerminalRelation['kind']>>
-> = {
-  spawned_by: 'delegates',
-  depends_on: 'depends-on',
-  reports_to: 'reports-to',
-  context_for: 'context-for'
 }
 
 function terminalReceiptIdentity(
@@ -194,97 +169,6 @@ function bindGraphNodesToSurfaces(params: {
       endpoints.size === 1 ? [[nodeId, [...endpoints.values()][0]!] as const] : []
     )
   )
-}
-
-function functionLabel(endpoint: MaestroWorkspaceLinkReceiptEndpoint): string | undefined {
-  const label = endpoint.node.title.trim()
-  return label || undefined
-}
-
-function formalTerminalRelations(
-  projection: NonNullable<ReturnType<typeof getMaestroProjection>>,
-  nodeBindings: ReadonlyMap<string, MaestroWorkspaceLinkReceiptEndpoint>
-): MaestroWorkspaceFormalTerminalRelation[] {
-  return projection.edges.flatMap((edge) => {
-    const kind = FORMAL_TERMINAL_EDGE_KINDS[edge.type]
-    const edgeSource = nodeBindings.get(edge.source_id)
-    const edgeTarget = nodeBindings.get(edge.target_id)
-    if (!kind || !edgeSource || !edgeTarget || edgeSource.surfaceKey === edgeTarget.surfaceKey) {
-      return []
-    }
-
-    if (edge.type === 'spawned_by') {
-      const receipts = joinMaestroWorkspaceParentChildReceipts(
-        edgeSource,
-        edgeTarget,
-        projection.runId
-      )
-      if (!receipts) {
-        return []
-      }
-      return [
-        {
-          sourceSurfaceId: edgeTarget.surfaceKey,
-          targetSurfaceId: edgeSource.surfaceKey,
-          kind,
-          provenance: 'orca-orchestration' as const,
-          runId: projection.runId,
-          authorityId: `${projection.runId}:${edge.id}`,
-          authorityRevision: projection.revision,
-          observedAt: latestMaestroWorkspaceReceiptTimestamp([
-            receipts.parent.updatedAt,
-            receipts.child.updatedAt
-          ]),
-          sourceFunctionLabel: functionLabel(edgeTarget),
-          targetFunctionLabel: functionLabel(edgeSource),
-          sourceRole: receipts.parent.role,
-          targetRole: receipts.child.role
-        }
-      ]
-    }
-
-    const receipts = joinMaestroWorkspaceTerminalReceipts(
-      edgeSource,
-      edgeTarget,
-      projection.runId
-    )
-    if (!receipts) {
-      return []
-    }
-    return [
-      {
-        sourceSurfaceId: edgeSource.surfaceKey,
-        targetSurfaceId: edgeTarget.surfaceKey,
-        kind,
-        provenance: 'orca-orchestration' as const,
-        runId: projection.runId,
-        authorityId: `${projection.runId}:${edge.id}`,
-        authorityRevision: projection.revision,
-        observedAt: latestMaestroWorkspaceReceiptTimestamp([
-          receipts.source.updatedAt,
-          receipts.target.updatedAt
-        ]),
-        sourceFunctionLabel: functionLabel(edgeSource),
-        targetFunctionLabel: functionLabel(edgeTarget),
-        sourceRole: receipts.source.role,
-        targetRole: receipts.target.role
-      }
-    ]
-  })
-}
-
-export function projectMaestroWorkspaceFormalTerminalRelations(params: {
-  database: OrchestrationDb
-  scope: RuntimeMaestroWorkspaceCanvasScope
-  session: RuntimeMobileSessionTabsResult
-  surfaces: Record<string, WorkspaceSurface>
-}): MaestroWorkspaceFormalTerminalRelation[] {
-  const projection = getMaestroProjection.call(params.database, params.scope)
-  if (!projection) {
-    return []
-  }
-  const nodeBindings = bindGraphNodesToSurfaces({ ...params, projection })
-  return formalTerminalRelations(projection, nodeBindings)
 }
 
 function automaticLinks(params: {

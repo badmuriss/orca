@@ -36,11 +36,18 @@ export function useMaestroWorkspaceProjection(
         if (!active) {
           return
         }
-        setState({ identity, projection })
+        setState((current) =>
+          current.identity === identity &&
+          ((current.projection === null && projection === null) ||
+            (current.projection !== null &&
+              projection !== null &&
+              current.projection.runId === projection.runId &&
+              current.projection.revision === projection.revision))
+            ? current
+            : { identity, projection }
+        )
       } catch {
-        if (active) {
-          setState({ identity, projection: null })
-        }
+        // Keep the last confirmed projection for this scope through transient poll failures.
       } finally {
         if (active) {
           timer = setTimeout(() => void poll(), 1_500)

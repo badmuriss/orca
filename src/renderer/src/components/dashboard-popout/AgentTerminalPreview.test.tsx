@@ -232,7 +232,7 @@ describe('AgentTerminalPreview', () => {
     expect(input).toHaveBeenCalledWith('pty-1', 'k')
 
     act(() => terminal.writeCallbacks.shift()?.())
-    expect(ack).toHaveBeenCalledWith('pty-1', 4)
+    await waitFor(() => expect(ack).toHaveBeenCalledWith('pty-1', 4))
   })
 
   it('installs the macOS IME native-text forwarder and lets its claims bypass chord handling', async () => {

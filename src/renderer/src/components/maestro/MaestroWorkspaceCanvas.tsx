@@ -27,6 +27,7 @@ import { useMaestroWorkspaceProjection } from './useMaestroWorkspaceRunProgress'
 import { useMaestroWorkspaceAgentTopology } from './useMaestroWorkspaceAgentTopology'
 import { buildMaestroWorkspaceTopologyLayoutNodes } from './maestro-workspace-topology-layout-input'
 import {
+  MAESTRO_INSPECTOR_REVEAL_INSETS,
   MAESTRO_REVEAL_INSETS,
   useMaestroWorkspaceAutomaticPlacement
 } from './useMaestroWorkspaceAutomaticPlacement'
@@ -78,6 +79,7 @@ export function MaestroWorkspaceCanvas({
   >([])
   const [selectedSurfaceKey, setSelectedSurfaceKey] = useState<string | null>(null)
   const optimisticPlacements = useRef<Record<string, MaestroWorkspaceWindowPlacement>>({})
+  const automaticallyPlacedSurfaceKeys = useRef(new Set<string>())
   const projection = useMaestroWorkspaceProjection(target, scope)
   const agentTopology = useMaestroWorkspaceAgentTopology(result?.snapshot ?? null, projection)
   const runProgress = projection?.runProgress ?? null
@@ -181,6 +183,7 @@ export function MaestroWorkspaceCanvas({
     placements,
     setPlacements,
     optimisticPlacements,
+    automaticallyPlacedSurfaceKeys,
     board
   })
 
@@ -341,6 +344,7 @@ export function MaestroWorkspaceCanvas({
         onSelectedKeyChange={setSelectedSurfaceKey}
         topology={agentTopology}
         optimisticPlacements={optimisticPlacements}
+        automaticallyPlacedSurfaceKeys={automaticallyPlacedSurfaceKeys}
         worldStyle={board.worldStyle}
         worldZoom={board.viewport.zoom}
         viewport={board.viewport}
@@ -351,8 +355,11 @@ export function MaestroWorkspaceCanvas({
             { id: crypto.randomUUID(), source, target: targetKey }
           ])
         }
-        onRevealPlacement={(placement) =>
-          board.reveal(workspaceWindowBounds(placement), MAESTRO_REVEAL_INSETS)
+        onRevealPlacement={(placement, reserveInspector) =>
+          board.reveal(
+            workspaceWindowBounds(placement),
+            reserveInspector ? MAESTRO_INSPECTOR_REVEAL_INSETS : MAESTRO_REVEAL_INSETS
+          )
         }
       />
       {runProgress ? (

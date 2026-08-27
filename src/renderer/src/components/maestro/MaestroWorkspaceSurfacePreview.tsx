@@ -12,14 +12,21 @@ type MaestroWorkspaceSurfacePreviewProps = {
   surface: WorkspaceSurface
   runtimeTarget: RuntimeClientTarget
   previewMode: MaestroWorkspacePreviewMode
+  agentFunctionLabel?: string
+  agentRole?: 'coordinator' | 'worker'
   onUpdateAnnotationTone: (tone: 'decision' | 'warning' | 'blocked' | 'observation') => void
   onUpdateAnnotationContent?: (content: string) => void
 }
 
 function LowDetailSurfacePreview({
   surface,
-  previewMode
-}: Pick<MaestroWorkspaceSurfacePreviewProps, 'surface' | 'previewMode'>): React.JSX.Element {
+  previewMode,
+  agentFunctionLabel,
+  agentRole
+}: Pick<
+  MaestroWorkspaceSurfacePreviewProps,
+  'surface' | 'previewMode' | 'agentFunctionLabel' | 'agentRole'
+>): React.JSX.Element {
   const detail =
     previewMode === 'identity'
       ? translate(
@@ -38,7 +45,18 @@ function LowDetailSurfacePreview({
       <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
         {surface.content_type}
       </span>
-      <p className="mt-2 max-w-[28ch] truncate text-xs font-medium text-foreground">
+      {agentRole ? (
+        <p className="mt-2 max-w-[28ch] truncate text-lg font-semibold text-foreground">
+          {agentRole === 'coordinator'
+            ? translate(
+                'auto.components.maestro.MaestroWorkspaceWindow.coordinator',
+                'Orchestrator'
+              )
+            : (agentFunctionLabel ??
+              translate('auto.components.maestro.MaestroWorkspaceWindow.worker', 'Worker'))}
+        </p>
+      ) : null}
+      <p className="mt-1 max-w-[28ch] truncate text-sm font-medium text-foreground">
         {surface.title}
       </p>
       <p className="mt-1 text-[11px] text-muted-foreground">{detail}</p>
@@ -53,11 +71,20 @@ export function MaestroWorkspaceSurfacePreview({
   surface,
   runtimeTarget,
   previewMode,
+  agentFunctionLabel,
+  agentRole,
   onUpdateAnnotationTone,
   onUpdateAnnotationContent
 }: MaestroWorkspaceSurfacePreviewProps): React.JSX.Element {
   if (previewMode !== 'full') {
-    return <LowDetailSurfacePreview surface={surface} previewMode={previewMode} />
+    return (
+      <LowDetailSurfacePreview
+        surface={surface}
+        previewMode={previewMode}
+        agentFunctionLabel={agentFunctionLabel}
+        agentRole={agentRole}
+      />
+    )
   }
   const binding = surface.binding
   if (binding.kind === 'terminal') {
@@ -80,6 +107,7 @@ export function MaestroWorkspaceSurfacePreview({
             ptyId={binding.session_id}
             autoFocus={false}
             mode="passive"
+            liveRefreshIntervalMs={80}
             className="size-full"
           />
         </RecoverableRenderErrorBoundary>

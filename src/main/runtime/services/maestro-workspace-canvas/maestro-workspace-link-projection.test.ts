@@ -10,10 +10,7 @@ import type {
 } from '../../../../shared/runtime-types'
 import { OrchestrationDb } from '../../orchestration/db/orchestration-db'
 import { applyMaestroProjection } from '../../orchestration/db/maestro/maestro-projection-store'
-import {
-  projectMaestroWorkspaceFormalTerminalRelations,
-  projectMaestroWorkspaceLinks
-} from './maestro-workspace-link-projection'
+import { projectMaestroWorkspaceLinks } from './maestro-workspace-link-projection'
 
 const scope = { execution_host_id: 'local', workspace_key: 'folder:topology-workspace' }
 const runId = 'run-topology'
@@ -259,7 +256,8 @@ function graphView(): AgentGraphView {
     revision: 9,
     cursor: null,
     from_cursor: null,
-    reset_required: false
+    reset_required: false,
+    progress: undefined
   }
 }
 
@@ -283,60 +281,13 @@ function attachFixtures(database: OrchestrationDb, fixtures: readonly TerminalFi
 }
 
 describe('Maestro workspace link projection', () => {
-  it('projects exact formal terminal relations without widening the snapshot wire schema', () => {
+  it('projects exact parent links without widening the snapshot wire schema', () => {
     const database = new OrchestrationDb(':memory:')
     const fixtures = [parent, implementation, verification, context]
     attachFixtures(database, fixtures)
     publishGraph(database)
     const projectedSurfaces = surfaces(fixtures)
     const projectedSession = session(fixtures)
-
-    const formal = projectMaestroWorkspaceFormalTerminalRelations({
-      database,
-      scope,
-      session: projectedSession,
-      surfaces: projectedSurfaces
-    })
-
-    expect(
-      formal.map((relation) => ({
-        source: relation.sourceSurfaceId,
-        target: relation.targetSurfaceId,
-        kind: relation.kind,
-        authorityId: relation.authorityId
-      }))
-    ).toEqual([
-      {
-        source: `surface-${parent.tabId}`,
-        target: `surface-${implementation.tabId}`,
-        kind: 'delegates',
-        authorityId: `${runId}:edge-spawned`
-      },
-      {
-        source: `surface-${implementation.tabId}`,
-        target: `surface-${verification.tabId}`,
-        kind: 'depends-on',
-        authorityId: `${runId}:edge-dependency`
-      },
-      {
-        source: `surface-${verification.tabId}`,
-        target: `surface-${parent.tabId}`,
-        kind: 'reports-to',
-        authorityId: `${runId}:edge-report`
-      },
-      {
-        source: `surface-${implementation.tabId}`,
-        target: `surface-${context.tabId}`,
-        kind: 'context-for',
-        authorityId: `${runId}:edge-context`
-      }
-    ])
-    expect(
-      formal.every(
-        (relation) =>
-          relation.provenance === 'orca-orchestration' && relation.authorityRevision === 9
-      )
-    ).toBe(true)
 
     const links = projectMaestroWorkspaceLinks({
       database,
@@ -351,31 +302,6 @@ describe('Maestro workspace link projection', () => {
       })
     ])
     expect(links.suggested_links).toEqual([])
-    database.close()
-  })
-
-  it('omits relations whose formal task endpoint joins more than one terminal', () => {
-    const database = new OrchestrationDb(':memory:')
-    const duplicateVerification: TerminalFixture = {
-      ...verification,
-      tabId: 'terminal-verification-duplicate',
-      leafId: '55555555-5555-4555-8555-555555555555',
-      handle: 'handle-verification-duplicate',
-      attemptId: 'attempt-verification-duplicate',
-      receiptId: 'receipt-verification-duplicate'
-    }
-    const fixtures = [parent, implementation, verification, context, duplicateVerification]
-    attachFixtures(database, fixtures)
-    publishGraph(database)
-
-    const formal = projectMaestroWorkspaceFormalTerminalRelations({
-      database,
-      scope,
-      session: session(fixtures),
-      surfaces: surfaces(fixtures)
-    })
-
-    expect(formal.map((relation) => relation.kind)).toEqual(['delegates', 'context-for'])
     database.close()
   })
 

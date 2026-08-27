@@ -178,18 +178,34 @@ function lineagePosition(
   parent: MaestroWorkspaceWindowPlacement,
   placements: Readonly<Record<string, MaestroWorkspaceWindowPlacement>>
 ): { x: number; y: number } {
+  const nodePlacement = placementForNode(node, placements)
   const siblingPlacements = siblings.map((sibling) => placementForNode(sibling, placements))
-  const totalWidth =
-    siblingPlacements.reduce((width, placement) => width + placement.size.width, 0) +
-    Math.max(0, siblings.length - 1) * TOPOLOGY_SIBLING_GAP
-  let x = parent.position.x + parent.size.width / 2 - totalWidth / 2
-  for (let index = 0; index < siblings.length; index += 1) {
-    if (siblings[index].surfaceKey === node.surfaceKey) {
-      break
-    }
-    x += siblingPlacements[index].size.width + TOPOLOGY_SIBLING_GAP
+  const placedSiblingCount = siblings.filter(
+    (sibling) => sibling.surfaceKey !== node.surfaceKey && placements[sibling.surfaceKey]
+  ).length
+  const column = placedSiblingCount % 2
+  const row = Math.floor(placedSiblingCount / 2)
+  const columnWidth = Math.max(
+    nodePlacement.size.width,
+    ...siblingPlacements.map((placement) => placement.size.width)
+  )
+  const rowHeight = Math.max(
+    nodePlacement.size.height,
+    ...siblingPlacements.map((placement) => placement.size.height)
+  )
+  const parentCenterX = parent.position.x + parent.size.width / 2
+  const columnStartX =
+    column === 0
+      ? parentCenterX - TOPOLOGY_SIBLING_GAP / 2 - columnWidth
+      : parentCenterX + TOPOLOGY_SIBLING_GAP / 2
+  return {
+    x: columnStartX + (columnWidth - nodePlacement.size.width) / 2,
+    y:
+      parent.position.y +
+      parent.size.height +
+      TOPOLOGY_LAYER_GAP +
+      row * (rowHeight + TOPOLOGY_SIBLING_GAP)
   }
-  return { x, y: parent.position.y + parent.size.height + TOPOLOGY_LAYER_GAP }
 }
 
 function ownershipPosition(

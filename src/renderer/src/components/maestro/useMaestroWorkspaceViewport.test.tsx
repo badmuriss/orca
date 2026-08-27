@@ -76,16 +76,19 @@ describe('useMaestroWorkspaceViewport', () => {
     })
 
     act(() => board?.onWheel(wheel() as never))
+    await act(async () => vi.advanceTimersByTimeAsync(16))
     expect(board?.viewport.zoom).toBeLessThan(1)
     const zoomed = board?.viewport
     expect(zoomed).toBeTruthy()
 
     act(() => board?.onWheel(wheel({ ctrlKey: true }) as never))
+    await act(async () => vi.advanceTimersByTimeAsync(16))
     expect(board?.viewport.zoom).toBe(zoomed?.zoom)
     expect(board?.viewport.center.y).toBeGreaterThan(zoomed?.center.y ?? 0)
     const verticallyPanned = board?.viewport
 
     act(() => board?.onWheel(wheel({ shiftKey: true }) as never))
+    await act(async () => vi.advanceTimersByTimeAsync(16))
     expect(board?.viewport.center.x).toBeGreaterThan(verticallyPanned?.center.x ?? 0)
     expect(board?.viewport.center.y).toBe(verticallyPanned?.center.y)
   })

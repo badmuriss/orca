@@ -42,6 +42,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount())
   container.remove()
+  vi.useRealTimers()
 })
 
 describe('useMaestroWorkspaceRunProgress', () => {
@@ -77,6 +78,25 @@ describe('useMaestroWorkspaceRunProgress', () => {
       runProgress: { available: false, state: 'outcome_unknown' }
     })
     await act(async () => newResponse.promise)
+    expect(current).toEqual({ available: false, state: 'outcome_unknown' })
+  })
+
+  it('retains the last confirmed projection through a transient poll failure', async () => {
+    vi.useFakeTimers()
+    getMaestroProjection
+      .mockResolvedValueOnce({
+        runId: 'run-1',
+        revision: 1,
+        runProgress: { available: false, state: 'outcome_unknown' }
+      })
+      .mockRejectedValueOnce(new Error('temporary transport failure'))
+
+    await act(async () => root.render(createElement(Probe, { workspaceKey: 'folder:stable' })))
+    expect(current).toEqual({ available: false, state: 'outcome_unknown' })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_500)
+    })
     expect(current).toEqual({ available: false, state: 'outcome_unknown' })
   })
 })

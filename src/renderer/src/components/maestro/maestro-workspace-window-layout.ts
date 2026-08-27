@@ -20,16 +20,16 @@ export function createMaestroSurfaceAdditionTracker() {
   const observedByScope = new Map<string, readonly string[]>()
   return {
     observe(scope: string, current: readonly string[], viewportReady = true): string[] {
-      if (!viewportReady) {
+      const previous = observedByScope.get(scope)
+      if (previous && !viewportReady) {
         return []
       }
-      const previous = observedByScope.get(scope)
       observedByScope.delete(scope)
       observedByScope.set(scope, current)
       if (observedByScope.size > 64) {
         observedByScope.delete(observedByScope.keys().next().value!)
       }
-      return previous ? addedMaestroSurfaceKeys(previous, current) : []
+      return previous && viewportReady ? addedMaestroSurfaceKeys(previous, current) : []
     }
   }
 }
@@ -44,9 +44,11 @@ export function workspaceWindowPlacement(
   const size =
     surface?.content_type === 'terminal'
       ? { width: 760, height: 530 }
-      : isAnnotation
-        ? { width: 440, height: 360 }
-        : { width: 360, height: 260 }
+      : surface?.content_type === 'browser'
+        ? { width: 680, height: 480 }
+        : isAnnotation
+          ? { width: 440, height: 360 }
+          : { width: 360, height: 260 }
   return (
     document.placements[surfaceKey] ?? {
       position: { x: 36 + (index % 3) * 800, y: 52 + Math.floor(index / 3) * 570 },

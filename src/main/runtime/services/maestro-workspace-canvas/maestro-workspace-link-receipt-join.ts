@@ -71,23 +71,6 @@ export function joinMaestroWorkspaceParentChildReceipts(
   return { child, parent }
 }
 
-export function joinMaestroWorkspaceTerminalReceipts(
-  source: MaestroWorkspaceLinkReceiptEndpoint,
-  target: MaestroWorkspaceLinkReceiptEndpoint,
-  runId: string
-): { source: MaestroTerminalLease; target: MaestroTerminalLease } | null {
-  if (
-    !('launchProfile' in source.receipt) ||
-    !('launchProfile' in target.receipt) ||
-    source.receipt.id === target.receipt.id ||
-    source.receipt.runId !== runId ||
-    target.receipt.runId !== runId
-  ) {
-    return null
-  }
-  return { source: source.receipt, target: target.receipt }
-}
-
 function receiptTimestamp(value: string): string {
   return value.includes('T') ? value : `${value.replace(' ', 'T')}Z`
 }

@@ -1,4 +1,4 @@
-import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
+import { useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 import type { RuntimeMaestroWorkspaceCanvasScope } from '../../../../shared/runtime-types'
 import type { MaestroWorkspaceCanvasResource } from '@/hooks/useMaestroWorkspaceCanvas'
 import type { MaestroWorkspaceTopologyLayoutNode } from './maestro-workspace-topology-layout'
@@ -12,7 +12,13 @@ import type { useMaestroWorkspaceViewport } from './useMaestroWorkspaceViewport'
 import { maestroWorkspaceMutationKey } from './maestro-workspace-mutation-key'
 
 const surfaceAdditionTracker = createMaestroSurfaceAdditionTracker()
-export const MAESTRO_REVEAL_INSETS = { top: 64, right: 344, bottom: 16, left: 16 } as const
+export const MAESTRO_REVEAL_INSETS = { top: 64, right: 16, bottom: 16, left: 16 } as const
+export const MAESTRO_INSPECTOR_REVEAL_INSETS = {
+  top: 64,
+  right: 344,
+  bottom: 16,
+  left: 16
+} as const
 
 type PlacementMap = Readonly<Record<string, MaestroWorkspaceWindowPlacement>>
 type CanvasResult = NonNullable<MaestroWorkspaceCanvasResource['result']>
@@ -26,6 +32,7 @@ export function useMaestroWorkspaceAutomaticPlacement({
   placements,
   setPlacements,
   optimisticPlacements,
+  automaticallyPlacedSurfaceKeys,
   board
 }: {
   result: CanvasResult | null
@@ -36,22 +43,49 @@ export function useMaestroWorkspaceAutomaticPlacement({
   placements: PlacementMap
   setPlacements: Dispatch<SetStateAction<PlacementMap>>
   optimisticPlacements: MutableRefObject<Record<string, MaestroWorkspaceWindowPlacement>>
+  automaticallyPlacedSurfaceKeys: MutableRefObject<Set<string>>
   board: ReturnType<typeof useMaestroWorkspaceViewport>
 }): void {
+  const { viewportReady, viewport, size, reveal } = board
+  const topologySignatureByScope = useRef(new Map<string, string>())
   useEffect(() => {
     if (!result) {
       return
     }
-    const additions = surfaceAdditionTracker.observe(
-      `${scope.execution_host_id}:${scope.workspace_key}`,
-      surfaceKeys,
-      board.viewportReady
+    const scopeKey = `${scope.execution_host_id}:${scope.workspace_key}`
+    const additions = surfaceAdditionTracker.observe(scopeKey, surfaceKeys, viewportReady)
+    for (const surfaceKey of automaticallyPlacedSurfaceKeys.current) {
+      if (!result.snapshot.surfaces[surfaceKey]) {
+        automaticallyPlacedSurfaceKeys.current.delete(surfaceKey)
+      }
+    }
+    const topologyNodes = nodes.filter(
+      (node) => node.isCoordinator || node.parentSurfaceKey || node.ownerSurfaceKey
     )
+    const topologySignature = JSON.stringify(
+      [...topologyNodes]
+        .sort((left, right) => left.surfaceKey.localeCompare(right.surfaceKey))
+        .map((node) => [
+          node.surfaceKey,
+          node.parentSurfaceKey,
+          node.ownerSurfaceKey,
+          node.functionLabel,
+          node.taskIdentity,
+          node.isCoordinator
+        ])
+    )
+    const topologyChanged = topologySignatureByScope.current.get(scopeKey) !== topologySignature
+    topologySignatureByScope.current.set(scopeKey, topologySignature)
     const unplaced = surfaceKeys.filter(
       (surfaceKey) =>
         !result.canvas.document.placements[surfaceKey] && !optimisticPlacements.current[surfaceKey]
     )
-    const candidateKeys = [...new Set([...additions, ...unplaced])]
+    const topologyManaged = topologyChanged
+      ? topologyNodes
+          .map((node) => node.surfaceKey)
+          .filter((surfaceKey) => automaticallyPlacedSurfaceKeys.current.has(surfaceKey))
+      : []
+    const candidateKeys = [...new Set([...additions, ...unplaced, ...topologyManaged])]
     if (candidateKeys.length === 0) {
       return
     }
@@ -62,8 +96,8 @@ export function useMaestroWorkspaceAutomaticPlacement({
     const layout = layoutIncrementalMaestroWorkspaceTopology({
       nodes,
       existingPlacements,
-      viewport: board.viewport,
-      canvas: board.size,
+      viewport,
+      canvas: size,
       insets: MAESTRO_REVEAL_INSETS
     })
     const positioned = Object.fromEntries(
@@ -81,6 +115,7 @@ export function useMaestroWorkspaceAutomaticPlacement({
         continue
       }
       optimisticPlacements.current[surfaceKey] = placement
+      automaticallyPlacedSurfaceKeys.current.add(surfaceKey)
       void resource.mutate({
         action: 'set-placement',
         surface_id: surface.id,
@@ -91,11 +126,11 @@ export function useMaestroWorkspaceAutomaticPlacement({
     setPlacements((current) => ({ ...current, ...positioned }))
     const newestAddition = additions.findLast((surfaceKey) => positioned[surfaceKey])
     if (newestAddition) {
-      board.reveal(workspaceWindowBounds(positioned[newestAddition]!), MAESTRO_REVEAL_INSETS)
+      reveal(workspaceWindowBounds(positioned[newestAddition]!), MAESTRO_REVEAL_INSETS)
     }
   }, [
-    board,
     nodes,
+    automaticallyPlacedSurfaceKeys,
     optimisticPlacements,
     placements,
     resource,
@@ -103,6 +138,10 @@ export function useMaestroWorkspaceAutomaticPlacement({
     scope.execution_host_id,
     scope.workspace_key,
     setPlacements,
-    surfaceKeys
+    size,
+    surfaceKeys,
+    reveal,
+    viewport,
+    viewportReady
   ])
 }

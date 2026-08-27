@@ -18,7 +18,7 @@ const emptyDocument = {
   ui_preferences: { inspector_open: false, inspector_width: 320 }
 }
 
-function surface(kind: 'terminal' | 'annotation'): WorkspaceSurface {
+function surface(kind: 'terminal' | 'browser' | 'annotation'): WorkspaceSurface {
   const id = {
     execution_host_id: 'local',
     workspace_key: 'folder:workspace',
@@ -41,6 +41,27 @@ function surface(kind: 'terminal' | 'annotation'): WorkspaceSurface {
         liveness: 'live',
         pty_incarnation: '1',
         authority_revision: 1
+      }
+    }
+  }
+  if (kind === 'browser') {
+    return {
+      id,
+      content_type: 'browser',
+      entity_id: 'browser-workspace',
+      group_id: 'group',
+      title: 'Browser',
+      revision: 1,
+      availability: 'available',
+      binding: {
+        kind: 'browser',
+        browser_workspace_id: 'browser-workspace',
+        browser_page_id: 'page',
+        profile_id: null,
+        partition_id: null,
+        authority_revision: 1,
+        live_frame: null,
+        immutable_capture: null
       }
     }
   }
@@ -88,12 +109,27 @@ describe('Maestro workspace window layout', () => {
     expect(tracker.observe('local:workspace', ['browser', 'terminal'], true)).toEqual(['browser'])
   })
 
-  it('creates terminals and annotations at readable working sizes', () => {
+  it('keeps the first unmeasured snapshot as the placement baseline', () => {
+    const tracker = createMaestroSurfaceAdditionTracker()
+
+    expect(tracker.observe('local:workspace', [], false)).toEqual([])
+    expect(tracker.observe('local:workspace', ['browser', 'terminal'], false)).toEqual([])
+    expect(tracker.observe('local:workspace', ['browser', 'terminal'], true)).toEqual([
+      'browser',
+      'terminal'
+    ])
+  })
+
+  it('creates terminal, Browser, and annotation surfaces at readable working sizes', () => {
     expect(
       workspaceWindowPlacement('terminal', 0, emptyDocument, surface('terminal')).size
     ).toEqual({ width: 760, height: 530 })
+    expect(workspaceWindowPlacement('browser', 1, emptyDocument, surface('browser')).size).toEqual({
+      width: 680,
+      height: 480
+    })
     expect(
-      workspaceWindowPlacement('annotation', 1, emptyDocument, surface('annotation')).size
+      workspaceWindowPlacement('annotation', 2, emptyDocument, surface('annotation')).size
     ).toEqual({ width: 440, height: 360 })
   })
 
