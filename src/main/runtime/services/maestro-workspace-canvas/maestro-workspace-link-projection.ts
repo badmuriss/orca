@@ -12,8 +12,13 @@ import type {
 } from '../../../../shared/runtime-types'
 import { getMaestroProjection } from '../../orchestration/db/maestro/maestro-projection-store'
 import type { OrchestrationDb } from '../../orchestration/db/orchestration-db'
-import type { MaestroBrowserSurfaceReceipt } from '../../../../shared/maestro-browser-surface'
 import type { MaestroTerminalLease } from '../../../../shared/maestro-terminal-lease'
+import {
+  joinMaestroWorkspaceBrowserReceipts,
+  joinMaestroWorkspaceParentChildReceipts,
+  latestMaestroWorkspaceReceiptTimestamp,
+  type MaestroWorkspaceLinkReceiptEndpoint
+} from './maestro-workspace-link-receipt-join'
 
 type LinkProjection = Pick<WorkspaceSurfaceSnapshot, 'automatic_links' | 'suggested_links'>
 
@@ -40,11 +45,6 @@ const AUTOMATIC_EDGE_KINDS: Readonly<Partial<Record<string, AutomaticLinkKind>>>
   }
 }
 
-type ReceiptEndpoint = {
-  surfaceKey: string
-  receipt: MaestroTerminalLease | MaestroBrowserSurfaceReceipt
-}
-
 function terminalReceiptIdentity(
   database: OrchestrationDb,
   scope: RuntimeMaestroWorkspaceCanvasScope,
@@ -59,8 +59,6 @@ function terminalReceiptIdentity(
     lease.executionHostId !== scope.execution_host_id ||
     lease.workspaceKey !== scope.workspace_key ||
     !lease.runId ||
-    !lease.taskId ||
-    !lease.attemptId ||
     !lease.launchProfile.agent
   ) {
     return null
@@ -87,16 +85,26 @@ function bindGraphNodesToSurfaces(params: {
   session: RuntimeMobileSessionTabsResult
   surfaces: Record<string, WorkspaceSurface>
   projection: NonNullable<ReturnType<typeof getMaestroProjection>>
-}): Map<string, ReceiptEndpoint> {
-  const candidates = new Map<string, Map<string, ReceiptEndpoint>>()
-  const add = (nodeId: string, endpoint: ReceiptEndpoint): void => {
-    const existing = candidates.get(nodeId) ?? new Map<string, ReceiptEndpoint>()
+}): Map<string, MaestroWorkspaceLinkReceiptEndpoint> {
+  const candidates = new Map<string, Map<string, MaestroWorkspaceLinkReceiptEndpoint>>()
+  const add = (nodeId: string, endpoint: MaestroWorkspaceLinkReceiptEndpoint): void => {
+    const existing =
+      candidates.get(nodeId) ?? new Map<string, MaestroWorkspaceLinkReceiptEndpoint>()
     existing.set(endpoint.surfaceKey, endpoint)
     candidates.set(nodeId, existing)
   }
   const surfaceByTabId = new Map(
     Object.entries(params.surfaces).map(([key, surface]) => [surface.id.unified_tab_id, key])
   )
+  const terminalIdsByAttempt = new Map<string, Set<string>>()
+  for (const node of params.projection.nodes) {
+    if (node.type !== 'terminal-receipt' || !node.attemptId || !node.terminalId) {
+      continue
+    }
+    const terminalIds = terminalIdsByAttempt.get(node.attemptId) ?? new Set<string>()
+    terminalIds.add(node.terminalId)
+    terminalIdsByAttempt.set(node.attemptId, terminalIds)
+  }
   for (const tab of params.session.tabs) {
     if (tab.type !== 'terminal') {
       continue
@@ -110,12 +118,22 @@ function bindGraphNodesToSurfaces(params: {
       continue
     }
     for (const node of params.projection.nodes) {
+      const attemptTerminalIds = node.attemptId
+        ? terminalIdsByAttempt.get(node.attemptId)
+        : undefined
       if (
-        node.type === 'terminal-receipt' &&
+        (node.type === 'terminal-receipt' || node.type === 'attempt') &&
         node.terminalId &&
-        identity.identifiers.has(node.terminalId)
+        (node.type === 'terminal-receipt' ||
+          (attemptTerminalIds?.size === 1 && attemptTerminalIds.has(node.terminalId))) &&
+        identity.identifiers.has(node.terminalId) &&
+        identity.lease.runId === params.projection.runId &&
+        (!node.taskId || !identity.lease.taskId || node.taskId === identity.lease.taskId) &&
+        (!node.attemptId ||
+          !identity.lease.attemptId ||
+          node.attemptId === identity.lease.attemptId)
       ) {
-        add(node.id, { surfaceKey, receipt: identity.lease })
+        add(node.id, { surfaceKey, receipt: identity.lease, node })
       }
     }
   }
@@ -134,7 +152,7 @@ function bindGraphNodesToSurfaces(params: {
         surface.binding.browser_page_id === receipt.browser_page_id
     )
     for (const [surfaceKey] of matches) {
-      add(node.id, { surfaceKey, receipt })
+      add(node.id, { surfaceKey, receipt, node })
     }
   }
   return new Map(
@@ -142,39 +160,6 @@ function bindGraphNodesToSurfaces(params: {
       endpoints.size === 1 ? [[nodeId, [...endpoints.values()][0]!] as const] : []
     )
   )
-}
-
-function joinedReceipts(
-  source: ReceiptEndpoint,
-  target: ReceiptEndpoint
-): { terminal: MaestroTerminalLease; browser: MaestroBrowserSurfaceReceipt } | null {
-  const terminal =
-    'launchProfile' in source.receipt
-      ? source.receipt
-      : 'launchProfile' in target.receipt
-        ? target.receipt
-        : null
-  const browser =
-    'protocol' in source.receipt
-      ? source.receipt
-      : 'protocol' in target.receipt
-        ? target.receipt
-        : null
-  if (
-    !terminal ||
-    !browser ||
-    terminal.runId !== browser.run_id ||
-    terminal.taskId !== browser.task_id ||
-    terminal.attemptId !== browser.attempt_id ||
-    terminal.launchProfile.agent !== browser.agent_id
-  ) {
-    return null
-  }
-  return { terminal, browser }
-}
-
-function receiptTimestamp(value: string): string {
-  return value.includes('T') ? value : `${value.replace(' ', 'T')}Z`
 }
 
 function automaticLinks(params: {
@@ -192,14 +177,27 @@ function automaticLinks(params: {
     const kind = AUTOMATIC_EDGE_KINDS[edge.type]
     const source = nodeBindings.get(edge.source_id)
     const target = nodeBindings.get(edge.target_id)
-    const receipts = source && target ? joinedReceipts(source, target) : null
-    if (!kind || !source || !target || source.surfaceKey === target.surfaceKey || !receipts) {
+    if (!kind || !source || !target || source.surfaceKey === target.surfaceKey) {
       return []
     }
-    const observedAt = [receipts.terminal.updatedAt, receipts.browser.updated_at]
-      .map(receiptTimestamp)
-      .sort()
-      .at(-1)!
+    const receiptTimestamps =
+      edge.type === 'spawned_by'
+        ? (() => {
+            const receipts = joinMaestroWorkspaceParentChildReceipts(
+              source,
+              target,
+              projection.runId
+            )
+            return receipts ? [receipts.child.updatedAt, receipts.parent.updatedAt] : null
+          })()
+        : (() => {
+            const receipts = joinMaestroWorkspaceBrowserReceipts(source, target)
+            return receipts ? [receipts.terminal.updatedAt, receipts.browser.updated_at] : null
+          })()
+    if (!receiptTimestamps) {
+      return []
+    }
+    const observedAt = latestMaestroWorkspaceReceiptTimestamp(receiptTimestamps)
     return [
       {
         id: `automatic-${createHash('sha256')

@@ -111,6 +111,34 @@ export function linkedSession(): RuntimeMobileSessionTabsResult {
   }
 }
 
+export function parentChildSession(): RuntimeMobileSessionTabsResult {
+  const current = session()
+  return {
+    ...current,
+    tabGroups: [
+      {
+        id: 'group-1',
+        activeTabId: 'terminal-tab-1',
+        tabOrder: ['terminal-tab-1', 'terminal-tab-parent']
+      }
+    ],
+    tabs: [
+      current.tabs[0]!,
+      {
+        type: 'terminal',
+        id: 'terminal-tab-parent::leaf-parent',
+        parentTabId: 'terminal-tab-parent',
+        leafId: 'leaf-parent',
+        ptyId: 'pty-parent',
+        status: 'ready',
+        terminal: 'terminal-handle-parent',
+        title: 'Parent worker',
+        isActive: false
+      }
+    ]
+  }
+}
+
 export function browserReceipt(
   overrides: {
     workspaceKey?: string

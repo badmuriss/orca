@@ -9,11 +9,12 @@ import {
   browserReceipt,
   editorSession,
   linkedSession,
+  parentChildSession,
   scope,
   session
 } from './maestro-workspace-canvas-session-fixtures'
 
-export { editorSession, linkedSession, scope, session }
+export { editorSession, linkedSession, parentChildSession, scope, session }
 
 export function publishLinkGraph(
   database: OrchestrationDb,
@@ -21,6 +22,7 @@ export function publishLinkGraph(
     revision?: number
     browserIdentity?: Parameters<typeof browserReceipt>[0]
     duplicateBrowserReceipt?: boolean
+    parentChild?: boolean
   }
 ): void {
   const revision = params?.revision ?? 7
@@ -76,7 +78,9 @@ export function publishLinkGraph(
           type: 'terminal-receipt',
           status: 'active',
           summary: 'Exact Codex terminal receipt',
+          ...(params?.parentChild ? { attempt_id: 'attempt-mwc-integ-002' } : {}),
           resource: {
+            ...(params?.parentChild ? { attempt_id: 'attempt-mwc-integ-002' } : {}),
             terminal_id: 'terminal-handle-1',
             terminal_status: 'running',
             liveness: 'live'
@@ -103,6 +107,39 @@ export function publishLinkGraph(
                 }
               }
             ]
+          : []),
+        ...(params?.parentChild
+          ? [
+              {
+                id: 'terminal-receipt-parent',
+                type: 'terminal-receipt' as const,
+                status: 'active',
+                summary: 'Exact parent terminal receipt',
+                attempt_id: 'attempt-mwc-parent-001',
+                resource: {
+                  attempt_id: 'attempt-mwc-parent-001',
+                  terminal_id: 'terminal-handle-parent',
+                  terminal_status: 'running',
+                  liveness: 'live' as const
+                }
+              },
+              {
+                id: 'attempt-child',
+                type: 'attempt' as const,
+                status: 'active',
+                summary: 'Child attempt',
+                task_id: 'MWC-INTEG',
+                attempt_id: 'attempt-mwc-integ-002'
+              },
+              {
+                id: 'attempt-parent',
+                type: 'attempt' as const,
+                status: 'active',
+                summary: 'Parent attempt',
+                task_id: 'MWC-INTEG',
+                attempt_id: 'attempt-mwc-parent-001'
+              }
+            ]
           : [])
       ],
       edges: [
@@ -111,7 +148,17 @@ export function publishLinkGraph(
           type: 'executes',
           source_id: 'terminal-receipt-1',
           target_id: 'browser-receipt-1'
-        }
+        },
+        ...(params?.parentChild
+          ? [
+              {
+                id: 'edge-child-spawned-by-parent',
+                type: 'spawned_by' as const,
+                source_id: 'attempt-child',
+                target_id: 'attempt-parent'
+              }
+            ]
+          : [])
       ],
       removed_node_ids: [],
       removed_edge_ids: [],
@@ -161,6 +208,38 @@ export function attachLinkLease(
     paneKey: 'leaf-1',
     ptyIncarnation: 'pty-1:incarnation-7',
     processRootId: 'pid:1'
+  })
+}
+
+export function attachParentLinkLease(database: OrchestrationDb): void {
+  const lease = database.reserveMaestroTerminalLease({
+    requestId: 'terminal-request-run-1-MWC-INTEG-attempt-mwc-parent-001-codex',
+    executionHostId: scope.execution_host_id,
+    workspaceKey: scope.workspace_key,
+    runId: 'run-1',
+    taskId: 'MWC-INTEG',
+    attemptId: 'attempt-mwc-parent-001',
+    role: 'worker',
+    workerTerminalResourceId: 'terminal-receipt-parent',
+    title: 'MWC-INTEG · parent · Codex',
+    launchProfile: {
+      agent: 'codex',
+      model: null,
+      effort: 'high',
+      permissionMode: 'default',
+      routeRef: null
+    },
+    spawnedBy: 'coordinator:g2',
+    ownerPrincipal: 'worker:attempt-mwc-parent-001',
+    retentionPolicy: 'retain'
+  })
+  database.attachMaestroTerminalLease({
+    leaseId: lease.id,
+    terminalHandle: 'terminal-handle-parent',
+    tabId: 'terminal-tab-parent',
+    paneKey: 'leaf-parent',
+    ptyIncarnation: 'pty-parent:incarnation-1',
+    processRootId: 'pid:parent'
   })
 }
 

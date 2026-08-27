@@ -3,9 +3,11 @@ import { MaestroWorkspaceCanvasAuthority } from '../../services/maestro-workspac
 import { MAESTRO_WORKSPACE_CANVAS_METHODS } from './maestro-workspace-canvas'
 import {
   attachLinkLease,
+  attachParentLinkLease,
   editorSession,
   harness,
   linkedSession,
+  parentChildSession,
   publishLinkGraph,
   scope,
   session
@@ -514,6 +516,37 @@ describe('Maestro workspace Canvas authority', () => {
     expect(current.snapshot.suggested_links).toHaveLength(2)
     expect(current.snapshot.suggested_links.map((link) => link.source_surface_key)).not.toContain(
       automatic.source_surface_key
+    )
+    database.close()
+  })
+
+  it('projects an exact same-run child and parent terminal relationship', async () => {
+    const { authority, database, runtime } = harness()
+    runtime.listMobileSessionTabs.mockResolvedValue(parentChildSession())
+    attachLinkLease(database)
+    attachParentLinkLease(database)
+    publishLinkGraph(database, { parentChild: true })
+
+    const current = await authority.query(scope, 'actor-1')
+    if (current.status !== 'available') {
+      throw new Error('missing parent-child snapshot')
+    }
+    const link = current.snapshot.automatic_links.find(
+      (candidate) => candidate.link_type === 'parent-child'
+    )
+    if (!link) {
+      throw new Error('missing parent-child link')
+    }
+    expect(link).toMatchObject({
+      authority_kind: 'parent-child-receipt',
+      authority_id: 'run-1:edge-child-spawned-by-parent',
+      explanation_code: 'parent-child'
+    })
+    expect(current.snapshot.surfaces[link.source_surface_key]?.id.unified_tab_id).toBe(
+      'terminal-tab-1'
+    )
+    expect(current.snapshot.surfaces[link.target_surface_key]?.id.unified_tab_id).toBe(
+      'terminal-tab-parent'
     )
     database.close()
   })
