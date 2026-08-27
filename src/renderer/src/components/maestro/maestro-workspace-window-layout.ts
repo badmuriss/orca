@@ -38,13 +38,13 @@ export function workspaceWindowPlacement(
   const isAnnotation = surface?.binding.kind === 'content' && surface.binding.annotation != null
   const size =
     surface?.content_type === 'terminal'
-      ? { width: 860, height: 600 }
+      ? { width: 760, height: 530 }
       : isAnnotation
         ? { width: 440, height: 360 }
         : { width: 360, height: 260 }
   return (
     document.placements[surfaceKey] ?? {
-      position: { x: 36 + (index % 3) * 900, y: 52 + Math.floor(index / 3) * 640 },
+      position: { x: 36 + (index % 3) * 800, y: 52 + Math.floor(index / 3) * 570 },
       size,
       collapsed: false,
       z_order: index
