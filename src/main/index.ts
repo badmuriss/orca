@@ -1914,6 +1914,11 @@ function maybeApplyGpuFallbackForThisLaunch(): void {
   if (process.platform !== 'linux' || !is.dev || isServeMode) {
     return
   }
+  if (process.env.ORCA_DEV_GPU_FALLBACK === '1') {
+    console.warn('[gpu-fallback] hardware acceleration disabled for the automatic dev retry.')
+    applyGpuFallbackSwitchesForThisLaunch(undefined)
+    return
+  }
   const environment = getLinuxDevGpuFallbackEnvironment()
   if (!environment) {
     return

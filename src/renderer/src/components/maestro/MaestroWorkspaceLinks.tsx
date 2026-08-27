@@ -7,12 +7,16 @@ type LinkLine = {
   id: string
   source: string
   target: string
-  provenance: 'manual' | 'automatic' | 'suggested'
+  provenance: 'manual' | 'automatic'
 }
+
+export type OptimisticMaestroManualLink = Pick<LinkLine, 'id' | 'source' | 'target'>
+const NO_OPTIMISTIC_MANUAL_LINKS: readonly OptimisticMaestroManualLink[] = []
 
 function linkLines(
   snapshot: WorkspaceSurfaceSnapshot,
-  document: WorkspaceCanvasDocument
+  document: WorkspaceCanvasDocument,
+  optimisticManualLinks: readonly OptimisticMaestroManualLink[]
 ): LinkLine[] {
   return [
     ...document.manual_links.map((link) => ({
@@ -21,20 +25,22 @@ function linkLines(
       target: link.target_surface_key,
       provenance: 'manual' as const
     })),
+    ...optimisticManualLinks
+      .filter(
+        (link) =>
+          !document.manual_links.some(
+            (confirmed) =>
+              confirmed.source_surface_key === link.source &&
+              confirmed.target_surface_key === link.target
+          )
+      )
+      .map((link) => ({ ...link, provenance: 'manual' as const })),
     ...snapshot.automatic_links.map((link) => ({
       id: link.id,
       source: link.source_surface_key,
       target: link.target_surface_key,
       provenance: 'automatic' as const
-    })),
-    ...snapshot.suggested_links
-      .filter((link) => !document.suggestion_decisions[link.fingerprint])
-      .map((link) => ({
-        id: link.fingerprint,
-        source: link.source_surface_key,
-        target: link.target_surface_key,
-        provenance: 'suggested' as const
-      }))
+    }))
   ]
 }
 
@@ -49,16 +55,18 @@ export function MaestroWorkspaceLinks({
   snapshot,
   document,
   placements,
+  optimisticManualLinks = NO_OPTIMISTIC_MANUAL_LINKS,
   style
 }: {
   snapshot: WorkspaceSurfaceSnapshot
   document: WorkspaceCanvasDocument
   placements: Readonly<Record<string, MaestroWorkspaceWindowPlacement>>
+  optimisticManualLinks?: readonly OptimisticMaestroManualLink[]
   style?: React.CSSProperties
 }): React.JSX.Element {
   return (
     <svg className="pointer-events-none absolute overflow-visible" style={style} aria-hidden>
-      {linkLines(snapshot, document).map((link) => {
+      {linkLines(snapshot, document, optimisticManualLinks).map((link) => {
         const source = placements[link.source]
         const target = placements[link.target]
         if (!source || !target) {
@@ -70,15 +78,7 @@ export function MaestroWorkspaceLinks({
         const label =
           link.provenance === 'manual'
             ? translate('auto.components.maestro.MaestroWorkspaceInspector.812d58dbea', 'Manual')
-            : link.provenance === 'automatic'
-              ? translate(
-                  'auto.components.maestro.MaestroWorkspaceInspector.07e9ddcb64',
-                  'Automatic'
-                )
-              : translate(
-                  'auto.components.maestro.MaestroWorkspaceInspector.f7bb7c2d65',
-                  'Suggestion'
-                )
+            : translate('auto.components.maestro.MaestroWorkspaceInspector.07e9ddcb64', 'Automatic')
         const labelWidth = label.length * 7 + 16
         const labelX = (from.x + to.x) / 2
         const labelY = (from.y + to.y) / 2
@@ -89,14 +89,8 @@ export function MaestroWorkspaceLinks({
               fill="none"
               stroke="var(--muted-foreground)"
               strokeWidth={link.provenance === 'automatic' ? 2 : 1.5}
-              strokeDasharray={
-                link.provenance === 'manual'
-                  ? undefined
-                  : link.provenance === 'suggested'
-                    ? '3 5'
-                    : '8 4'
-              }
-              opacity={link.provenance === 'suggested' ? 0.45 : 0.75}
+              strokeDasharray={link.provenance === 'manual' ? undefined : '8 4'}
+              opacity={0.75}
               vectorEffect="non-scaling-stroke"
             />
             <rect

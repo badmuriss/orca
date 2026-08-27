@@ -8,13 +8,7 @@ import {
   readRuntimeMaestroDiff
 } from '@/runtime/runtime-maestro-workspace-client'
 import { translate } from '@/i18n/i18n'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from '@/components/ui/select'
+import { MaestroWorkspaceMiniMarkdownEditor } from './MaestroWorkspaceMiniMarkdownEditor'
 
 type Preview = { content: string; revision: string; source: string }
 type AnnotationTone = 'decision' | 'warning' | 'blocked' | 'observation'
@@ -37,17 +31,27 @@ const TONE_LABEL = {
   observation: translate('auto.components.maestro.MaestroWorkspaceCanvas.3474e6c93b', 'Observation')
 } as const
 
+const TONE_DOT = {
+  decision: 'bg-[var(--status-success)]',
+  warning: 'bg-[var(--agent-question-text)]',
+  blocked: 'bg-destructive',
+  observation: 'bg-muted-foreground'
+} as const
+
 export function MaestroWorkspaceContentPreview({
   target,
   surface,
-  onUpdateAnnotationTone
+  onUpdateAnnotationTone,
+  onUpdateAnnotationContent
 }: {
   target: RuntimeClientTarget
   surface: WorkspaceSurface
   onUpdateAnnotationTone?: (tone: AnnotationTone) => void
+  onUpdateAnnotationContent?: (content: string) => void
 }): React.JSX.Element {
   const [preview, setPreview] = useState<Preview | null>(null)
   const [unavailable, setUnavailable] = useState(false)
+  const [optimisticTone, setOptimisticTone] = useState<AnnotationTone | null>(null)
   const workspace = parseWorkspaceKey(surface.id.workspace_key)
   const worktreeId =
     workspace?.type === 'folder' ? workspace.folderWorkspaceId : workspace?.worktreeId
@@ -55,6 +59,8 @@ export function MaestroWorkspaceContentPreview({
   const executionHostId = surface.id.execution_host_id
   const workspaceKey = surface.id.workspace_key
   const unifiedTabId = surface.id.unified_tab_id
+
+  useEffect(() => setOptimisticTone(null), [unifiedTabId])
 
   // Layout mutations rebuild equivalent objects, so primitive identity prevents reloads on Fit.
   const latestTarget = useRef(target)
@@ -137,47 +143,54 @@ export function MaestroWorkspaceContentPreview({
   ])
 
   if (preview && binding) {
-    const tone = binding.annotation?.tone
+    const authoritativeTone = binding.annotation?.tone
+    const tone = optimisticTone ?? authoritativeTone
     return (
       <div
-        className={`scrollbar-sleek size-full overflow-auto border-l-4 p-3 ${tone ? TONE_CLASS[tone] : 'border-l-border bg-editor-surface'}`}
+        className={`flex size-full min-h-0 flex-col overflow-hidden border-l-4 ${tone ? TONE_CLASS[tone] : 'border-l-border bg-editor-surface'}`}
         data-annotation-tone={tone}
       >
         {tone ? (
-          <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
             <p className="text-[10px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
               {TONE_LABEL[tone]}
             </p>
             {onUpdateAnnotationTone ? (
-              <Select
-                value={tone}
-                onValueChange={(value) => onUpdateAnnotationTone(value as AnnotationTone)}
+              <div
+                className="flex items-center gap-1 rounded-md border border-border/60 bg-background/55 p-1"
+                aria-label={translate(
+                  'auto.components.maestro.MaestroWorkspaceContentPreview.a83bb54e16',
+                  'Annotation color'
+                )}
               >
-                <SelectTrigger
-                  size="sm"
-                  className="h-6 w-28 bg-background/65 px-2 text-[10px]"
-                  aria-label={translate(
-                    'auto.components.maestro.MaestroWorkspaceContentPreview.a83bb54e16',
-                    'Annotation color'
-                  )}
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(Object.keys(TONE_LABEL) as AnnotationTone[]).map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {TONE_LABEL[value]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                {(Object.keys(TONE_LABEL) as AnnotationTone[]).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`size-3.5 rounded-full border-2 transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${TONE_DOT[value]} ${tone === value ? 'border-foreground/75' : 'border-transparent'}`}
+                    aria-label={`Set annotation color to ${TONE_LABEL[value]}`}
+                    aria-pressed={tone === value}
+                    onClick={() => {
+                      setOptimisticTone(value)
+                      onUpdateAnnotationTone(value)
+                    }}
+                  />
+                ))}
+              </div>
             ) : null}
           </div>
         ) : null}
-        <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-5 text-foreground">
-          {preview.content}
-        </pre>
-        <p className="mt-3 text-[10px] text-muted-foreground">
+        {tone && onUpdateAnnotationContent ? (
+          <MaestroWorkspaceMiniMarkdownEditor
+            content={preview.content}
+            onSave={onUpdateAnnotationContent}
+          />
+        ) : (
+          <pre className="scrollbar-sleek min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-5 text-foreground">
+            {preview.content}
+          </pre>
+        )}
+        <p className="shrink-0 border-t border-border/50 px-3 py-1.5 text-[10px] text-muted-foreground">
           {preview.source}{' '}
           {translate(
             'auto.components.maestro.MaestroWorkspaceContentPreview.6ecef4bd09',

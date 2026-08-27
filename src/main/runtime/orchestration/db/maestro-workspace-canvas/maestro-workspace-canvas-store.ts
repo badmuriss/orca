@@ -5,6 +5,7 @@ import {
 } from '../../../../../shared/maestro-document-contract'
 import { emptyWorkspaceCanvasDocument } from '../../../../../shared/maestro-workspace-document-state'
 import type { WorkspaceSurfaceSnapshot } from '../../../../../shared/maestro-workspace-canvas'
+import { defaultWorkspaceCanvasPlacement } from './maestro-workspace-default-placement'
 import type { OrchestrationDb } from '../orchestration-db'
 import { createMaestroWorkspaceCanvasTablesSql } from '../migrations/create-maestro-workspace-canvas-tables-sql'
 
@@ -212,15 +213,6 @@ export function writeWorkspaceCanvasDocument(
   }
 }
 
-function deterministicPlacement(index: number): WorkspaceCanvasDocument['placements'][string] {
-  return {
-    position: { x: (index % 3) * 360, y: Math.floor(index / 3) * 260 },
-    size: { width: 320, height: 220 },
-    collapsed: false,
-    z_order: index
-  }
-}
-
 function reconcileDocument(params: {
   document: WorkspaceCanvasDocument
   snapshot: WorkspaceSurfaceSnapshot
@@ -258,7 +250,10 @@ function reconcileDocument(params: {
     .filter((key) => !knownKeys.has(key) && !confirmedClosed.has(key))
     .sort()
   for (const surfaceKey of newSurfaceKeys) {
-    next.placements[surfaceKey] = deterministicPlacement(Object.keys(next.placements).length)
+    next.placements[surfaceKey] = defaultWorkspaceCanvasPlacement(
+      Object.keys(next.placements).length,
+      params.snapshot.surfaces[surfaceKey]!
+    )
   }
   return { outcome: 'applied', document: WorkspaceCanvasDocumentSchema.parse(next) }
 }

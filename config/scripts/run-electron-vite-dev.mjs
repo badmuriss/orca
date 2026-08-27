@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
   cpSync,
@@ -23,6 +23,7 @@ import {
   getDevBundlePlistPatches,
   getDevHelperPlistPatches
 } from './dev-electron-bundle-identity.mjs'
+import { runElectronViteDevSupervisor } from './electron-vite-dev-supervisor.mjs'
 
 // Why: Electron-based hosts (e.g. Claude Code, VS Code) set
 // ELECTRON_RUN_AS_NODE=1 in their terminal environment. If this leaks into
@@ -653,94 +654,9 @@ if (!userPassedPort && !isHelpOrVersion) {
 }
 prepareDevWebClient()
 const forwardedArgs = ['dev', ...forwardedRaw, ...forwardedExtras]
-const child = spawn(process.execPath, [electronViteCli, ...forwardedArgs], {
-  stdio: 'inherit',
-  env: process.env,
-  // Why: electron-vite launches Electron as a descendant process. Giving the
-  // dev runner its own process group lets Ctrl+C kill the whole tree on macOS
-  // instead of leaving the Electron app alive after the terminal exits.
-  detached: process.platform !== 'win32'
-})
-
-let isShuttingDown = false
-let forcedKillTimer = null
-
-function signalExitCode(signal) {
-  if (signal === 'SIGINT') {
-    return 130
-  }
-  if (signal === 'SIGTERM') {
-    return 143
-  }
-  return 1
-}
-
-function terminateChild(signal) {
-  if (!child.pid) {
-    return
-  }
-
-  if (process.platform === 'win32') {
-    const taskkill = spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], {
-      stdio: 'ignore',
-      windowsHide: true
-    })
-    taskkill.unref()
-    return
-  }
-
-  try {
-    process.kill(-child.pid, signal)
-  } catch (error) {
-    const code = error && typeof error === 'object' && 'code' in error ? error.code : null
-    if (code !== 'ESRCH') {
-      throw error
-    }
-  }
-}
-
-function beginShutdown(signal) {
-  if (isShuttingDown) {
-    return
-  }
-  isShuttingDown = true
-
-  terminateChild(signal)
-  forcedKillTimer = setTimeout(() => {
-    terminateChild('SIGKILL')
-  }, 5000)
-}
-
-process.on('SIGINT', () => {
-  beginShutdown('SIGINT')
-})
-
-process.on('SIGTERM', () => {
-  beginShutdown('SIGTERM')
-})
-
-child.on('error', (error) => {
-  if (forcedKillTimer) {
-    clearTimeout(forcedKillTimer)
-  }
-  console.error(error)
-  process.exit(1)
-})
-
-child.on('exit', (code, signal) => {
-  if (forcedKillTimer) {
-    clearTimeout(forcedKillTimer)
-  }
-
-  if (isShuttingDown) {
-    process.exit(signalExitCode(signal ?? 'SIGINT'))
-    return
-  }
-
-  if (signal) {
-    process.exit(signalExitCode(signal))
-    return
-  }
-
-  process.exit(code ?? 1)
+runElectronViteDevSupervisor({
+  nodePath: process.execPath,
+  electronViteCli,
+  args: forwardedArgs,
+  env: process.env
 })

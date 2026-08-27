@@ -1,4 +1,5 @@
 import type { WorkspaceCanvasDocument } from '../../../../shared/maestro-document-contract'
+import type { WorkspaceSurface } from '../../../../shared/maestro-workspace-canvas'
 
 export type MaestroWorkspaceWindowPlacement = WorkspaceCanvasDocument['placements'][string]
 
@@ -31,12 +32,20 @@ export function createMaestroSurfaceAdditionTracker() {
 export function workspaceWindowPlacement(
   surfaceKey: string,
   index: number,
-  document: WorkspaceCanvasDocument
+  document: WorkspaceCanvasDocument,
+  surface?: WorkspaceSurface
 ): MaestroWorkspaceWindowPlacement {
+  const isAnnotation = surface?.binding.kind === 'content' && surface.binding.annotation != null
+  const size =
+    surface?.content_type === 'terminal'
+      ? { width: 480, height: 320 }
+      : isAnnotation
+        ? { width: 440, height: 360 }
+        : { width: 360, height: 260 }
   return (
     document.placements[surfaceKey] ?? {
-      position: { x: 36 + (index % 3) * 350, y: 52 + Math.floor(index / 3) * 260 },
-      size: { width: 320, height: 220 },
+      position: { x: 36 + (index % 3) * 510, y: 52 + Math.floor(index / 3) * 380 },
+      size,
       collapsed: false,
       z_order: index
     }

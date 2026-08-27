@@ -1,4 +1,13 @@
-import { FileCode2, Focus, Globe2, Link2, MonitorUp, Pencil, TerminalSquare, X } from 'lucide-react'
+import {
+  FileCode2,
+  Focus,
+  Globe2,
+  Link2,
+  MonitorUp,
+  TerminalSquare,
+  TextCursorInput,
+  X
+} from 'lucide-react'
 import type { WorkspaceSurface } from '../../../../shared/maestro-workspace-canvas'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -30,6 +39,7 @@ type MaestroWorkspaceWindowProps = {
   onMoveCommit: (delta: { x: number; y: number }) => void
   onResizeCommit: (delta: { x: number; y: number }) => void
   onUpdateAnnotationTone: (tone: 'decision' | 'warning' | 'blocked' | 'observation') => void
+  onUpdateAnnotationContent?: (content: string) => void
 }
 
 const SURFACE_ICON = {
@@ -45,7 +55,8 @@ const SURFACE_ICON = {
 function bindingDetail(
   surface: WorkspaceSurface,
   runtimeTarget: RuntimeClientTarget,
-  onUpdateAnnotationTone: MaestroWorkspaceWindowProps['onUpdateAnnotationTone']
+  onUpdateAnnotationTone: MaestroWorkspaceWindowProps['onUpdateAnnotationTone'],
+  onUpdateAnnotationContent: MaestroWorkspaceWindowProps['onUpdateAnnotationContent']
 ): React.JSX.Element {
   const binding = surface.binding
   if (binding.kind === 'terminal') {
@@ -104,6 +115,7 @@ function bindingDetail(
       target={runtimeTarget}
       surface={surface}
       onUpdateAnnotationTone={onUpdateAnnotationTone}
+      onUpdateAnnotationContent={onUpdateAnnotationContent}
     />
   )
 }
@@ -165,7 +177,8 @@ export function MaestroWorkspaceWindow({
   onResize,
   onMoveCommit,
   onResizeCommit,
-  onUpdateAnnotationTone
+  onUpdateAnnotationTone,
+  onUpdateAnnotationContent
 }: MaestroWorkspaceWindowProps): React.JSX.Element {
   const Icon = SURFACE_ICON[surface.content_type]
   return (
@@ -231,7 +244,7 @@ export function MaestroWorkspaceWindow({
                   onEdit()
                 }}
               >
-                <Pencil />
+                <TextCursorInput />
                 <span className="sr-only">
                   {translate(
                     'auto.components.maestro.MaestroWorkspaceWindow.97d6f5fe39',
@@ -302,7 +315,7 @@ export function MaestroWorkspaceWindow({
           </Tooltip>
         </header>
         <div className="min-h-0 flex-1">
-          {bindingDetail(surface, runtimeTarget, onUpdateAnnotationTone)}
+          {bindingDetail(surface, runtimeTarget, onUpdateAnnotationTone, onUpdateAnnotationContent)}
         </div>
       </div>
       <Tooltip>

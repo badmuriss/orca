@@ -6,8 +6,12 @@ import type { RuntimeMaestroWorkspaceCanvasScope } from '../../../../shared/runt
 import { Button } from '@/components/ui/button'
 import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu'
 import type { RuntimeClientTarget } from '@/runtime/runtime-client-target'
-import { useMaestroWorkspaceCanvas } from '@/hooks/useMaestroWorkspaceCanvas'
+import {
+  useMaestroWorkspaceCanvas,
+  type MaestroWorkspaceCanvasResource
+} from '@/hooks/useMaestroWorkspaceCanvas'
 import { MaestroWorkspaceLinks } from './MaestroWorkspaceLinks'
+import type { OptimisticMaestroManualLink } from './MaestroWorkspaceLinks'
 import { MaestroWorkspaceHarnessOverlay } from './MaestroWorkspaceHarnessOverlay'
 import {
   createMaestroSurfaceAdditionTracker,
@@ -25,11 +29,15 @@ import { useMaestroWorkspaceRunProgress } from './useMaestroWorkspaceRunProgress
 const surfaceAdditionTracker = createMaestroSurfaceAdditionTracker()
 const REVEAL_INSETS = { top: 64, right: 344, bottom: 16, left: 16 } as const
 
-function initialPlacements(document: WorkspaceCanvasDocument, surfaceKeys: readonly string[]) {
+function initialPlacements(
+  document: WorkspaceCanvasDocument,
+  snapshot: NonNullable<MaestroWorkspaceCanvasResource['result']>['snapshot'],
+  surfaceKeys: readonly string[]
+) {
   return Object.fromEntries(
     surfaceKeys.map((surfaceKey, index) => [
       surfaceKey,
-      workspaceWindowPlacement(surfaceKey, index, document)
+      workspaceWindowPlacement(surfaceKey, index, document, snapshot.surfaces[surfaceKey])
     ])
   )
 }
@@ -63,6 +71,9 @@ export function MaestroWorkspaceCanvas({
   const [placements, setPlacements] = useState<
     Readonly<Record<string, MaestroWorkspaceWindowPlacement>>
   >({})
+  const [optimisticManualLinks, setOptimisticManualLinks] = useState<
+    readonly OptimisticMaestroManualLink[]
+  >([])
   const optimisticPlacements = useRef<Record<string, MaestroWorkspaceWindowPlacement>>({})
   const runProgress = useMaestroWorkspaceRunProgress(target, scope)
 
@@ -70,7 +81,7 @@ export function MaestroWorkspaceCanvas({
     if (!result) {
       return
     }
-    const authoritative = initialPlacements(result.canvas.document, surfaceKeys)
+    const authoritative = initialPlacements(result.canvas.document, result.snapshot, surfaceKeys)
     setPlacements(() =>
       Object.fromEntries(
         surfaceKeys.map((surfaceKey) => {
@@ -96,6 +107,30 @@ export function MaestroWorkspaceCanvas({
       )
     )
   }, [resource.mutation?.status, result, surfaceKeys])
+
+  useEffect(() => {
+    setOptimisticManualLinks((current) =>
+      current.filter(
+        (link) =>
+          !result?.canvas.document.manual_links.some(
+            (confirmed) =>
+              confirmed.source_surface_key === link.source &&
+              confirmed.target_surface_key === link.target
+          )
+      )
+    )
+  }, [result?.canvas.document.manual_links])
+
+  useEffect(() => {
+    if (
+      resource.mutation?.status === 'stale' ||
+      resource.mutation?.status === 'cancelled' ||
+      resource.mutation?.status === 'unavailable' ||
+      resource.mutation?.status === 'outcome_unknown'
+    ) {
+      setOptimisticManualLinks([])
+    }
+  }, [resource.mutation?.status])
 
   const pendingSurfaceKey = useMemo(
     () =>
@@ -132,7 +167,8 @@ export function MaestroWorkspaceCanvas({
     const placement = workspaceWindowPlacement(
       addedSurfaceKey,
       surfaceKeys.indexOf(addedSurfaceKey),
-      result.canvas.document
+      result.canvas.document,
+      result.snapshot.surfaces[addedSurfaceKey]
     )
     revealPlacement(workspaceWindowBounds(placement), REVEAL_INSETS)
   }, [
@@ -282,6 +318,7 @@ export function MaestroWorkspaceCanvas({
         snapshot={snapshot}
         document={document}
         placements={placements}
+        optimisticManualLinks={optimisticManualLinks}
         style={board.worldStyle}
       />
       <MaestroWorkspaceWindowLayer
@@ -296,6 +333,12 @@ export function MaestroWorkspaceCanvas({
         optimisticPlacements={optimisticPlacements}
         worldStyle={board.worldStyle}
         worldZoom={board.viewport.zoom}
+        onManualLinkCreated={(source, targetKey) =>
+          setOptimisticManualLinks((current) => [
+            ...current.filter((link) => link.source !== source || link.target !== targetKey),
+            { id: crypto.randomUUID(), source, target: targetKey }
+          ])
+        }
         onRevealPlacement={(placement) =>
           board.reveal(workspaceWindowBounds(placement), REVEAL_INSETS)
         }

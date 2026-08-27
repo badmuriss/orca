@@ -173,14 +173,20 @@ describe('useMaestroWorkspaceCanvas', () => {
     expect(resource?.result?.snapshot.surfaces).toHaveProperty(workspaceSurfaceKey(surface.id))
   })
 
-  it('stops after a second stale canvas mutation and preserves the receipt', async () => {
-    query.mockResolvedValueOnce(available(2)).mockResolvedValueOnce(available(3))
-    mutate.mockResolvedValueOnce({ status: 'stale', authority_revision: 3 }).mockResolvedValueOnce({
-      status: 'stale',
-      authority_revision: 4,
-      canvas_revision: 4,
-      reason: 'canvas_revision_conflict'
-    })
+  it('stops after two bounded stale retries and preserves the receipt', async () => {
+    query
+      .mockResolvedValueOnce(available(2))
+      .mockResolvedValueOnce(available(3))
+      .mockResolvedValueOnce(available(4))
+    mutate
+      .mockResolvedValueOnce({ status: 'stale', authority_revision: 3 })
+      .mockResolvedValueOnce({ status: 'stale', authority_revision: 4 })
+      .mockResolvedValueOnce({
+        status: 'stale',
+        authority_revision: 5,
+        canvas_revision: 5,
+        reason: 'canvas_revision_conflict'
+      })
     await act(async () => {
       root?.render(createElement(Probe))
       await Promise.resolve()
@@ -192,11 +198,11 @@ describe('useMaestroWorkspaceCanvas', () => {
         idempotency_key: 'focus-stale-1'
       })
     })
-    expect(mutate).toHaveBeenCalledTimes(2)
-    expect(mutate.mock.calls[1][1]).toMatchObject({
+    expect(mutate).toHaveBeenCalledTimes(3)
+    expect(mutate.mock.calls[2][1]).toMatchObject({
       idempotency_key: 'focus-stale-1',
-      expected_authority_revision: 3,
-      expected_canvas_revision: 3
+      expected_authority_revision: 4,
+      expected_canvas_revision: 4
     })
     expect(resource?.mutation).toMatchObject({
       status: 'stale',

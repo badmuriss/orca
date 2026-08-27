@@ -40,9 +40,11 @@ type WindowLayerProps = {
   worldStyle: React.CSSProperties
   worldZoom?: number
   onRevealPlacement: (placement: MaestroWorkspaceWindowPlacement) => void
+  onManualLinkCreated: (sourceKey: string, targetKey: string) => void
 }
 
 export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.Element {
+  const { onManualLinkCreated, snapshot } = props
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [inspectorKey, setInspectorKey] = useState<string | null>(null)
   const [editingKey, setEditingKey] = useState<string | null>(null)
@@ -78,9 +80,7 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
           ?.closest<HTMLElement>('[data-maestro-workspace-surface]')
         const candidate = target?.dataset.maestroWorkspaceSurface ?? null
         const targetKey =
-          candidate && candidate !== sourceKey && props.snapshot.surfaces[candidate]
-            ? candidate
-            : null
+          candidate && candidate !== sourceKey && snapshot.surfaces[candidate] ? candidate : null
         hoveredTargetKey = targetKey
         setLinkDrag({
           sourceKey,
@@ -98,7 +98,8 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
           .elementFromPoint(upEvent.clientX, upEvent.clientY)
           ?.closest<HTMLElement>('[data-maestro-workspace-surface]')
         const targetKey = hoveredTargetKey ?? target?.dataset.maestroWorkspaceSurface
-        if (targetKey && targetKey !== sourceKey && props.snapshot.surfaces[targetKey]) {
+        if (targetKey && targetKey !== sourceKey && snapshot.surfaces[targetKey]) {
+          onManualLinkCreated(sourceKey, targetKey)
           void mutate({
             action: 'create-manual-link',
             source_surface_key: sourceKey,
@@ -127,7 +128,7 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
       window.addEventListener('pointercancel', cancel, true)
       linkDragCleanupRef.current = cleanup
     },
-    [mutate, props.snapshot.surfaces]
+    [mutate, onManualLinkCreated, snapshot.surfaces]
   )
   return (
     <>
@@ -211,6 +212,18 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
                   idempotency_key: key('annotation-tone')
                 })
               }
+              onUpdateAnnotationContent={(content) =>
+                void mutate({
+                  action: 'update-annotation',
+                  surface_id: surface.id,
+                  content,
+                  tone:
+                    surface.binding.kind === 'content' && surface.binding.annotation
+                      ? surface.binding.annotation.tone
+                      : 'observation',
+                  idempotency_key: key('annotation-content')
+                })
+              }
             />
           )
         })}
@@ -262,14 +275,6 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
               action: 'delete-manual-link',
               link_id: linkId,
               idempotency_key: maestroWorkspaceMutationKey('delete-link', linkId)
-            })
-          }
-          onDecideSuggestion={(fingerprint, decision) =>
-            void mutate({
-              action: 'decide-suggestion',
-              fingerprint,
-              decision,
-              idempotency_key: maestroWorkspaceMutationKey(`suggestion-${decision}`, fingerprint)
             })
           }
         />

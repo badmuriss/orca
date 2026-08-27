@@ -21,7 +21,7 @@ cd /home/badmuriss/Documents/orca
 pnpm dev
 ```
 
-No Linux, o processo pode encerrar após detectar uma sequência de falhas da GPU. Quando aparecer a mensagem de fallback, execute `pnpm dev` novamente. A segunda execução usa renderização por software.
+No Linux, o runner detecta uma sequência fatal de falhas da GPU e reinicia uma única vez com renderização por software. Não é necessário executar `pnpm dev` novamente. Se a retomada também falhar, o runner encerra em vez de entrar em loop.
 
 Abra um projeto ou workspace e valide:
 
@@ -32,7 +32,7 @@ Abra um projeto ou workspace e valide:
 5. Terminal, Browser e Markdown aparecem renderizados dentro das janelas do Canvas.
 6. Clicar no preview seleciona a janela, mas só `Focus` troca para a aba correspondente.
 7. As janelas podem ser movidas e redimensionadas pelos controles visíveis.
-8. Os conectores podem ser arrastados entre janelas. Links automáticos e sugeridos têm estados distintos.
+8. Os conectores podem ser arrastados entre janelas. Links manuais e automáticos permanecem visíveis; sugestões não ocupam o Canvas.
 9. Uma nova annotation cria um Markdown normal e permite editar conteúdo e cor depois da criação.
 10. O scroll aplica zoom. `Shift+scroll` move na horizontal. `Ctrl+scroll`, ou `Command+scroll` no macOS, move na vertical.
 11. O painel de progresso distingue concluído, ativo, pendente, bloqueado e próximo passo.

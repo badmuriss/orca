@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceSurface } from '../../../../shared/maestro-workspace-canvas'
 
@@ -54,7 +54,9 @@ function surface(
 describe('MaestroWorkspaceContentPreview', () => {
   afterEach(cleanup)
   beforeEach(() => {
-    readAnnotation.mockReset()
+    readAnnotation
+      .mockReset()
+      .mockResolvedValue({ content: '# New annotation', version: '1', source: 'file' })
     readContent
       .mockReset()
       .mockResolvedValue({ content: 'Exact file', modelRevision: 'model-1', tabId: 'tab-1' })
@@ -102,5 +104,20 @@ describe('MaestroWorkspaceContentPreview', () => {
     await screen.findByText('Exact file')
     expect(readContent).toHaveBeenCalledTimes(1)
     expect(readContent.mock.calls[0][2]).toMatchObject({ unified_tab_id: 'tab-2' })
+  })
+
+  it('changes annotation tone from the compact color controls', async () => {
+    const onUpdateAnnotationTone = vi.fn()
+    render(
+      <MaestroWorkspaceContentPreview
+        target={{ kind: 'local' }}
+        surface={surface('observation')}
+        onUpdateAnnotationTone={onUpdateAnnotationTone}
+      />
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Set annotation color to Decision' }))
+    expect(onUpdateAnnotationTone).toHaveBeenCalledWith('decision')
+    expect(document.querySelector('[data-annotation-tone="decision"]')).not.toBeNull()
   })
 })

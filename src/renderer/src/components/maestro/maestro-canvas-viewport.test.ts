@@ -73,4 +73,15 @@ describe('Maestro canvas viewport', () => {
       )
     ).toBe(viewport)
   })
+
+  it('zooms out enough to reveal a larger terminal beside the notebook Inspector', () => {
+    const revealed = revealMaestroCanvasBounds(
+      { center: { x: 0, y: 0 }, zoom: 1 },
+      { width: 735, height: 700 },
+      { x: 0, y: 0, width: 480, height: 320 },
+      { top: 56, right: 344, bottom: 12, left: 16 }
+    )
+
+    expect(revealed.zoom).toBeCloseTo(375 / 480)
+  })
 })

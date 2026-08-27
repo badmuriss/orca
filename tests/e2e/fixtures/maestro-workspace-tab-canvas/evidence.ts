@@ -142,18 +142,12 @@ export async function createAnnotation(page: Page, tone: string, text: string): 
   await inspector.getByLabel('Tab title').fill(text)
   await inspector.getByRole('button', { name: 'Rename', exact: true }).click()
   await page.locator('aside').getByRole('button', { name: 'Close', exact: true }).click()
-  const tonePicker = annotation.getByLabel('Annotation color')
-  await tonePicker.click()
-  await page.getByRole('option', { name: new RegExp(`^${tone}$`, 'i') }).evaluate((option) => {
-    const pointerEvent = {
-      bubbles: true,
-      cancelable: true,
-      pointerType: 'mouse',
-      button: 0
-    }
-    option.dispatchEvent(new PointerEvent('pointerdown', pointerEvent))
-    option.dispatchEvent(new PointerEvent('pointerup', pointerEvent))
-  })
+  const editor = annotation.getByLabel('Edit annotation')
+  await editor.fill(`${text}\n\nEditable directly in Canvas.`)
+  await annotation
+    .getByRole('button', { name: new RegExp(`^Set annotation color to ${tone}$`, 'i') })
+    .click()
+  await expect(annotation).toContainText('Editable directly in Canvas.', { timeout: 30_000 })
   await expect(annotation.locator(`[data-annotation-tone="${tone.toLowerCase()}"]`)).toBeVisible({
     timeout: 30_000
   })

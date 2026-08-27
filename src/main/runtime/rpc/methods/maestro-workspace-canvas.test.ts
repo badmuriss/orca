@@ -384,6 +384,25 @@ describe('Maestro workspace Canvas authority', () => {
       kind: 'content',
       annotation: { tone: 'decision' }
     })
+    const annotationSurface = Object.values(reopened.snapshot.surfaces)[0]!
+    await expect(
+      authority.mutate({
+        action: 'update-annotation',
+        scope,
+        actor_id: 'actor-1',
+        expected_authority_revision: reopened.snapshot.authority_revision,
+        expected_canvas_revision: reopened.canvas.revision,
+        idempotency_key: 'annotation-tone-update-1',
+        surface_id: annotationSurface.id,
+        tone: 'blocked'
+      })
+    ).resolves.toMatchObject({ status: 'applied' })
+    const updated = await authority.query(scope, 'actor-1')
+    expect(
+      updated.status === 'available'
+        ? Object.values(updated.snapshot.surfaces)[0]?.binding
+        : undefined
+    ).toMatchObject({ kind: 'content', annotation: { tone: 'blocked' } })
     database.close()
   })
 

@@ -17,8 +17,7 @@ export function MaestroWorkspaceInspector({
   editingTitle,
   onClose,
   onRename,
-  onDeleteManualLink,
-  onDecideSuggestion
+  onDeleteManualLink
 }: {
   surfaceKey: string
   surface: WorkspaceSurface
@@ -28,7 +27,6 @@ export function MaestroWorkspaceInspector({
   onClose: () => void
   onRename: (title: string) => void
   onDeleteManualLink: (linkId: string) => void
-  onDecideSuggestion: (fingerprint: string, decision: 'accepted' | 'hidden') => void
 }): React.JSX.Element {
   const [title, setTitle] = useState(surface.title)
   useEffect(() => setTitle(surface.title), [surface.id.unified_tab_id, surface.title])
@@ -37,11 +35,6 @@ export function MaestroWorkspaceInspector({
   )
   const manual = document.manual_links.filter(
     (link) => link.source_surface_key === surfaceKey || link.target_surface_key === surfaceKey
-  )
-  const suggested = snapshot.suggested_links.filter(
-    (link) =>
-      !document.suggestion_decisions[link.fingerprint] &&
-      (link.source_surface_key === surfaceKey || link.target_surface_key === surfaceKey)
   )
   return (
     <aside className="absolute right-3 top-14 z-30 flex max-h-[calc(100%_-_4.25rem)] w-72 flex-col overflow-hidden rounded-lg border border-border bg-card shadow-[0_10px_24px_rgba(0,0,0,0.18)] 2xl:w-80">
@@ -130,40 +123,7 @@ export function MaestroWorkspaceInspector({
               </p>
             </div>
           ))}
-          {suggested.map((link) => (
-            <div
-              key={link.fingerprint}
-              className="rounded-md border border-dashed border-border p-2"
-            >
-              <Badge variant="outline">
-                {translate(
-                  'auto.components.maestro.MaestroWorkspaceInspector.f7bb7c2d65',
-                  'Suggestion'
-                )}
-              </Badge>
-              <p className="mt-1 text-foreground">{link.reason}</p>
-              <p className="mt-1 text-muted-foreground">{link.evidence_summary}</p>
-              <div className="mt-2 flex gap-1">
-                <Button size="xs" onClick={() => onDecideSuggestion(link.fingerprint, 'accepted')}>
-                  {translate(
-                    'auto.components.maestro.MaestroWorkspaceInspector.6343e83ffa',
-                    'Accept'
-                  )}
-                </Button>
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  onClick={() => onDecideSuggestion(link.fingerprint, 'hidden')}
-                >
-                  {translate(
-                    'auto.components.maestro.MaestroWorkspaceInspector.fc7696c2e4',
-                    'Hide'
-                  )}
-                </Button>
-              </div>
-            </div>
-          ))}
-          {manual.length + automatic.length + suggested.length === 0 ? (
+          {manual.length + automatic.length === 0 ? (
             <p className="text-muted-foreground">
               {translate(
                 'auto.components.maestro.MaestroWorkspaceInspector.f1039bab27',

@@ -41,22 +41,27 @@ export function revealMaestroCanvasBounds(
   bounds: MaestroCanvasBounds,
   insets: MaestroCanvasInsets
 ): MaestroCanvasViewport {
-  const screenLeft = canvas.width / 2 + (bounds.x - viewport.center.x) * viewport.zoom
-  const screenTop = canvas.height / 2 + (bounds.y - viewport.center.y) * viewport.zoom
-  const screenWidth = bounds.width * viewport.zoom
-  const screenHeight = bounds.height * viewport.zoom
+  const availableWidth = Math.max(1, canvas.width - insets.left - insets.right)
+  const availableHeight = Math.max(1, canvas.height - insets.top - insets.bottom)
+  const zoom = clampMaestroZoom(
+    Math.min(viewport.zoom, availableWidth / bounds.width, availableHeight / bounds.height)
+  )
+  const screenLeft = canvas.width / 2 + (bounds.x - viewport.center.x) * zoom
+  const screenTop = canvas.height / 2 + (bounds.y - viewport.center.y) * zoom
+  const screenWidth = bounds.width * zoom
+  const screenHeight = bounds.height * zoom
   const revealedLeft = revealAxis(screenLeft, screenWidth, insets.left, canvas.width - insets.right)
   const revealedTop = revealAxis(screenTop, screenHeight, insets.top, canvas.height - insets.bottom)
   const deltaX = screenLeft - revealedLeft
   const deltaY = screenTop - revealedTop
-  if (deltaX === 0 && deltaY === 0) {
+  if (deltaX === 0 && deltaY === 0 && zoom === viewport.zoom) {
     return viewport
   }
   return {
-    ...viewport,
+    zoom,
     center: {
-      x: viewport.center.x + deltaX / viewport.zoom,
-      y: viewport.center.y + deltaY / viewport.zoom
+      x: viewport.center.x + deltaX / zoom,
+      y: viewport.center.y + deltaY / zoom
     }
   }
 }

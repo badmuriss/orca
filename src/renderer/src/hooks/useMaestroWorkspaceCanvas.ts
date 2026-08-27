@@ -175,14 +175,15 @@ export function useMaestroWorkspaceCanvas(
         return
       }
       const generation = renderGeneration
+      let mutationBase = current
       let result = await mutateRuntimeMaestroWorkspaceCanvas(
         target,
-        buildMutationRequest(input, scope, current)
+        buildMutationRequest(input, scope, mutationBase)
       )
-      if (generation !== generationRef.current) {
-        return
-      }
-      if (result.status === 'stale') {
+      for (let staleRetry = 0; result.status === 'stale' && staleRetry < 2; staleRetry += 1) {
+        if (generation !== generationRef.current) {
+          return
+        }
         const sequence = ++requestSequence.current
         const incoming = await getRuntimeMaestroWorkspaceCanvas(target, scope)
         if (generation !== generationRef.current || sequence < appliedSequence.current) {
@@ -191,13 +192,16 @@ export function useMaestroWorkspaceCanvas(
         appliedSequence.current = sequence
         applyState((previous) => reconcileMaestroWorkspaceCanvasQuery(previous, incoming))
         if (incoming.status === 'available' && matchesScope(incoming, scope)) {
+          mutationBase = incoming
           result = await mutateRuntimeMaestroWorkspaceCanvas(
             target,
-            buildMutationRequest(input, scope, incoming)
+            buildMutationRequest(input, scope, mutationBase)
           )
           if (generation !== generationRef.current) {
             return
           }
+        } else {
+          break
         }
       }
       applyState((previous) => reconcileMaestroWorkspaceCanvasMutation(previous, result))
