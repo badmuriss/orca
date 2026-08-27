@@ -5,8 +5,6 @@ import { getShortcutPlatform } from '@/lib/shortcut-platform'
 import { subscribeToTerminalUserInput } from '@/components/terminal-pane/terminal-user-input-signal'
 import { composeActiveTerminalTheme } from '@/components/terminal-pane/terminal-appearance'
 import { useSystemPrefersDark } from '@/components/terminal-pane/use-system-prefers-dark'
-import { TerminalKittyKeyboardModeTracker } from '../../../../shared/terminal-kitty-keyboard-mode-tracker'
-import { replayPreviewConnectionSnapshot } from './preview-terminal-snapshot-replay'
 import { useEffectiveMacOptionAsAlt } from '@/lib/keyboard-layout/use-effective-mac-option-as-alt'
 import {
   buildPreviewAppearanceOptions,
@@ -24,7 +22,12 @@ import { useAppStore } from '@/store'
 import { installPreviewTerminalKeyHandler } from './preview-terminal-key-handler'
 import { createPreviewGridClaim } from './preview-grid-claim'
 import { installPreviewTerminalAppMenuClipboard } from './preview-terminal-app-menu-clipboard'
-import type { TerminalPreviewDataPayload } from '../../../../shared/terminal-preview'
+import {
+  createAgentTerminalPreviewFitScheduler,
+  createAgentTerminalPreviewWriter,
+  preparePassiveAgentTerminalOutput,
+  subscribeAgentTerminalPreviewStream
+} from './agent-terminal-preview-stream'
 
 const PREVIEW_SCROLLBACK_ROWS = 24
 // Why: main only ever serializes PREVIEW_SCROLLBACK_ROWS of history into this
@@ -38,31 +41,26 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
-/**
- * Live interactive view of an agent's terminal, streaming from the main
- * process's per-PTY headless emulator. On open it claims the PTY grid for the
- * dialog's own box (see createPreviewGridClaim), so the terminal renders
- * properly sized rather than scaled. The terminal itself is always created at
- * the PTY's REAL cols/rows — serialized ANSI replayed into different
- * dimensions rewraps into garbage — and when someone else owns the grid (a
- * phone, a host reclaim) the oversized frame is scaled down to fit and
- * anchored so the cursor stays visible. Keystrokes pass through to the PTY;
- * DOM renderer so it never grabs a WebGL context.
- */
+export type AgentTerminalPreviewMode = 'interactive' | 'passive'
+
+/** Renders the exact PTY through a DOM xterm, with optional interactive ownership. */
 export function AgentTerminalPreview({
   ptyId,
   terminalInput = null,
   autoFocus = true,
-  className
+  className,
+  mode = 'interactive'
 }: {
   ptyId: string
   /** Host-input facts relayed with the card; null routes bytes by client OS. */
   terminalInput?: DashboardCardTerminalInput | null
   autoFocus?: boolean
   className?: string
+  mode?: AgentTerminalPreviewMode
 }): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
+  const scheduleFitRef = useRef<(() => void) | null>(null)
   const settings = useAppStore((state) => state.settings)
   const systemPrefersDark = useSystemPrefersDark()
   const macOptionAsAlt = useEffectiveMacOptionAsAlt(settings?.terminalMacOptionAsAlt)
@@ -109,103 +107,54 @@ export function AgentTerminalPreview({
     let imeBridge: PreviewImeBridge | null = null
     let disposeKeyHandler: (() => void) | null = null
     let disposeTerminalCompatibility: (() => void) | null = null
-    // Why: mirrors the pane's tracker — the policy needs the flags the TUI
-    // negotiated, and this preview parses the same output stream the pane does.
-    const kittyKeyboardModes = new TerminalKittyKeyboardModeTracker()
+    let disposeAppMenuClipboard: (() => void) | null = null
     let refreshInFlight = false
     let refreshAgain = false
     let retryTimer: ReturnType<typeof setTimeout> | null = null
-    const pendingLivePayloads: Extract<TerminalPreviewDataPayload, { type: 'data' }>[] = []
-
-    const fitToBox = (): void => {
-      const screen = container.querySelector<HTMLElement>('.xterm-screen')
-      const box = container.parentElement
-      if (!screen || !box || !terminal) {
-        return
-      }
-      const scale = Math.min(1, box.clientWidth / Math.max(1, screen.offsetWidth))
-      container.style.transform = scale < 1 ? `scale(${scale})` : ''
-      // Anchor whichever end keeps the CURSOR row in view when the terminal is
-      // taller than the box: a fresh shell prompts at the TOP of its screen
-      // (blind bottom-anchoring clipped it away), while a busy TUI keeps its
-      // action at the bottom.
-      const cellHeight = screen.offsetHeight / Math.max(1, terminal.rows)
-      const cursorBottom = (terminal.buffer.active.cursorY + 1) * cellHeight * scale
-      const anchorTop = cursorBottom <= box.clientHeight
-      box.style.alignItems = anchorTop ? 'flex-start' : 'flex-end'
-      container.style.transformOrigin = anchorTop ? 'top left' : 'bottom left'
-    }
-    // Re-fit after every parsed write (cursor may move ends); rAF coalesces.
-    let fitScheduled = false
-    const scheduleFit = (): void => {
-      if (fitScheduled) {
-        return
-      }
-      fitScheduled = true
-      requestAnimationFrame(() => {
-        fitScheduled = false
-        fitToBox()
-      })
-    }
-
-    const gridClaim = createPreviewGridClaim({
-      ptyId,
+    const fitScheduler = createAgentTerminalPreviewFitScheduler({
       container,
       getTerminal: () => terminal
     })
+    const scheduleFit = fitScheduler.schedule
+    scheduleFitRef.current = scheduleFit
+
+    let gridClaim =
+      mode === 'interactive'
+        ? createPreviewGridClaim({
+            ptyId,
+            container,
+            getTerminal: () => terminal
+          })
+        : null
     // Box growth/shrink (window resize) changes the reachable grid.
     const boxResizeObserver =
       typeof ResizeObserver === 'undefined'
         ? null
         : new ResizeObserver(() => {
             scheduleFit()
-            gridClaim.schedule()
+            gridClaim?.schedule()
           })
     if (container.parentElement) {
       boxResizeObserver?.observe(container.parentElement)
     }
     boxResizeObserver?.observe(container)
-
-    let replayDepth = 0
-    const writeReplayed = (chunk: string, onDone?: () => void, live = false): void => {
-      // Why: a redelivered snapshot repeats the TUI's one-time kitty push, so
-      // replayed bytes must apply as idempotent sets (see the tracker's docs).
-      if (live) {
-        kittyKeyboardModes.scan(chunk)
-      } else {
-        kittyKeyboardModes.scanReplay(chunk)
-      }
-      replayDepth++
-      terminal?.write(chunk, () => {
-        replayDepth--
-        scheduleFit()
-        onDone?.()
-      })
-    }
-
-    const writeLive = (payload: Extract<TerminalPreviewDataPayload, { type: 'data' }>): void => {
-      if (!terminal) {
-        pendingLivePayloads.push(payload)
-        return
-      }
-      writeReplayed(
-        payload.data,
-        () => {
-          if (!disposed) {
-            void window.api.terminalPreview.ack(ptyId, payload.bytes)
-          }
-        },
-        true
-      )
-    }
-
-    const pasteClipboardText = createPreviewClipboardPaster({
+    const previewWriter = createAgentTerminalPreviewWriter({
       ptyId,
-      container,
       getTerminal: () => terminal,
-      getTerminalInput: () => terminalInputRef.current,
-      isDisposed: () => disposed
+      isDisposed: () => disposed,
+      onParsedWrite: mode === 'interactive' ? scheduleFit : () => undefined
     })
+
+    const pasteClipboardText =
+      mode === 'interactive'
+        ? createPreviewClipboardPaster({
+            ptyId,
+            container,
+            getTerminal: () => terminal,
+            getTerminalInput: () => terminalInputRef.current,
+            isDisposed: () => disposed
+          })
+        : null
 
     const disposeImeNativeTextBridge = (): void => {
       imeBridge?.dispose()
@@ -217,13 +166,13 @@ export function AgentTerminalPreview({
         // Why a live getter: kitty state can change between keydown and commit,
         // and the tracker outlives every reconnect inside this effect.
         imeBridge = installPreviewImeBridge(terminal, {
-          getKittyKeyboardFlags: () => kittyKeyboardModes.flags
+          getKittyKeyboardFlags: () => previewWriter.kittyKeyboardModes.flags
         })
       }
     }
 
     const installKeyHandler = (): void => {
-      if (!terminal) {
+      if (!terminal || !pasteClipboardText) {
         return
       }
       disposeKeyHandler = installPreviewTerminalKeyHandler({
@@ -238,7 +187,7 @@ export function AgentTerminalPreview({
           macOptionAsAlt: macOptionAsAltRef.current,
           keybindings: useAppStore.getState().keybindings,
           terminalInput: terminalInputRef.current,
-          getKittyKeyboardFlags: () => kittyKeyboardModes.flags,
+          getKittyKeyboardFlags: () => previewWriter.kittyKeyboardModes.flags,
           terminalShortcutPolicy: settingsRef.current?.terminalShortcutPolicy
         })
       })
@@ -267,11 +216,45 @@ export function AgentTerminalPreview({
           pendingUserInputSignals--
         }
         // Why: core's signal distinguishes real input from parser replies, so typing survives live replay without forwarding synthetic CPR/DA bytes.
-        if (userInputDisposable ? !signaledUserInput : replayDepth > 0) {
+        if (userInputDisposable ? !signaledUserInput : previewWriter.isReplaying()) {
           return
         }
         void window.api.terminalPreview.input(ptyId, data)
       })
+    }
+
+    let resourcesReleased = false
+    const releaseResources = (): void => {
+      if (resourcesReleased) {
+        return
+      }
+      resourcesReleased = true
+      if (retryTimer) {
+        clearTimeout(retryTimer)
+        retryTimer = null
+      }
+      fitScheduler.dispose()
+      if (scheduleFitRef.current === scheduleFit) {
+        scheduleFitRef.current = null
+      }
+      gridClaim?.dispose()
+      gridClaim = null
+      boxResizeObserver?.disconnect()
+      disposeAppMenuClipboard?.()
+      disposeAppMenuClipboard = null
+      offData?.()
+      offData = null
+      userInputDisposable?.dispose()
+      userInputDisposable = null
+      disposeImeNativeTextBridge()
+      disposeTerminalCompatibility?.()
+      disposeTerminalCompatibility = null
+      disposeKeyHandler?.()
+      disposeKeyHandler = null
+      void window.api.terminalPreview.unsubscribe(ptyId)
+      terminal?.dispose()
+      terminal = null
+      terminalRef.current = null
     }
 
     const replayConnection = (
@@ -281,8 +264,8 @@ export function AgentTerminalPreview({
     ): void => {
       const snap = connection.snapshot!
       if (!terminal) {
-        terminal = new Terminal(
-          buildPreviewTerminalOptions({
+        terminal = new Terminal({
+          ...buildPreviewTerminalOptions({
             settings: settingsRef.current,
             terminalInput: terminalInputRef.current,
             macOptionIsMeta: macOptionAsAltRef.current === 'true',
@@ -291,8 +274,9 @@ export function AgentTerminalPreview({
             cols: clamp(snap.cols ?? FALLBACK_COLS, 2, 500),
             rows: clamp(snap.rows ?? FALLBACK_ROWS, 2, 200),
             scrollback: PREVIEW_SCROLLBACK_BUFFER_ROWS
-          })
-        )
+          }),
+          ...(mode === 'passive' ? { disableStdin: true } : {})
+        })
         try {
           terminal.open(container)
         } catch {
@@ -301,10 +285,14 @@ export function AgentTerminalPreview({
           return
         }
         terminalRef.current = terminal
-        installTerminalCompatibility()
-        installInputRouting()
-        installImeNativeTextBridge()
-        installKeyHandler()
+        if (mode === 'passive') {
+          preparePassiveAgentTerminalOutput(terminal, settingsRef.current)
+        } else {
+          installTerminalCompatibility()
+          installInputRouting()
+          installImeNativeTextBridge()
+          installKeyHandler()
+        }
       } else if (replaceExisting) {
         // Why: keep the old frame visible during capture, then atomically replace it once the authoritative snapshot arrives.
         terminal.resize(
@@ -313,19 +301,11 @@ export function AgentTerminalPreview({
         )
         terminal.reset()
       }
-      replayPreviewConnectionSnapshot({
-        snapshot: snap,
-        replay: connection.replay,
-        kittyKeyboardModes,
-        write: (chunk, live) => writeReplayed(chunk, undefined, live)
-      })
-      for (const payload of pendingLivePayloads.splice(0)) {
-        writeLive(payload)
-      }
+      previewWriter.replay(connection)
       if (connection.resyncRequired) {
         refreshAgain = false
         // Why: sustained output can overflow every capture; delay retries so recovery cannot spin two serializations per event-loop turn.
-        writeReplayed('', () => {
+        previewWriter.writeBarrier(() => {
           if (disposed || retryTimer) {
             return
           }
@@ -337,11 +317,15 @@ export function AgentTerminalPreview({
       } else if (refreshAgain) {
         refreshAgain = false
         // Queue behind every replay write so replacement never clears a half-parsed frame.
-        writeReplayed('', requestRefresh)
+        previewWriter.writeBarrier(requestRefresh)
       }
-      scheduleFit()
-      gridClaim.schedule()
-      if (autoFocus) {
+      if (mode === 'passive') {
+        previewWriter.writeBarrier(scheduleFit)
+      } else {
+        scheduleFit()
+        gridClaim?.schedule()
+      }
+      if (mode === 'interactive' && autoFocus) {
         terminal.focus()
       }
     }
@@ -362,19 +346,8 @@ export function AgentTerminalPreview({
       if (!snap) {
         refreshInFlight = false
         setPtyGone(true)
-        offData?.()
-        offData = null
-        userInputDisposable?.dispose()
-        userInputDisposable = null
-        disposeImeNativeTextBridge()
-        disposeTerminalCompatibility?.()
-        disposeTerminalCompatibility = null
-        disposeKeyHandler?.()
-        disposeKeyHandler = null
-        terminal?.dispose()
-        terminal = null
-        terminalRef.current = null
-        void window.api.terminalPreview.unsubscribe(ptyId)
+        disposed = true
+        releaseResources()
         return
       }
       refreshInFlight = false
@@ -385,43 +358,29 @@ export function AgentTerminalPreview({
       replayConnection(connection, replaceExisting, () => void setup(true))
     }
 
-    const disposeAppMenuClipboard = installPreviewTerminalAppMenuClipboard({
-      container,
-      getTerminal: () => terminal,
-      pasteClipboardText
-    })
+    if (pasteClipboardText) {
+      disposeAppMenuClipboard = installPreviewTerminalAppMenuClipboard({
+        container,
+        getTerminal: () => terminal,
+        pasteClipboardText
+      })
+    }
 
-    offData = window.api.terminalPreview.onData((payload) => {
-      if (payload.ptyId !== ptyId) {
-        return
-      }
+    offData = subscribeAgentTerminalPreviewStream(ptyId, (payload) => {
       if (payload.type === 'resync') {
         void setup(true)
         return
       }
-      writeLive(payload)
+      previewWriter.writeLive(payload)
     })
 
     void setup()
 
     return () => {
       disposed = true
-      if (retryTimer) {
-        clearTimeout(retryTimer)
-      }
-      gridClaim.dispose()
-      boxResizeObserver?.disconnect()
-      disposeAppMenuClipboard()
-      offData?.()
-      userInputDisposable?.dispose()
-      disposeImeNativeTextBridge()
-      disposeTerminalCompatibility?.()
-      disposeKeyHandler?.()
-      void window.api.terminalPreview.unsubscribe(ptyId)
-      terminal?.dispose()
-      terminalRef.current = null
+      releaseResources()
     }
-  }, [autoFocus, ptyId, terminalTheme, terminalMode])
+  }, [autoFocus, mode, ptyId, terminalTheme, terminalMode])
 
   // Why: appearance settings must land on the open terminal, and the OS input
   // source can flip Option-as-Alt with no settings change at all. A remount
@@ -436,6 +395,7 @@ export function AgentTerminalPreview({
       buildPreviewAppearanceOptions(settings, macOptionAsAlt === 'true')
     )
     syncPreviewTerminalLigatures(terminal, settings)
+    scheduleFitRef.current?.()
   }, [settings, macOptionAsAlt])
 
   return (
@@ -444,6 +404,7 @@ export function AgentTerminalPreview({
     // buffer is. The terminal keeps the pane's true dimensions and is scaled/
     // clipped to fit; fitToBox anchors whichever end keeps the cursor in view.
     <div
+      data-terminal-preview-mode={mode}
       className={cn(
         'relative h-[calc(100vh-140px)] w-full overflow-hidden bg-background p-1.5',
         className
@@ -462,7 +423,13 @@ export function AgentTerminalPreview({
         aria-hidden={ptyGone || undefined}
         className={cn('flex h-full w-full items-end overflow-hidden', ptyGone && 'invisible')}
       >
-        <div ref={containerRef} className="origin-bottom-left" />
+        <div
+          ref={containerRef}
+          className={cn(
+            'origin-bottom-left',
+            mode === 'passive' && 'pointer-events-none select-none'
+          )}
+        />
       </div>
     </div>
   )
