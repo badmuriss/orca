@@ -79,6 +79,7 @@ export function MaestroWorkspaceSurfacePreview({
           <AgentTerminalPreview
             ptyId={binding.session_id}
             autoFocus={false}
+            mode="passive"
             className="size-full"
           />
         </RecoverableRenderErrorBoundary>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { MaestroProjection } from '../../../../shared/maestro-projection'
 import type { MaestroRunProgress } from '../../../../shared/maestro-run-progress'
 import type { RuntimeMaestroWorkspaceCanvasScope } from '../../../../shared/runtime-types'
 import type { RuntimeClientTarget } from '@/runtime/runtime-client-target'
@@ -8,17 +9,24 @@ export function useMaestroWorkspaceRunProgress(
   target: RuntimeClientTarget,
   scope: RuntimeMaestroWorkspaceCanvasScope
 ): MaestroRunProgress | null {
+  return useMaestroWorkspaceProjection(target, scope)?.runProgress ?? null
+}
+
+export function useMaestroWorkspaceProjection(
+  target: RuntimeClientTarget,
+  scope: RuntimeMaestroWorkspaceCanvasScope
+): MaestroProjection | null {
   const executionHostId = scope.execution_host_id
   const workspaceKey = scope.workspace_key
   const identity = `${executionHostId}\0${workspaceKey}`
-  const [state, setState] = useState<{ identity: string; progress: MaestroRunProgress | null }>({
+  const [state, setState] = useState<{ identity: string; projection: MaestroProjection | null }>({
     identity,
-    progress: null
+    projection: null
   })
   useEffect(() => {
     let active = true
     let timer: ReturnType<typeof setTimeout> | undefined
-    setState({ identity, progress: null })
+    setState({ identity, projection: null })
     const poll = async (): Promise<void> => {
       try {
         const projection = await getMaestroProjection(target, {
@@ -28,10 +36,10 @@ export function useMaestroWorkspaceRunProgress(
         if (!active) {
           return
         }
-        setState({ identity, progress: projection?.runProgress ?? null })
+        setState({ identity, projection })
       } catch {
         if (active) {
-          setState({ identity, progress: null })
+          setState({ identity, projection: null })
         }
       } finally {
         if (active) {
@@ -47,5 +55,5 @@ export function useMaestroWorkspaceRunProgress(
       }
     }
   }, [executionHostId, identity, target, workspaceKey])
-  return state.identity === identity ? state.progress : null
+  return state.identity === identity ? state.projection : null
 }

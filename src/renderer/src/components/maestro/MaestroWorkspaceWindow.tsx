@@ -6,6 +6,7 @@ import {
   MonitorUp,
   TerminalSquare,
   TextCursorInput,
+  Workflow,
   X
 } from 'lucide-react'
 import type { WorkspaceSurface } from '../../../../shared/maestro-workspace-canvas'
@@ -30,6 +31,8 @@ type MaestroWorkspaceWindowProps = {
   worldZoom?: number
   presencePhase?: MaestroWorkspacePresencePhase
   previewMode?: MaestroWorkspacePreviewMode
+  agentFunctionLabel?: string
+  agentRole?: 'coordinator' | 'worker'
   onSelect: () => void
   onEdit: () => void
   onLinkPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => void
@@ -123,6 +126,8 @@ export function MaestroWorkspaceWindow({
   worldZoom = 1,
   presencePhase = 'present',
   previewMode = 'full',
+  agentFunctionLabel,
+  agentRole,
   onSelect,
   onEdit,
   onLinkPointerDown,
@@ -136,6 +141,17 @@ export function MaestroWorkspaceWindow({
   onUpdateAnnotationContent
 }: MaestroWorkspaceWindowProps): React.JSX.Element {
   const Icon = SURFACE_ICON[surface.content_type]
+  const normalizedFunction = agentFunctionLabel?.trim()
+  const roleLabel =
+    agentRole === 'coordinator'
+      ? translate('auto.components.maestro.MaestroWorkspaceWindow.coordinator', 'Orchestrator')
+      : agentRole === 'worker'
+        ? translate('auto.components.maestro.MaestroWorkspaceWindow.worker', 'Worker')
+        : null
+  const functionLabel =
+    roleLabel && normalizedFunction && normalizedFunction !== surface.title
+      ? `${roleLabel} · ${normalizedFunction}`
+      : roleLabel
   return (
     <article
       className={`maestro-workspace-window absolute flex overflow-visible rounded-xl border bg-card shadow-xs outline-none transition-[border-color,box-shadow] focus-visible:ring-2 focus-visible:ring-ring ${selected ? 'ring-1 ring-ring/35' : ''}`}
@@ -161,6 +177,8 @@ export function MaestroWorkspaceWindow({
       data-availability={surface.availability}
       data-maestro-presence={presencePhase}
       data-maestro-preview-mode={previewMode}
+      data-maestro-agent-role={agentRole}
+      data-maestro-agent-function={normalizedFunction}
       aria-busy={presencePhase === 'entering'}
       tabIndex={0}
       onFocus={(event) => {
@@ -176,7 +194,7 @@ export function MaestroWorkspaceWindow({
     >
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[inherit]">
         <header
-          className="flex h-9 shrink-0 cursor-move items-center gap-2 border-b border-border/80 bg-muted/35 px-2.5"
+          className="flex h-10 shrink-0 cursor-move items-center gap-2 border-b border-border/80 bg-muted/35 px-2.5"
           onPointerDown={(event) => {
             onSelect()
             startPointerGesture(event, worldZoom, onMove, onMoveCommit)
@@ -185,7 +203,15 @@ export function MaestroWorkspaceWindow({
           <span className="flex size-5 shrink-0 items-center justify-center rounded-md border border-border/70 bg-background/70">
             <Icon className="size-3 text-muted-foreground" />
           </span>
-          <span className="min-w-0 flex-1 truncate text-xs font-semibold">{surface.title}</span>
+          <span className="flex min-w-0 flex-1 flex-col justify-center">
+            <span className="truncate text-xs font-semibold leading-4">{surface.title}</span>
+            {functionLabel ? (
+              <span className="flex min-w-0 items-center gap-1 truncate text-[9px] font-semibold uppercase leading-3 tracking-[0.08em] text-muted-foreground">
+                <Workflow className="size-2.5 shrink-0" />
+                <span className="truncate">{functionLabel}</span>
+              </span>
+            ) : null}
+          </span>
           {surface.availability !== 'available' ? (
             <span className="text-[10px] font-medium text-muted-foreground">
               {surface.availability}

@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type Dispatch,
@@ -26,6 +27,7 @@ import {
   maestroWorkspacePreviewMode,
   type MaestroWorkspacePreviewMode
 } from './maestro-workspace-visibility'
+import type { CanvasAgentTopology } from './maestro-agent-topology'
 
 type PlacementMap = Readonly<Record<string, MaestroWorkspaceWindowPlacement>>
 type LinkDrag = {
@@ -43,6 +45,9 @@ type WindowLayerProps = {
   pendingSurfaceKey: string | null
   placements: PlacementMap
   setPlacements: Dispatch<SetStateAction<PlacementMap>>
+  selectedKey: string | null
+  onSelectedKeyChange: (surfaceKey: string | null) => void
+  topology: CanvasAgentTopology
   optimisticPlacements: MutableRefObject<Record<string, MaestroWorkspaceWindowPlacement>>
   worldStyle: React.CSSProperties
   worldZoom?: number
@@ -54,7 +59,6 @@ type WindowLayerProps = {
 
 export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.Element {
   const { onManualLinkCreated, snapshot } = props
-  const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [inspectorKey, setInspectorKey] = useState<string | null>(null)
   const [editingKey, setEditingKey] = useState<string | null>(null)
   const [linkDrag, setLinkDrag] = useState<LinkDrag | null>(null)
@@ -63,6 +67,10 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
   const lastPlacementsRef = useRef<Record<string, MaestroWorkspaceWindowPlacement>>({})
   const previewModesRef = useRef<Record<string, MaestroWorkspacePreviewMode>>({})
   const presenceItems = useMaestroWorkspacePresence(props.snapshot, props.surfaceKeys)
+  const topologyBySurfaceKey = useMemo(
+    () => new Map(props.topology.nodes.map((node) => [node.surfaceId, node])),
+    [props.topology.nodes]
+  )
   const inspectedSurface = inspectorKey ? props.snapshot.surfaces[inspectorKey] : undefined
   const mutate = props.resource.mutate
   useEffect(() => () => linkDragCleanupRef.current?.(), [])
@@ -163,7 +171,8 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
           if (!surface || !placement) {
             return null
           }
-          const selected = selectedKey === surfaceKey && phase !== 'exiting'
+          const selected = props.selectedKey === surfaceKey && phase !== 'exiting'
+          const agentNode = topologyBySurfaceKey.get(surfaceKey)
           const previewMode = maestroWorkspacePreviewMode({
             bounds: workspaceWindowBounds(placement),
             viewport: props.viewport,
@@ -195,12 +204,20 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
               worldZoom={props.worldZoom}
               presencePhase={phase}
               previewMode={previewMode}
+              agentFunctionLabel={agentNode?.functionLabel}
+              agentRole={
+                props.topology.coordinatorSurfaceId === surfaceKey
+                  ? 'coordinator'
+                  : agentNode?.parentSurfaceId || agentNode?.coordinatorSurfaceId
+                    ? 'worker'
+                    : undefined
+              }
               onSelect={() => {
                 props.onRevealPlacement(placement)
-                setSelectedKey(surfaceKey)
+                props.onSelectedKeyChange(surfaceKey)
               }}
               onEdit={() => {
-                setSelectedKey(surfaceKey)
+                props.onSelectedKeyChange(surfaceKey)
                 setInspectorKey(surfaceKey)
                 setEditingKey(surfaceKey)
               }}

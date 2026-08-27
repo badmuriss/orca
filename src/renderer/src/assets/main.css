@@ -3033,6 +3033,24 @@ html.native-shell .app-layout {
   will-change: opacity, transform;
 }
 
+.maestro-workspace-window[data-maestro-agent-role='coordinator'] {
+  outline: 1px solid color-mix(in srgb, var(--ring) 38%, transparent);
+  outline-offset: 2px;
+}
+
+.maestro-workspace-window[data-maestro-agent-role='coordinator']::after {
+  content: '';
+  position: absolute;
+  z-index: 8;
+  top: 48px;
+  bottom: 12px;
+  left: -2px;
+  width: 3px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--ring) 72%, var(--border));
+  pointer-events: none;
+}
+
 .maestro-workspace-window[data-maestro-presence='exiting'] {
   pointer-events: none;
   animation: maestro-workspace-surface-exit 210ms cubic-bezier(0.7, 0, 0.84, 0) both;
