@@ -88,7 +88,7 @@ describe('Maestro workspace window layout', () => {
   it('creates terminals and annotations at readable working sizes', () => {
     expect(
       workspaceWindowPlacement('terminal', 0, emptyDocument, surface('terminal')).size
-    ).toEqual({ width: 480, height: 320 })
+    ).toEqual({ width: 720, height: 460 })
     expect(
       workspaceWindowPlacement('annotation', 1, emptyDocument, surface('annotation')).size
     ).toEqual({ width: 440, height: 360 })

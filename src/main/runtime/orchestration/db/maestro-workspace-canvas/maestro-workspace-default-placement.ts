@@ -8,12 +8,12 @@ export function defaultWorkspaceCanvasPlacement(
   const isAnnotation = surface.binding.kind === 'content' && surface.binding.annotation != null
   const size =
     surface.content_type === 'terminal'
-      ? { width: 480, height: 320 }
+      ? { width: 720, height: 460 }
       : isAnnotation
         ? { width: 440, height: 360 }
         : { width: 360, height: 260 }
   return {
-    position: { x: (index % 3) * 510, y: Math.floor(index / 3) * 380 },
+    position: { x: (index % 3) * 760, y: Math.floor(index / 3) * 500 },
     size,
     collapsed: false,
     z_order: index
