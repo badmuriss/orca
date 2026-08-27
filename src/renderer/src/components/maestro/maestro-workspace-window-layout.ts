@@ -68,8 +68,16 @@ export function workspaceWindowBounds(placement: MaestroWorkspaceWindowPlacement
 
 const NEW_WINDOW_GAP = 40
 const MAX_PLACEMENT_ROWS = 64
+const MAX_PLACEMENT_SCAN_RINGS = 16
+const MAX_LAYOUT_COORDINATE = 1_000_000
+const MAX_LAYOUT_Z_ORDER = 1_000_000
 
-function placementsOverlap(
+export type MaestroWorkspaceWindowPlacementAttempt = {
+  placement: MaestroWorkspaceWindowPlacement
+  collisionFree: boolean
+}
+
+export function workspaceWindowPlacementsOverlap(
   left: MaestroWorkspaceWindowPlacement,
   right: MaestroWorkspaceWindowPlacement
 ): boolean {
@@ -79,6 +87,74 @@ function placementsOverlap(
     left.position.y + left.size.height + NEW_WINDOW_GAP <= right.position.y ||
     right.position.y + right.size.height + NEW_WINDOW_GAP <= left.position.y
   )
+}
+
+function boundedLayoutCoordinate(value: number): number {
+  return Math.max(-MAX_LAYOUT_COORDINATE, Math.min(MAX_LAYOUT_COORDINATE, Math.round(value)))
+}
+
+function placementZOrder(
+  placement: MaestroWorkspaceWindowPlacement,
+  occupied: readonly MaestroWorkspaceWindowPlacement[]
+): number {
+  return Math.min(
+    MAX_LAYOUT_Z_ORDER,
+    Math.max(placement.z_order, ...occupied.map((item) => item.z_order + 1), 0)
+  )
+}
+
+function* placementScanOffsets(): Generator<{ x: number; y: number }> {
+  yield { x: 0, y: 0 }
+  for (let ring = 1; ring <= MAX_PLACEMENT_SCAN_RINGS; ring += 1) {
+    for (let x = -ring; x <= ring; x += 1) {
+      yield { x, y: -ring }
+    }
+    for (let y = -ring + 1; y <= ring; y += 1) {
+      yield { x: ring, y }
+    }
+    for (let x = ring - 1; x >= -ring; x -= 1) {
+      yield { x, y: ring }
+    }
+    for (let y = ring - 1; y > -ring; y -= 1) {
+      yield { x: -ring, y }
+    }
+  }
+}
+
+export function findWorkspaceWindowPlacementNearPosition(
+  placement: MaestroWorkspaceWindowPlacement,
+  occupied: readonly MaestroWorkspaceWindowPlacement[],
+  preferredPosition: { x: number; y: number }
+): MaestroWorkspaceWindowPlacementAttempt {
+  const zOrder = placementZOrder(placement, occupied)
+  const stepX = placement.size.width + NEW_WINDOW_GAP
+  const stepY = placement.size.height + NEW_WINDOW_GAP
+
+  for (const offset of placementScanOffsets()) {
+    const candidate = {
+      ...placement,
+      position: {
+        x: boundedLayoutCoordinate(preferredPosition.x + offset.x * stepX),
+        y: boundedLayoutCoordinate(preferredPosition.y + offset.y * stepY)
+      },
+      z_order: zOrder
+    }
+    if (!occupied.some((item) => workspaceWindowPlacementsOverlap(candidate, item))) {
+      return { placement: candidate, collisionFree: true }
+    }
+  }
+
+  return {
+    placement: {
+      ...placement,
+      position: {
+        x: boundedLayoutCoordinate(preferredPosition.x),
+        y: boundedLayoutCoordinate(preferredPosition.y)
+      },
+      z_order: zOrder
+    },
+    collisionFree: false
+  }
 }
 
 function placementRowOffset(row: number): number {
@@ -110,7 +186,7 @@ export function placeWorkspaceWindowNearViewport(
       ? [anchor.x - NEW_WINDOW_GAP / 2 - placement.size.width, anchor.x + NEW_WINDOW_GAP / 2]
       : [anchor.x - placement.size.width / 2]
   const originY = anchor.y - placement.size.height / 2
-  const zOrder = Math.max(placement.z_order, ...occupied.map((item) => item.z_order + 1), 0)
+  const zOrder = placementZOrder(placement, occupied)
 
   for (let row = 0; row < MAX_PLACEMENT_ROWS; row += 1) {
     const y = originY + placementRowOffset(row) * (placement.size.height + NEW_WINDOW_GAP)
@@ -118,12 +194,12 @@ export function placeWorkspaceWindowNearViewport(
       const candidate = {
         ...placement,
         position: {
-          x: Math.round(x),
-          y: Math.round(y)
+          x: boundedLayoutCoordinate(x),
+          y: boundedLayoutCoordinate(y)
         },
         z_order: zOrder
       }
-      if (!occupied.some((item) => placementsOverlap(candidate, item))) {
+      if (!occupied.some((item) => workspaceWindowPlacementsOverlap(candidate, item))) {
         return candidate
       }
     }
@@ -131,7 +207,10 @@ export function placeWorkspaceWindowNearViewport(
 
   return {
     ...placement,
-    position: { x: Math.round(columnX[0]), y: Math.round(originY) },
+    position: {
+      x: boundedLayoutCoordinate(columnX[0]),
+      y: boundedLayoutCoordinate(originY)
+    },
     z_order: zOrder
   }
 }

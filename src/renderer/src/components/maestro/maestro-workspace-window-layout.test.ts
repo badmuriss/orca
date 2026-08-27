@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import type { WorkspaceSurface } from '../../../../shared/maestro-workspace-canvas'
 import {
   createMaestroSurfaceAdditionTracker,
+  findWorkspaceWindowPlacementNearPosition,
   placeWorkspaceWindowNearViewport,
+  workspaceWindowPlacementsOverlap,
   workspaceWindowPlacement
 } from './maestro-workspace-window-layout'
 
@@ -115,5 +117,30 @@ describe('Maestro workspace window layout', () => {
     expect(first.position).toEqual({ x: -108, y: 283 })
     expect(second.position).toEqual({ x: 692, y: 283 })
     expect(first.position.x + first.size.width).toBeLessThan(second.position.x)
+  })
+
+  it('scans around a preferred position using the candidate window dimensions', () => {
+    const occupied = {
+      position: { x: 0, y: 0 },
+      size: { width: 360, height: 260 },
+      collapsed: false,
+      z_order: 4
+    }
+    const preferred = {
+      position: { x: 120, y: 80 },
+      size: { width: 760, height: 530 },
+      collapsed: false,
+      z_order: 0
+    }
+
+    const attempt = findWorkspaceWindowPlacementNearPosition(preferred, [occupied], {
+      x: 120,
+      y: 80
+    })
+
+    expect(attempt.collisionFree).toBe(true)
+    expect(attempt.placement.size).toEqual(preferred.size)
+    expect(attempt.placement.z_order).toBe(5)
+    expect(workspaceWindowPlacementsOverlap(attempt.placement, occupied)).toBe(false)
   })
 })
