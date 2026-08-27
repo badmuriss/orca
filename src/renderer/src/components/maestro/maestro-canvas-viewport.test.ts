@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  MAESTRO_MIN_ZOOM,
   isMaestroCanvasBoundsVisible,
   panMaestroViewport,
   revealMaestroCanvasBounds,
@@ -7,6 +8,18 @@ import {
 } from './maestro-canvas-viewport'
 
 describe('Maestro canvas viewport', () => {
+  it('zooms far enough out to survey a large workspace', () => {
+    const zoomed = zoomMaestroViewportAtPointer(
+      { center: { x: 0, y: 0 }, zoom: 1 },
+      { width: 1600, height: 900 },
+      { x: 800, y: 450 },
+      0.01
+    )
+
+    expect(zoomed.zoom).toBe(MAESTRO_MIN_ZOOM)
+    expect(zoomed.zoom).toBe(0.1)
+  })
+
   it('keeps the pointer world coordinate stable while zooming', () => {
     const viewport = { center: { x: 400, y: 300 }, zoom: 1 }
     const zoomed = zoomMaestroViewportAtPointer(

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { WorkspaceSurface } from '../../../../shared/maestro-workspace-canvas'
 import {
   createMaestroSurfaceAdditionTracker,
+  placeWorkspaceWindowNearViewport,
   workspaceWindowPlacement
 } from './maestro-workspace-window-layout'
 
@@ -92,5 +93,27 @@ describe('Maestro workspace window layout', () => {
     expect(
       workspaceWindowPlacement('annotation', 1, emptyDocument, surface('annotation')).size
     ).toEqual({ width: 440, height: 360 })
+  })
+
+  it('places new windows in a predictable two-column cluster without overlap', () => {
+    const base = workspaceWindowPlacement('terminal', 0, emptyDocument, surface('terminal'))
+    const first = placeWorkspaceWindowNearViewport(
+      base,
+      [],
+      { center: { x: 1000, y: 500 }, zoom: 0.5 },
+      { width: 1600, height: 900 },
+      { top: 64, right: 344, bottom: 16, left: 16 }
+    )
+    const second = placeWorkspaceWindowNearViewport(
+      base,
+      [first],
+      { center: { x: 1000, y: 500 }, zoom: 0.5 },
+      { width: 1600, height: 900 },
+      { top: 64, right: 344, bottom: 16, left: 16 }
+    )
+
+    expect(first.position).toEqual({ x: -108, y: 283 })
+    expect(second.position).toEqual({ x: 692, y: 283 })
+    expect(first.position.x + first.size.width).toBeLessThan(second.position.x)
   })
 })

@@ -15,6 +15,7 @@ import type { OptimisticMaestroManualLink } from './MaestroWorkspaceLinks'
 import { MaestroWorkspaceHarnessOverlay } from './MaestroWorkspaceHarnessOverlay'
 import {
   createMaestroSurfaceAdditionTracker,
+  placeWorkspaceWindowNearViewport,
   workspaceWindowBounds,
   workspaceWindowPlacement,
   type MaestroWorkspaceWindowPlacement
@@ -25,6 +26,7 @@ import { MaestroWorkspaceToolbar } from './MaestroWorkspaceToolbar'
 import { MaestroWorkspaceContextMenu } from './MaestroWorkspaceContextMenu'
 import { MaestroWorkspaceWindowLayer } from './MaestroWorkspaceWindowLayer'
 import { useMaestroWorkspaceRunProgress } from './useMaestroWorkspaceRunProgress'
+import { maestroWorkspaceMutationKey } from './maestro-workspace-mutation-key'
 
 const surfaceAdditionTracker = createMaestroSurfaceAdditionTracker()
 const REVEAL_INSETS = { top: 64, right: 344, bottom: 16, left: 16 } as const
@@ -160,19 +162,64 @@ export function MaestroWorkspaceCanvas({
       surfaceKeys,
       board.viewportReady
     )
-    const addedSurfaceKey = additions.at(-1)
-    if (!addedSurfaceKey) {
+    if (!additions.length) {
       return
     }
-    const placement = workspaceWindowPlacement(
-      addedSurfaceKey,
-      surfaceKeys.indexOf(addedSurfaceKey),
-      result.canvas.document,
-      result.snapshot.surfaces[addedSurfaceKey]
-    )
-    revealPlacement(workspaceWindowBounds(placement), REVEAL_INSETS)
+    const additionKeys = new Set(additions)
+    const occupied = surfaceKeys
+      .filter((surfaceKey) => !additionKeys.has(surfaceKey))
+      .map(
+        (surfaceKey) =>
+          placements[surfaceKey] ??
+          workspaceWindowPlacement(
+            surfaceKey,
+            surfaceKeys.indexOf(surfaceKey),
+            result.canvas.document,
+            result.snapshot.surfaces[surfaceKey]
+          )
+      )
+    const positioned: Record<string, MaestroWorkspaceWindowPlacement> = {}
+
+    for (const addedSurfaceKey of additions) {
+      const surface = result.snapshot.surfaces[addedSurfaceKey]
+      if (!surface) {
+        continue
+      }
+      const placement = placeWorkspaceWindowNearViewport(
+        workspaceWindowPlacement(
+          addedSurfaceKey,
+          surfaceKeys.indexOf(addedSurfaceKey),
+          result.canvas.document,
+          surface
+        ),
+        occupied,
+        board.viewport,
+        board.size,
+        REVEAL_INSETS
+      )
+      positioned[addedSurfaceKey] = placement
+      occupied.push(placement)
+      optimisticPlacements.current[addedSurfaceKey] = placement
+      void resource.mutate({
+        action: 'set-placement',
+        surface_id: surface.id,
+        placement,
+        idempotency_key: maestroWorkspaceMutationKey('initial-placement', addedSurfaceKey)
+      })
+    }
+
+    const latestPlacement = positioned[additions.at(-1) ?? '']
+    if (!latestPlacement) {
+      return
+    }
+    setPlacements((current) => ({ ...current, ...positioned }))
+    revealPlacement(workspaceWindowBounds(latestPlacement), REVEAL_INSETS)
   }, [
+    board.size,
+    board.viewport,
     board.viewportReady,
+    placements,
+    resource,
     result,
     revealPlacement,
     scope.execution_host_id,
@@ -239,6 +286,7 @@ export function MaestroWorkspaceCanvas({
       className="relative size-full overflow-hidden bg-background"
       data-maestro-workspace-canvas=""
       data-authority-state={resource.status}
+      ref={board.rootRef}
     >
       <ContextMenu>
         <ContextMenuTrigger asChild>

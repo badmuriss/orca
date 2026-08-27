@@ -21,9 +21,6 @@ export function MaestroWorkspaceToolbar({ board }: ToolbarProps) {
       >
         <ZoomOut />
       </Button>
-      <span className="min-w-10 text-center text-[10px] tabular-nums text-muted-foreground">
-        {Math.round(board.viewport.zoom * 100)}%
-      </span>
       <Button
         size="icon-xs"
         variant="ghost"

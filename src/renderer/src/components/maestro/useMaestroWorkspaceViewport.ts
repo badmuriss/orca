@@ -13,8 +13,11 @@ import {
   type MaestroCanvasViewport
 } from './maestro-canvas-viewport'
 import type { MaestroWorkspaceWindowPlacement } from './maestro-workspace-window-layout'
+import { useMaestroViewportElementStyles } from './useMaestroViewportElementStyles'
+import { useMaestroViewportPersistence } from './useMaestroViewportPersistence'
 
 const DEFAULT_VIEWPORT: MaestroCanvasViewport = { center: { x: 0, y: 0 }, zoom: 1 }
+const VIEWPORT_REVEAL_DURATION_MS = 320
 
 export function useMaestroWorkspaceViewport(params: {
   canvasRevision: number
@@ -28,33 +31,30 @@ export function useMaestroWorkspaceViewport(params: {
   )
   const viewportRef = useRef(viewport)
   const [size, setSize] = useState<MaestroCanvasSize>({ width: 1, height: 1 })
+  const sizeRef = useRef(size)
+  const animationFrameRef = useRef<number | null>(null)
+  const viewportStyles = useMaestroViewportElementStyles(viewportRef, sizeRef)
   const [canvasElement, setCanvasElement] = useState<HTMLElement | null>(null)
   const canvasRef = useCallback((node: HTMLElement | null): void => {
     if (node) {
       setCanvasElement(node)
     }
   }, [])
-  const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const commitInFlight = useRef(false)
-  const flushPendingRef = useRef<() => void>(() => {})
-  const pendingCommit = useRef<{
-    viewport: MaestroCanvasViewport
-    mutate: MaestroWorkspaceCanvasResource['mutate']
-    identity: string
-  } | null>(null)
+  const persistence = useMaestroViewportPersistence(params.resource.mutate, params.mutationIdentity)
   const pan = useRef<{ pointerId: number; x: number; y: number } | null>(null)
   const persistedX = params.persisted?.center.x ?? DEFAULT_VIEWPORT.center.x
   const persistedY = params.persisted?.center.y ?? DEFAULT_VIEWPORT.center.y
   const persistedZoom = params.persisted?.zoom ?? DEFAULT_VIEWPORT.zoom
 
   useEffect(() => {
-    if (pan.current || pendingCommit.current || commitInFlight.current) {
+    if (pan.current || persistence.isBusy() || animationFrameRef.current !== null) {
       return
     }
     const persisted = { center: { x: persistedX, y: persistedY }, zoom: persistedZoom }
     viewportRef.current = persisted
     setViewport(persisted)
-  }, [params.canvasRevision, persistedX, persistedY, persistedZoom])
+    viewportStyles.apply(persisted)
+  }, [params.canvasRevision, persistedX, persistedY, persistedZoom, persistence, viewportStyles])
   useEffect(() => {
     const node = canvasElement
     if (!node) {
@@ -62,69 +62,87 @@ export function useMaestroWorkspaceViewport(params: {
     }
     if (typeof ResizeObserver === 'undefined') {
       const bounds = node.getBoundingClientRect()
-      setSize({ width: Math.max(1, bounds.width), height: Math.max(1, bounds.height) })
+      const nextSize = { width: Math.max(1, bounds.width), height: Math.max(1, bounds.height) }
+      sizeRef.current = nextSize
+      setSize(nextSize)
+      viewportStyles.apply(viewportRef.current, nextSize)
       return
     }
     const observer = new ResizeObserver(([entry]) => {
       if (entry) {
-        setSize({ width: entry.contentRect.width, height: entry.contentRect.height })
+        const nextSize = { width: entry.contentRect.width, height: entry.contentRect.height }
+        sizeRef.current = nextSize
+        setSize(nextSize)
+        viewportStyles.apply(viewportRef.current, nextSize)
       }
     })
     observer.observe(node)
     return () => observer.disconnect()
-  }, [canvasElement])
-  const flushPending = useCallback((): void => {
-    if (commitTimer.current) {
-      clearTimeout(commitTimer.current)
-    }
-    commitTimer.current = null
-    if (commitInFlight.current) {
+  }, [canvasElement, viewportStyles])
+  const cancelAnimation = useCallback((syncState: boolean): void => {
+    if (animationFrameRef.current === null) {
       return
     }
-    const pending = pendingCommit.current
-    pendingCommit.current = null
-    if (!pending) {
-      return
+    cancelAnimationFrame(animationFrameRef.current)
+    animationFrameRef.current = null
+    if (syncState) {
+      setViewport(viewportRef.current)
     }
-    commitInFlight.current = true
-    void pending
-      .mutate({
-        action: 'set-viewport',
-        viewport: pending.viewport,
-        idempotency_key: `renderer-viewport-${pending.identity}-${crypto.randomUUID()}`
-      })
-      .finally(() => {
-        commitInFlight.current = false
-        if (pendingCommit.current) {
-          flushPendingRef.current()
-        }
-      })
   }, [])
-  flushPendingRef.current = flushPending
-  useEffect(() => () => flushPending(), [flushPending, params.mutationIdentity])
 
-  const commit = useCallback(
-    (next: MaestroCanvasViewport): void => {
-      if (commitTimer.current) {
-        clearTimeout(commitTimer.current)
-      }
-      pendingCommit.current = {
-        viewport: next,
-        mutate: params.resource.mutate,
-        identity: params.mutationIdentity
-      }
-      commitTimer.current = setTimeout(flushPending, 140)
-    },
-    [flushPending, params.mutationIdentity, params.resource.mutate]
-  )
+  useEffect(() => () => cancelAnimation(false), [cancelAnimation])
 
   const update = useCallback(
     (next: MaestroCanvasViewport): void => {
+      cancelAnimation(false)
       viewportRef.current = next
       setViewport(next)
-      commit(next)
+      viewportStyles.apply(next)
+      persistence.commit(next)
     },
-    [commit]
+    [cancelAnimation, persistence, viewportStyles]
+  )
+
+  const animateTo = useCallback(
+    (next: MaestroCanvasViewport): void => {
+      cancelAnimation(false)
+      const start = viewportRef.current
+      const unchanged =
+        start.center.x === next.center.x &&
+        start.center.y === next.center.y &&
+        start.zoom === next.zoom
+      if (unchanged) {
+        return
+      }
+      if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+        update(next)
+        return
+      }
+      const startedAt = performance.now()
+      const frame = (timestamp: number): void => {
+        const progress = Math.min(1, (timestamp - startedAt) / VIEWPORT_REVEAL_DURATION_MS)
+        const eased = 1 - (1 - progress) ** 3
+        const current = {
+          center: {
+            x: start.center.x + (next.center.x - start.center.x) * eased,
+            y: start.center.y + (next.center.y - start.center.y) * eased
+          },
+          zoom: start.zoom + (next.zoom - start.zoom) * eased
+        }
+        viewportRef.current = current
+        viewportStyles.apply(current)
+        if (progress < 1) {
+          animationFrameRef.current = requestAnimationFrame(frame)
+          return
+        }
+        animationFrameRef.current = null
+        viewportRef.current = next
+        setViewport(next)
+        persistence.commit(next)
+      }
+      animationFrameRef.current = requestAnimationFrame(frame)
+    },
+    [cancelAnimation, persistence, update, viewportStyles]
   )
 
   const onWheel = useCallback(
@@ -158,36 +176,45 @@ export function useMaestroWorkspaceViewport(params: {
     [size, update]
   )
 
-  const onPointerDown = useCallback((event: React.PointerEvent<HTMLElement>): void => {
-    if (event.target !== event.currentTarget || event.button !== 0) {
-      return
-    }
-    pan.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY }
-    event.currentTarget.setPointerCapture(event.pointerId)
-  }, [])
-  const onPointerMove = useCallback((event: React.PointerEvent<HTMLElement>): void => {
-    const current = pan.current
-    if (!current || current.pointerId !== event.pointerId) {
-      return
-    }
-    const currentViewport = viewportRef.current
-    const next = panMaestroViewport(currentViewport, {
-      x: event.clientX - current.x,
-      y: event.clientY - current.y
-    })
-    pan.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY }
-    viewportRef.current = next
-    setViewport(next)
-  }, [])
+  const onPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLElement>): void => {
+      if (event.target !== event.currentTarget || event.button !== 0) {
+        return
+      }
+      cancelAnimation(true)
+      pan.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY }
+      event.currentTarget.setPointerCapture(event.pointerId)
+    },
+    [cancelAnimation]
+  )
+  const onPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLElement>): void => {
+      const current = pan.current
+      if (!current || current.pointerId !== event.pointerId) {
+        return
+      }
+      const currentViewport = viewportRef.current
+      const next = panMaestroViewport(currentViewport, {
+        x: event.clientX - current.x,
+        y: event.clientY - current.y
+      })
+      pan.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY }
+      viewportRef.current = next
+      viewportStyles.schedulePan()
+    },
+    [viewportStyles]
+  )
   const onPointerUp = useCallback(
     (event: React.PointerEvent<HTMLElement>): void => {
       if (pan.current?.pointerId !== event.pointerId) {
         return
       }
       pan.current = null
-      commit(viewportRef.current)
+      viewportStyles.flushPan()
+      setViewport(viewportRef.current)
+      persistence.commit(viewportRef.current)
     },
-    [commit]
+    [persistence, viewportStyles]
   )
 
   const zoom = useCallback(
@@ -197,16 +224,16 @@ export function useMaestroWorkspaceViewport(params: {
     },
     [update]
   )
-  const reset = useCallback(() => update(DEFAULT_VIEWPORT), [update])
+  const reset = useCallback(() => animateTo(DEFAULT_VIEWPORT), [animateTo])
   const reveal = useCallback(
     (bounds: MaestroCanvasBounds, insets: MaestroCanvasInsets): void => {
       const current = viewportRef.current
       const next = revealMaestroCanvasBounds(current, size, bounds, insets)
       if (next !== current) {
-        update(next)
+        animateTo(next)
       }
     },
-    [size, update]
+    [animateTo, size]
   )
   const fit = useCallback(() => {
     const values = Object.values(params.placements)
@@ -217,19 +244,21 @@ export function useMaestroWorkspaceViewport(params: {
     const top = Math.min(...values.map((item) => item.position.y))
     const right = Math.max(...values.map((item) => item.position.x + item.size.width))
     const bottom = Math.max(...values.map((item) => item.position.y + item.size.height))
-    update({
+    animateTo({
       center: { x: (left + right) / 2, y: (top + bottom) / 2 },
       zoom: clampMaestroZoom(
         Math.min(size.width / (right - left + 80), size.height / (bottom - top + 80))
       )
     })
-  }, [params.placements, reset, size, update])
+  }, [animateTo, params.placements, reset, size])
 
   const gridStep = maestroBoardGridStep(viewport.zoom) * viewport.zoom
   return {
+    rootRef: viewportStyles.rootRef,
     canvasRef,
     viewportReady: size.width > 1 && size.height > 1,
     viewport,
+    size,
     zoom,
     reset,
     fit,
@@ -239,13 +268,13 @@ export function useMaestroWorkspaceViewport(params: {
     onPointerMove,
     onPointerUp,
     canvasStyle: {
-      backgroundSize: `${gridStep}px ${gridStep}px`,
-      backgroundPosition: `${size.width / 2 - viewport.center.x * viewport.zoom}px ${size.height / 2 - viewport.center.y * viewport.zoom}px`
+      backgroundSize: `var(--maestro-grid-size, ${gridStep}px ${gridStep}px)`,
+      backgroundPosition: `var(--maestro-grid-position, ${size.width / 2 - viewport.center.x * viewport.zoom}px ${size.height / 2 - viewport.center.y * viewport.zoom}px)`
     },
     worldStyle: {
       left: '50%',
       top: '50%',
-      transform: `translate(${-viewport.center.x * viewport.zoom}px, ${-viewport.center.y * viewport.zoom}px) scale(${viewport.zoom})`,
+      transform: `var(--maestro-world-transform, translate(${-viewport.center.x * viewport.zoom}px, ${-viewport.center.y * viewport.zoom}px) scale(${viewport.zoom}))`,
       transformOrigin: '0 0'
     }
   }

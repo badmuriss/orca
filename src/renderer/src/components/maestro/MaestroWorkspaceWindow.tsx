@@ -75,7 +75,11 @@ function bindingDetail(
             'The exact terminal remains available in its own tab.'
           )}
         >
-          <AgentTerminalPreview ptyId={binding.session_id} className="size-full" />
+          <AgentTerminalPreview
+            ptyId={binding.session_id}
+            autoFocus={false}
+            className="size-full"
+          />
         </RecoverableRenderErrorBoundary>
       )
     }
@@ -131,7 +135,19 @@ function startPointerGesture(
   const target = event.currentTarget
   const origin = { x: event.clientX, y: event.clientY }
   const total = { x: 0, y: 0 }
+  const pending = { x: 0, y: 0 }
+  let moveFrame: number | null = null
   target.setPointerCapture(event.pointerId)
+  const flushMove = (): void => {
+    moveFrame = null
+    if (pending.x === 0 && pending.y === 0) {
+      return
+    }
+    const delta = { ...pending }
+    pending.x = 0
+    pending.y = 0
+    onDelta(delta)
+  }
   const move: EventListener = (moveEvent): void => {
     if (!(moveEvent instanceof PointerEvent)) {
       return
@@ -142,7 +158,11 @@ function startPointerGesture(
     }
     total.x += delta.x
     total.y += delta.y
-    onDelta(delta)
+    pending.x += delta.x
+    pending.y += delta.y
+    if (moveFrame === null) {
+      moveFrame = requestAnimationFrame(flushMove)
+    }
     origin.x = moveEvent.clientX
     origin.y = moveEvent.clientY
   }
@@ -150,6 +170,10 @@ function startPointerGesture(
     target.removeEventListener('pointermove', move)
     target.removeEventListener('pointerup', finish)
     target.removeEventListener('pointercancel', finish)
+    if (moveFrame !== null) {
+      cancelAnimationFrame(moveFrame)
+    }
+    flushMove()
     if (total.x !== 0 || total.y !== 0) {
       onCommit(total)
     }
