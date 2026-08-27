@@ -381,6 +381,8 @@ export function MaestroWorkspaceCanvas({
         optimisticPlacements={optimisticPlacements}
         worldStyle={board.worldStyle}
         worldZoom={board.viewport.zoom}
+        viewport={board.viewport}
+        canvasSize={board.size}
         onManualLinkCreated={(source, targetKey) =>
           setOptimisticManualLinks((current) => [
             ...current.filter((link) => link.source !== source || link.target !== targetKey),

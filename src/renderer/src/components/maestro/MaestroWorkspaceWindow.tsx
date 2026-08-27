@@ -11,13 +11,12 @@ import {
 import type { WorkspaceSurface } from '../../../../shared/maestro-workspace-canvas'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { AgentTerminalPreview } from '@/components/dashboard-popout/AgentTerminalPreview'
 import type { RuntimeClientTarget } from '@/runtime/runtime-client-target'
-import { RecoverableRenderErrorBoundary } from '@/components/error-boundaries/RecoverableRenderErrorBoundary'
-import { MaestroWorkspaceBrowserPreview } from './MaestroWorkspaceBrowserPreview'
-import { MaestroWorkspaceContentPreview } from './MaestroWorkspaceContentPreview'
 import type { MaestroWorkspaceWindowPlacement } from './maestro-workspace-window-layout'
 import { translate } from '@/i18n/i18n'
+import type { MaestroWorkspacePresencePhase } from './maestro-workspace-presence'
+import type { MaestroWorkspacePreviewMode } from './maestro-workspace-visibility'
+import { MaestroWorkspaceSurfacePreview } from './MaestroWorkspaceSurfacePreview'
 
 type MaestroWorkspaceWindowProps = {
   surfaceKey: string
@@ -29,6 +28,8 @@ type MaestroWorkspaceWindowProps = {
   runtimeTarget: RuntimeClientTarget
   // Canvas zoom, so screen-px drag deltas can be converted into world placement units.
   worldZoom?: number
+  presencePhase?: MaestroWorkspacePresencePhase
+  previewMode?: MaestroWorkspacePreviewMode
   onSelect: () => void
   onEdit: () => void
   onLinkPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => void
@@ -51,78 +52,6 @@ const SURFACE_ICON = {
   'check-details': FileCode2,
   simulator: MonitorUp
 } as const
-
-function bindingDetail(
-  surface: WorkspaceSurface,
-  runtimeTarget: RuntimeClientTarget,
-  onUpdateAnnotationTone: MaestroWorkspaceWindowProps['onUpdateAnnotationTone'],
-  onUpdateAnnotationContent: MaestroWorkspaceWindowProps['onUpdateAnnotationContent']
-): React.JSX.Element {
-  const binding = surface.binding
-  if (binding.kind === 'terminal') {
-    if (binding.session_id && binding.liveness === 'live') {
-      return (
-        <RecoverableRenderErrorBoundary
-          boundaryId={`maestro-workspace-terminal-${binding.session_id}`}
-          surface="overlay"
-          resetKey={`${binding.session_id}:${binding.pty_incarnation ?? 'unknown'}`}
-          title={translate(
-            'auto.components.maestro.MaestroWorkspaceWindow.52cce7f247',
-            'Terminal output could not attach.'
-          )}
-          description={translate(
-            'auto.components.maestro.MaestroWorkspaceWindow.c6b6befac1',
-            'The exact terminal remains available in its own tab.'
-          )}
-        >
-          <AgentTerminalPreview
-            ptyId={binding.session_id}
-            autoFocus={false}
-            className="size-full"
-          />
-        </RecoverableRenderErrorBoundary>
-      )
-    }
-    return (
-      <div className="flex h-full flex-col items-center justify-center bg-[var(--terminal-pane-surface-on-dark)] p-3 text-center text-xs text-[var(--terminal-pane-title-on-dark-fg)]">
-        <TerminalSquare className="size-5" />
-        <p className="mt-2">
-          {binding.liveness === 'live'
-            ? translate(
-                'auto.components.maestro.MaestroWorkspaceWindow.1ac69faf69',
-                'The live terminal preview is reconnecting.'
-              )
-            : translate(
-                'auto.components.maestro.MaestroWorkspaceWindow.37f9e2104d',
-                'Terminal output is {{value0}}.',
-                { value0: binding.liveness }
-              )}
-        </p>
-      </div>
-    )
-  }
-  if (binding.kind === 'browser') {
-    const receiptRevision =
-      binding.live_frame?.frame_revision ??
-      binding.immutable_capture?.page_revision ??
-      binding.authority_revision
-    return (
-      <MaestroWorkspaceBrowserPreview
-        target={runtimeTarget}
-        pageId={binding.browser_page_id}
-        receiptRevision={receiptRevision}
-      />
-    )
-  }
-  return (
-    <MaestroWorkspaceContentPreview
-      target={runtimeTarget}
-      surface={surface}
-      onUpdateAnnotationTone={onUpdateAnnotationTone}
-      onUpdateAnnotationContent={onUpdateAnnotationContent}
-    />
-  )
-}
 
 function startPointerGesture(
   event: React.PointerEvent,
@@ -192,6 +121,8 @@ export function MaestroWorkspaceWindow({
   linkTarget,
   runtimeTarget,
   worldZoom = 1,
+  presencePhase = 'present',
+  previewMode = 'full',
   onSelect,
   onEdit,
   onLinkPointerDown,
@@ -207,7 +138,7 @@ export function MaestroWorkspaceWindow({
   const Icon = SURFACE_ICON[surface.content_type]
   return (
     <article
-      className={`absolute flex overflow-visible rounded-xl border bg-card shadow-xs outline-none transition-[border-color,box-shadow] focus-visible:ring-2 focus-visible:ring-ring ${selected ? 'ring-1 ring-ring/35' : ''}`}
+      className={`maestro-workspace-window absolute flex overflow-visible rounded-xl border bg-card shadow-xs outline-none transition-[border-color,box-shadow] focus-visible:ring-2 focus-visible:ring-ring ${selected ? 'ring-1 ring-ring/35' : ''}`}
       style={{
         left: placement.position.x,
         top: placement.position.y,
@@ -228,6 +159,9 @@ export function MaestroWorkspaceWindow({
       }
       data-maestro-link-target={linkTarget ? 'true' : undefined}
       data-availability={surface.availability}
+      data-maestro-presence={presencePhase}
+      data-maestro-preview-mode={previewMode}
+      aria-busy={presencePhase === 'entering'}
       tabIndex={0}
       onFocus={(event) => {
         if (event.target === event.currentTarget) {
@@ -339,7 +273,13 @@ export function MaestroWorkspaceWindow({
           </Tooltip>
         </header>
         <div className="min-h-0 flex-1">
-          {bindingDetail(surface, runtimeTarget, onUpdateAnnotationTone, onUpdateAnnotationContent)}
+          <MaestroWorkspaceSurfacePreview
+            surface={surface}
+            runtimeTarget={runtimeTarget}
+            previewMode={previewMode}
+            onUpdateAnnotationTone={onUpdateAnnotationTone}
+            onUpdateAnnotationContent={onUpdateAnnotationContent}
+          />
         </div>
       </div>
       <Tooltip>
@@ -378,6 +318,11 @@ export function MaestroWorkspaceWindow({
           startPointerGesture(event, worldZoom, onResize, onResizeCommit)
         }}
       />
+      {presencePhase !== 'present' ? (
+        <div className="maestro-workspace-smoke" aria-hidden>
+          <span />
+        </div>
+      ) : null}
     </article>
   )
 }

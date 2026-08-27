@@ -16,9 +16,16 @@ import { MaestroWorkspaceWindow } from './MaestroWorkspaceWindow'
 import {
   moveWorkspaceWindow,
   resizeWorkspaceWindow,
+  workspaceWindowBounds,
   type MaestroWorkspaceWindowPlacement
 } from './maestro-workspace-window-layout'
 import { maestroWorkspaceMutationKey } from './maestro-workspace-mutation-key'
+import type { MaestroCanvasSize, MaestroCanvasViewport } from './maestro-canvas-viewport'
+import { useMaestroWorkspacePresence } from './maestro-workspace-presence'
+import {
+  maestroWorkspacePreviewMode,
+  type MaestroWorkspacePreviewMode
+} from './maestro-workspace-visibility'
 
 type PlacementMap = Readonly<Record<string, MaestroWorkspaceWindowPlacement>>
 type LinkDrag = {
@@ -39,6 +46,8 @@ type WindowLayerProps = {
   optimisticPlacements: MutableRefObject<Record<string, MaestroWorkspaceWindowPlacement>>
   worldStyle: React.CSSProperties
   worldZoom?: number
+  viewport: MaestroCanvasViewport
+  canvasSize: MaestroCanvasSize
   onRevealPlacement: (placement: MaestroWorkspaceWindowPlacement) => void
   onManualLinkCreated: (sourceKey: string, targetKey: string) => void
 }
@@ -51,9 +60,21 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
   const [linkDrag, setLinkDrag] = useState<LinkDrag | null>(null)
   const linkOverlayRef = useRef<SVGSVGElement | null>(null)
   const linkDragCleanupRef = useRef<(() => void) | null>(null)
+  const lastPlacementsRef = useRef<Record<string, MaestroWorkspaceWindowPlacement>>({})
+  const previewModesRef = useRef<Record<string, MaestroWorkspacePreviewMode>>({})
+  const presenceItems = useMaestroWorkspacePresence(props.snapshot, props.surfaceKeys)
   const inspectedSurface = inspectorKey ? props.snapshot.surfaces[inspectorKey] : undefined
   const mutate = props.resource.mutate
   useEffect(() => () => linkDragCleanupRef.current?.(), [])
+  useEffect(() => {
+    const retainedKeys = new Set(presenceItems.map((item) => item.surfaceKey))
+    for (const surfaceKey of Object.keys(lastPlacementsRef.current)) {
+      if (!retainedKeys.has(surfaceKey)) {
+        delete lastPlacementsRef.current[surfaceKey]
+        delete previewModesRef.current[surfaceKey]
+      }
+    }
+  }, [presenceItems])
   const beginLink = useCallback(
     (sourceKey: string, event: React.PointerEvent<HTMLButtonElement>): void => {
       if (event.button !== 0) {
@@ -133,12 +154,24 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
   return (
     <>
       <div className="absolute" style={props.worldStyle}>
-        {props.surfaceKeys.map((surfaceKey) => {
-          const surface = props.snapshot.surfaces[surfaceKey]
-          const placement = props.placements[surfaceKey]
+        {presenceItems.map(({ surfaceKey, surface, phase }) => {
+          const currentPlacement = props.placements[surfaceKey]
+          if (currentPlacement) {
+            lastPlacementsRef.current[surfaceKey] = currentPlacement
+          }
+          const placement = currentPlacement ?? lastPlacementsRef.current[surfaceKey]
           if (!surface || !placement) {
             return null
           }
+          const selected = selectedKey === surfaceKey && phase !== 'exiting'
+          const previewMode = maestroWorkspacePreviewMode({
+            bounds: workspaceWindowBounds(placement),
+            viewport: props.viewport,
+            canvas: props.canvasSize,
+            previous: previewModesRef.current[surfaceKey],
+            selected
+          })
+          previewModesRef.current[surfaceKey] = previewMode
           const updatePlacement = (
             update: (current: MaestroWorkspaceWindowPlacement) => MaestroWorkspaceWindowPlacement
           ): void =>
@@ -155,11 +188,13 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
               surfaceKey={surfaceKey}
               surface={surface}
               placement={placement}
-              selected={selectedKey === surfaceKey}
-              pending={props.pendingSurfaceKey === surfaceKey}
+              selected={selected}
+              pending={props.pendingSurfaceKey === surfaceKey || phase === 'exiting'}
               linkTarget={linkDrag?.targetKey === surfaceKey}
               runtimeTarget={props.target}
               worldZoom={props.worldZoom}
+              presencePhase={phase}
+              previewMode={previewMode}
               onSelect={() => {
                 props.onRevealPlacement(placement)
                 setSelectedKey(surfaceKey)
