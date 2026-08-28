@@ -13,6 +13,11 @@ export function runElectronViteDevSupervisor({ nodePath, electronViteCli, args, 
   let restartTimer = null
   let shutdownSignal = null
 
+  function exitSupervisor(exitCode) {
+    process.exitCode = exitCode
+    process.exit(exitCode)
+  }
+
   function signalExitCode(signal) {
     if (signal === 'SIGINT') {
       return 130
@@ -76,7 +81,7 @@ export function runElectronViteDevSupervisor({ nodePath, electronViteCli, args, 
     if (isShuttingDown) {
       signalAttempt(attempt, 'SIGKILL')
       activeAttempt = null
-      process.exitCode = signalExitCode(shutdownSignal ?? attempt.signal ?? 'SIGINT')
+      exitSupervisor(signalExitCode(shutdownSignal ?? attempt.signal ?? 'SIGINT'))
       return
     }
 
@@ -95,10 +100,10 @@ export function runElectronViteDevSupervisor({ nodePath, electronViteCli, args, 
     activeAttempt = null
     if (attempt.spawnError) {
       console.error(attempt.spawnError)
-      process.exitCode = 1
+      exitSupervisor(1)
       return
     }
-    process.exitCode = attempt.signal ? signalExitCode(attempt.signal) : (attempt.exitCode ?? 1)
+    exitSupervisor(attempt.signal ? signalExitCode(attempt.signal) : (attempt.exitCode ?? 1))
   }
 
   function scheduleAttemptFinish(attempt) {
@@ -179,7 +184,7 @@ export function runElectronViteDevSupervisor({ nodePath, electronViteCli, args, 
       restartTimer = null
     }
     if (!activeAttempt) {
-      process.exitCode = signalExitCode(signal)
+      exitSupervisor(signalExitCode(signal))
       return
     }
     terminateAttempt(activeAttempt, signal)
