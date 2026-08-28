@@ -1,9 +1,21 @@
-import { Camera, CircleHelp, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { BrowserScreenshotResult } from '../../../../shared/runtime-types'
 import type { RuntimeClientTarget } from '@/runtime/runtime-client-target'
 import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
 import { translate } from '@/i18n/i18n'
+
+const MAX_BROWSER_PREVIEW_CACHE_ENTRIES = 24
+const BROWSER_PREVIEW_RETRY_MS = 1_500
+const browserPreviewCache = new Map<string, string>()
+
+function rememberBrowserPreview(key: string, preview: string): void {
+  browserPreviewCache.delete(key)
+  browserPreviewCache.set(key, preview)
+  while (browserPreviewCache.size > MAX_BROWSER_PREVIEW_CACHE_ENTRIES) {
+    browserPreviewCache.delete(browserPreviewCache.keys().next().value!)
+  }
+}
 
 export function MaestroWorkspaceBrowserPreview({
   target,
@@ -14,45 +26,65 @@ export function MaestroWorkspaceBrowserPreview({
   pageId: string
   receiptRevision: number
 }): React.JSX.Element {
-  const [preview, setPreview] = useState<string | null>(null)
-  const [state, setState] = useState<'loading' | 'ready' | 'unavailable'>('loading')
+  const targetKey = target.kind === 'environment' ? `environment:${target.environmentId}` : 'local'
+  const captureKey = `${targetKey}:${pageId}`
+  const cachedPreview = browserPreviewCache.get(captureKey) ?? null
+  const [preview, setPreview] = useState<string | null>(cachedPreview)
+  const [state, setState] = useState<'loading' | 'ready' | 'reconnecting'>(
+    cachedPreview ? 'ready' : 'loading'
+  )
 
   // Layout mutations rebuild equivalent targets, so primitive identity prevents recapture on Fit.
   const latestTarget = useRef(target)
   latestTarget.current = target
-  const targetKey = target.kind === 'environment' ? `environment:${target.environmentId}` : 'local'
 
   // Revision recaptures swap in place: keep the resolved frame until the new one lands.
   const resolvedCaptureKey = useRef<string | null>(null)
 
   useEffect(() => {
     let active = true
-    const captureKey = `${targetKey}:${pageId}`
-    if (resolvedCaptureKey.current !== captureKey) {
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
+    const retained = browserPreviewCache.get(captureKey) ?? null
+    if (retained) {
+      setPreview(retained)
+      setState('ready')
+      resolvedCaptureKey.current = captureKey
+    } else if (resolvedCaptureKey.current !== captureKey) {
+      setPreview(null)
       setState('loading')
     }
-    void callRuntimeRpc<BrowserScreenshotResult>(latestTarget.current, 'browser.screenshot', {
-      page: pageId,
-      format: 'png'
-    })
-      .then((screenshot) => {
-        if (active) {
-          setPreview(`data:image/${screenshot.format};base64,${screenshot.data}`)
+    const capture = (): void => {
+      void callRuntimeRpc<BrowserScreenshotResult>(latestTarget.current, 'browser.screenshot', {
+        page: pageId,
+        format: 'png'
+      }).then(
+        (screenshot) => {
+          if (!active) {
+            return
+          }
+          const nextPreview = `data:image/${screenshot.format};base64,${screenshot.data}`
+          rememberBrowserPreview(captureKey, nextPreview)
+          setPreview(nextPreview)
           setState('ready')
           resolvedCaptureKey.current = captureKey
+        },
+        () => {
+          if (!active) {
+            return
+          }
+          setState(browserPreviewCache.has(captureKey) ? 'ready' : 'reconnecting')
+          retryTimer = setTimeout(capture, BROWSER_PREVIEW_RETRY_MS)
         }
-      })
-      .catch(() => {
-        // A failed recapture keeps the last valid frame; unavailable only without one.
-        if (active && resolvedCaptureKey.current !== captureKey) {
-          setPreview(null)
-          setState('unavailable')
-        }
-      })
+      )
+    }
+    capture()
     return () => {
       active = false
+      if (retryTimer) {
+        clearTimeout(retryTimer)
+      }
     }
-  }, [pageId, receiptRevision, targetKey])
+  }, [captureKey, pageId, receiptRevision])
 
   if (state === 'ready' && preview) {
     return (
@@ -70,11 +102,7 @@ export function MaestroWorkspaceBrowserPreview({
   }
   return (
     <div className="flex size-full flex-col items-center justify-center bg-editor-surface p-4 text-center text-xs text-muted-foreground">
-      {state === 'loading' ? (
-        <Loader2 className="size-5 animate-spin" />
-      ) : (
-        <CircleHelp className="size-5" />
-      )}
+      <Loader2 className="size-5 animate-spin" />
       <p className="mt-2">
         {state === 'loading'
           ? translate(
@@ -82,11 +110,10 @@ export function MaestroWorkspaceBrowserPreview({
               'Capturing the exact existing page…'
             )
           : translate(
-              'auto.components.maestro.MaestroWorkspaceBrowserPreview.791294b80c',
-              'Exact page capture unavailable'
+              'auto.components.maestro.MaestroWorkspaceBrowserPreview.reconnecting',
+              'Reconnecting the exact page preview…'
             )}
       </p>
-      {state === 'unavailable' ? <Camera className="mt-2 size-3.5" /> : null}
     </div>
   )
 }

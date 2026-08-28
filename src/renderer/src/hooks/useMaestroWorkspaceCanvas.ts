@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { startTransition, useCallback, useEffect, useRef, useState } from 'react'
 import type {
   RuntimeMaestroWorkspaceCanvasMutation,
   RuntimeMaestroWorkspaceCanvasQueryResult,
@@ -48,7 +48,7 @@ function buildMutationRequest(
 ): RuntimeMaestroWorkspaceCanvasMutation {
   const requiresCanvasRevision =
     CANVAS_REVISION_ACTIONS.has(input.action) ||
-    (input.action === 'create' && input.surface_type === 'content')
+    (input.action === 'create' && (input.surface_type === 'content' || input.placement != null))
   return {
     ...input,
     scope,
@@ -99,7 +99,7 @@ export function useMaestroWorkspaceCanvas(
     (update: (current: MaestroWorkspaceCanvasState) => MaestroWorkspaceCanvasState): void => {
       const next = update(stateRef.current)
       stateRef.current = next
-      setState(next)
+      startTransition(() => setState(next))
     },
     []
   )

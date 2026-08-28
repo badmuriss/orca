@@ -9222,6 +9222,7 @@ export class OrcaRuntimeService {
               parentTabId: tab.id,
               leafId,
               title,
+              ...(tab.customTitle?.trim() ? { customTitle: tab.customTitle.trim() } : {}),
               ...(ptyId ? { ptyId } : {}),
               ...(tab.startupCwd ? { startupCwd: tab.startupCwd } : {}),
               ...(tab.launchAgent ? { launchAgent: tab.launchAgent } : {}),
@@ -35532,10 +35533,12 @@ export class OrcaRuntimeService {
         liveLeafPty?.foregroundAgent ??
         pty?.foregroundAgent ??
         null
-      const title = normalizeCompatibleAgentTitleForOwner(
-        trackerOnlyTitle ?? leafTitle ?? ptyTitle ?? syncedTab?.title ?? tab.title,
-        ownerAgent
-      )
+      const title =
+        tab.customTitle?.trim() ||
+        normalizeCompatibleAgentTitleForOwner(
+          trackerOnlyTitle ?? leafTitle ?? ptyTitle ?? syncedTab?.title ?? tab.title,
+          ownerAgent
+        )
       const liveTitleEvidence = leafTitle ?? ptyTitle
       // Why: renderer status can precede hook session identity, leaving native chat with no transcript address.
       const rendererStatusAgent =

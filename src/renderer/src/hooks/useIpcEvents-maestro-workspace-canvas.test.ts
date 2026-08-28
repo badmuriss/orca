@@ -109,6 +109,26 @@ describe('Maestro workspace tab command bridge', () => {
     expect(store.setTabCustomLabel).toHaveBeenCalledWith('editor-tab', 'Renamed exact warning')
   })
 
+  it('renames a terminal through its tab-wide title authority', async () => {
+    const exactTab = { id: 'terminal-tab', entityId: 'terminal-1', contentType: 'terminal' }
+    const store = {
+      unifiedTabsByWorktree: { 'workspace-1': [exactTab] },
+      setTabCustomTitle: vi.fn()
+    }
+    const { executeMaestroWorkspaceTabCommand } = await import('./useIpcEvents')
+
+    expect(
+      executeMaestroWorkspaceTabCommand(store as never, {
+        requestId: 'request-rename-terminal-1',
+        kind: 'rename',
+        worktreeId: 'workspace-1',
+        tabId: 'terminal-tab',
+        title: 'Renamed terminal'
+      })
+    ).toEqual({ ok: true, tabId: 'terminal-tab' })
+    expect(store.setTabCustomTitle).toHaveBeenCalledWith('terminal-1', 'Renamed terminal')
+  })
+
   it('keeps the exact editor tab active when its file has another wrapper', async () => {
     let activeTabId = 'other-tab'
     const exactTab = {

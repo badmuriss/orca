@@ -55,6 +55,20 @@ export function mutateMaestroWorkspaceDocument(params: {
         reason: 'invalid_link_endpoints'
       }
     }
+    const duplicate = document.manual_links.some(
+      (link) =>
+        (link.source_surface_key === request.source_surface_key &&
+          link.target_surface_key === request.target_surface_key) ||
+        (link.source_surface_key === request.target_surface_key &&
+          link.target_surface_key === request.source_surface_key)
+    )
+    if (duplicate) {
+      return {
+        status: 'applied',
+        authority_revision: snapshot.authority_revision,
+        canvas_revision: canvas.revision
+      }
+    }
     document.manual_links.push({
       id: `link-${createHash('sha256').update(request.idempotency_key).digest('hex').slice(0, 24)}`,
       source_surface_key: request.source_surface_key,

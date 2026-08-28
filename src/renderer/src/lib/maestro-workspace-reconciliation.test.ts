@@ -31,6 +31,15 @@ function available(revision: number): RuntimeMaestroWorkspaceCanvasQueryResult {
 }
 
 describe('workspace Canvas reconciliation', () => {
+  it('reuses an unchanged authoritative snapshot', () => {
+    const current = reconcileMaestroWorkspaceCanvasQuery(
+      INITIAL_MAESTRO_WORKSPACE_CANVAS_STATE,
+      available(4)
+    )
+
+    expect(reconcileMaestroWorkspaceCanvasQuery(current, available(4))).toBe(current)
+  })
+
   it('ignores an older authoritative snapshot', () => {
     const current = reconcileMaestroWorkspaceCanvasQuery(
       INITIAL_MAESTRO_WORKSPACE_CANVAS_STATE,

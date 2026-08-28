@@ -7,7 +7,7 @@ export type MaestroCanvasSize = { width: number; height: number }
 export type MaestroCanvasBounds = { x: number; y: number; width: number; height: number }
 export type MaestroCanvasInsets = { top: number; right: number; bottom: number; left: number }
 
-export const MAESTRO_MIN_ZOOM = 0.1
+export const MAESTRO_MIN_ZOOM = 0.025
 export const MAESTRO_MAX_ZOOM = 2.5
 
 export function clampMaestroZoom(value: number): number {
@@ -66,7 +66,7 @@ export function revealMaestroCanvasBounds(
   }
 }
 
-const BOARD_GRID_STEPS = [24, 48, 96, 192] as const
+const BOARD_GRID_STEPS = [24, 48, 96, 192, 384, 768] as const
 const MIN_ON_SCREEN_GRID_PX = 18
 
 /** Keeps the board's dot spacing readable instead of collapsing into moiré. */

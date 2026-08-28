@@ -31,13 +31,12 @@ const placement = {
 }
 const callbacks = {
   onSelect: vi.fn(),
-  onEdit: vi.fn(),
+  onRename: vi.fn(),
   onLinkPointerDown: vi.fn(),
   onFocus: vi.fn(),
   onClose: vi.fn(),
   onMoveCommit: vi.fn(),
-  onResizeCommit: vi.fn(),
-  onUpdateAnnotationTone: vi.fn()
+  onResizeCommit: vi.fn()
 }
 
 function terminal(): WorkspaceSurface {
@@ -110,8 +109,63 @@ describe('MaestroWorkspaceWindow', () => {
 
     expect(pointer.defaultPrevented).toBe(false)
     expect(callbacks.onSelect).not.toHaveBeenCalled()
-    expect(callbacks.onEdit).not.toHaveBeenCalled()
+    expect(callbacks.onRename).not.toHaveBeenCalled()
     expect(callbacks.onFocus).not.toHaveBeenCalled()
+  })
+
+  describe('inline rename', () => {
+    it('commits a trimmed title with Enter without opening a separate surface', () => {
+      render(
+        <TooltipProvider>
+          <MaestroWorkspaceWindow
+            {...callbacks}
+            surfaceKey="terminal-1"
+            surface={terminal()}
+            placement={placement}
+            selected
+            pending={false}
+            linkTarget={false}
+            runtimeTarget={{ kind: 'local' }}
+          />
+        </TooltipProvider>
+      )
+
+      fireEvent.click(screen.getByRole('button', { name: 'Rename tab' }))
+      const titleInput = screen.getByRole('textbox', { name: 'Tab title' })
+      fireEvent.change(titleInput, { target: { value: '  Compile  ' } })
+      fireEvent.keyDown(titleInput, { key: 'Enter' })
+
+      expect(callbacks.onRename).toHaveBeenCalledOnce()
+      expect(callbacks.onRename).toHaveBeenCalledWith('Compile')
+      expect(screen.queryByRole('textbox', { name: 'Tab title' })).toBeNull()
+    })
+
+    it('cancels with Escape and ignores an empty blur', () => {
+      render(
+        <TooltipProvider>
+          <MaestroWorkspaceWindow
+            {...callbacks}
+            surfaceKey="terminal-1"
+            surface={terminal()}
+            placement={placement}
+            selected
+            pending={false}
+            linkTarget={false}
+            runtimeTarget={{ kind: 'local' }}
+          />
+        </TooltipProvider>
+      )
+
+      fireEvent.click(screen.getByRole('button', { name: 'Rename tab' }))
+      fireEvent.keyDown(screen.getByRole('textbox', { name: 'Tab title' }), { key: 'Escape' })
+      fireEvent.click(screen.getByRole('button', { name: 'Rename tab' }))
+      const titleInput = screen.getByRole('textbox', { name: 'Tab title' })
+      fireEvent.change(titleInput, { target: { value: '   ' } })
+      fireEvent.blur(titleInput)
+
+      expect(callbacks.onRename).not.toHaveBeenCalled()
+      expect(screen.queryByRole('textbox', { name: 'Tab title' })).toBeNull()
+    })
   })
 
   it('avoids committing placement when a header click has no movement', () => {

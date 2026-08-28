@@ -37,11 +37,15 @@ export type RuntimeMaestroWorkspaceCanvasMutation =
       surface_type: 'terminal'
       title?: string
       agent?: TuiAgent
+      expected_canvas_revision?: number
+      placement?: WorkspaceCanvasDocument['placements'][string]
     })
   | (RuntimeMaestroWorkspaceCanvasMutationBase & {
       action: 'create'
       surface_type: 'browser'
       title?: string
+      expected_canvas_revision?: number
+      placement?: WorkspaceCanvasDocument['placements'][string]
     })
   | (RuntimeMaestroWorkspaceCanvasDocumentMutationBase & {
       action: 'create'
@@ -51,6 +55,7 @@ export type RuntimeMaestroWorkspaceCanvasMutation =
         text: string
         tone: 'decision' | 'warning' | 'blocked' | 'observation'
       }
+      placement?: WorkspaceCanvasDocument['placements'][string]
     })
   | (RuntimeMaestroWorkspaceCanvasDocumentMutationBase & {
       action: 'focus' | 'close'

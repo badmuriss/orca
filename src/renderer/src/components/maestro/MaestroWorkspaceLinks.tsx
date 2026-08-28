@@ -1,20 +1,25 @@
 import { memo } from 'react'
-import type { WorkspaceCanvasDocument } from '../../../../shared/maestro-document-contract'
+import type {
+  WorkspaceCanvasDocument,
+  WorkspaceCanvasManualLink
+} from '../../../../shared/maestro-document-contract'
 import type { WorkspaceSurfaceSnapshot } from '../../../../shared/maestro-workspace-canvas'
 import type { CanvasAgentRelation, CanvasAgentTopology } from './maestro-agent-topology'
 import type { MaestroWorkspaceWindowPlacement } from './maestro-workspace-window-layout'
 import { translate } from '@/i18n/i18n'
+import { MaestroWorkspaceLinkArtwork, MaestroWorkspaceManualLink } from './MaestroWorkspaceLink'
 
-type LinkKind = CanvasAgentRelation['kind'] | 'manual' | 'automatic'
-type LinkLine = {
+export type MaestroWorkspaceLinkKind = CanvasAgentRelation['kind'] | 'manual' | 'automatic'
+export type MaestroWorkspaceLinkLine = {
   id: string
   source: string
   target: string
-  kind: LinkKind
+  kind: MaestroWorkspaceLinkKind
   provenance: 'manual' | 'automatic' | CanvasAgentRelation['provenance']
+  deletable: boolean
 }
 
-export type OptimisticMaestroManualLink = Pick<LinkLine, 'id' | 'source' | 'target'>
+export type OptimisticMaestroManualLink = Pick<MaestroWorkspaceLinkLine, 'id' | 'source' | 'target'>
 const NO_OPTIMISTIC_MANUAL_LINKS: readonly OptimisticMaestroManualLink[] = []
 
 function relationEndpoint(
@@ -23,11 +28,25 @@ function relationEndpoint(
   return `${relation.sourceSurfaceId}\0${relation.targetSurfaceId}`
 }
 
-function unorderedEndpoint(source: string, target: string): string {
+export function maestroWorkspaceLinkEndpointPair(source: string, target: string): string {
   return source < target ? `${source}\0${target}` : `${target}\0${source}`
 }
 
-function topologyLines(topology: CanvasAgentTopology): LinkLine[] {
+export function unconfirmedOptimisticMaestroManualLinks(
+  optimisticLinks: readonly OptimisticMaestroManualLink[],
+  confirmedLinks: readonly WorkspaceCanvasManualLink[]
+): readonly OptimisticMaestroManualLink[] {
+  const confirmedPairs = new Set(
+    confirmedLinks.map((link) =>
+      maestroWorkspaceLinkEndpointPair(link.source_surface_key, link.target_surface_key)
+    )
+  )
+  return optimisticLinks.filter(
+    (link) => !confirmedPairs.has(maestroWorkspaceLinkEndpointPair(link.source, link.target))
+  )
+}
+
+function topologyLines(topology: CanvasAgentTopology): MaestroWorkspaceLinkLine[] {
   const semanticEndpoints = new Set(
     topology.relations
       .filter((relation) => relation.kind !== 'coordinates')
@@ -42,7 +61,8 @@ function topologyLines(topology: CanvasAgentTopology): LinkLine[] {
             source: relation.sourceSurfaceId,
             target: relation.targetSurfaceId,
             kind: relation.kind,
-            provenance: relation.provenance
+            provenance: relation.provenance,
+            deletable: false
           }
         ]
   )
@@ -53,45 +73,71 @@ function linkLines(
   document: WorkspaceCanvasDocument,
   topology: CanvasAgentTopology,
   optimisticManualLinks: readonly OptimisticMaestroManualLink[]
-): LinkLine[] {
+): MaestroWorkspaceLinkLine[] {
   const topologyLinks = topologyLines(topology)
+  const manualPairs = new Set<string>()
+  const manualLinks: MaestroWorkspaceLinkLine[] = document.manual_links.flatMap((link) => {
+    const pair = maestroWorkspaceLinkEndpointPair(link.source_surface_key, link.target_surface_key)
+    if (manualPairs.has(pair)) {
+      return []
+    }
+    manualPairs.add(pair)
+    return [
+      {
+        id: link.id,
+        source: link.source_surface_key,
+        target: link.target_surface_key,
+        kind: 'manual',
+        provenance: 'manual',
+        deletable: true
+      }
+    ]
+  })
+  const optimisticLinks: MaestroWorkspaceLinkLine[] = optimisticManualLinks.flatMap((link) => {
+    const pair = maestroWorkspaceLinkEndpointPair(link.source, link.target)
+    if (manualPairs.has(pair)) {
+      return []
+    }
+    manualPairs.add(pair)
+    return [
+      {
+        ...link,
+        kind: 'manual' as const,
+        provenance: 'manual' as const,
+        deletable: false
+      }
+    ]
+  })
   const delegatedPairs = new Set(
     topologyLinks
       .filter((link) => link.kind === 'delegates')
-      .map((link) => unorderedEndpoint(link.source, link.target))
+      .map((link) => maestroWorkspaceLinkEndpointPair(link.source, link.target))
   )
   return [
-    ...document.manual_links.map((link) => ({
-      id: link.id,
-      source: link.source_surface_key,
-      target: link.target_surface_key,
-      kind: 'manual' as const,
-      provenance: 'manual' as const
-    })),
-    ...optimisticManualLinks
-      .filter(
-        (link) =>
-          !document.manual_links.some(
-            (confirmed) =>
-              confirmed.source_surface_key === link.source &&
-              confirmed.target_surface_key === link.target
-          )
-      )
-      .map((link) => ({ ...link, kind: 'manual' as const, provenance: 'manual' as const })),
+    ...manualLinks,
+    ...optimisticLinks,
     ...snapshot.automatic_links
       .filter(
         (link) =>
-          link.link_type !== 'parent-child' ||
-          !delegatedPairs.has(unorderedEndpoint(link.source_surface_key, link.target_surface_key))
+          !manualPairs.has(
+            maestroWorkspaceLinkEndpointPair(link.source_surface_key, link.target_surface_key)
+          ) &&
+          (link.link_type !== 'parent-child' ||
+            !delegatedPairs.has(
+              maestroWorkspaceLinkEndpointPair(link.source_surface_key, link.target_surface_key)
+            ))
       )
       .map((link) => ({
         id: link.id,
         source: link.source_surface_key,
         target: link.target_surface_key,
         kind: 'automatic' as const,
-        provenance: 'automatic' as const
+        provenance: 'automatic' as const,
+        deletable: false
       })),
-    ...topologyLinks
+    ...topologyLinks.filter(
+      (link) => !manualPairs.has(maestroWorkspaceLinkEndpointPair(link.source, link.target))
+    )
   ]
 }
 
@@ -134,7 +180,7 @@ function linkGeometry(
   return { path, label: { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 } }
 }
 
-function linkPresentation(kind: LinkKind): {
+function linkPresentation(kind: MaestroWorkspaceLinkKind): {
   label: string | null
   width: number
   dash?: string
@@ -143,7 +189,7 @@ function linkPresentation(kind: LinkKind): {
   if (kind === 'coordinates') {
     return { label: null, width: 1, dash: '3 6', opacity: 0.38 }
   }
-  const labels: Record<Exclude<LinkKind, 'coordinates'>, string> = {
+  const labels: Record<Exclude<MaestroWorkspaceLinkKind, 'coordinates'>, string> = {
     delegates: translate('auto.components.maestro.links.delegates', 'Delegates'),
     'depends-on': translate('auto.components.maestro.links.dependsOn', 'Depends on'),
     'reports-to': translate('auto.components.maestro.links.reportsTo', 'Reports to'),
@@ -154,7 +200,7 @@ function linkPresentation(kind: LinkKind): {
       'Automatic'
     )
   }
-  const patterns: Partial<Record<LinkKind, string>> = {
+  const patterns: Partial<Record<MaestroWorkspaceLinkKind, string>> = {
     'depends-on': '7 4',
     'reports-to': '2 4',
     'context-for': '5 5',
@@ -168,6 +214,9 @@ function linkPresentation(kind: LinkKind): {
   }
 }
 
+export type MaestroWorkspaceLinkGeometry = ReturnType<typeof linkGeometry>
+export type MaestroWorkspaceLinkPresentation = ReturnType<typeof linkPresentation>
+
 export const MaestroWorkspaceLinks = memo(function MaestroWorkspaceLinks({
   snapshot,
   document,
@@ -175,6 +224,9 @@ export const MaestroWorkspaceLinks = memo(function MaestroWorkspaceLinks({
   topology,
   optimisticManualLinks = NO_OPTIMISTIC_MANUAL_LINKS,
   selectedSurfaceKey,
+  selectedManualLinkId,
+  onManualLinkSelect,
+  onManualLinkDelete,
   style
 }: {
   snapshot: WorkspaceSurfaceSnapshot
@@ -183,10 +235,18 @@ export const MaestroWorkspaceLinks = memo(function MaestroWorkspaceLinks({
   topology: CanvasAgentTopology
   optimisticManualLinks?: readonly OptimisticMaestroManualLink[]
   selectedSurfaceKey?: string | null
+  selectedManualLinkId?: string | null
+  onManualLinkSelect?: (linkId: string) => void
+  onManualLinkDelete?: (linkId: string) => void
   style?: React.CSSProperties
 }): React.JSX.Element {
   return (
-    <svg className="pointer-events-none absolute overflow-visible" style={style} aria-hidden>
+    <svg
+      className="pointer-events-none absolute overflow-visible"
+      style={style}
+      role="group"
+      aria-label={translate('auto.components.maestro.links.group', 'Workspace links')}
+    >
       {linkLines(snapshot, document, topology, optimisticManualLinks).map((link) => {
         const source = placements[link.source]
         const target = placements[link.target]
@@ -196,12 +256,32 @@ export const MaestroWorkspaceLinks = memo(function MaestroWorkspaceLinks({
         const incident = selectedSurfaceKey === link.source || selectedSurfaceKey === link.target
         const presentation = linkPresentation(link.kind)
         const geometry = linkGeometry(source, target)
-        const labelWidth = presentation.label ? presentation.label.length * 6.5 + 16 : 0
-        const opacity = selectedSurfaceKey
-          ? incident
-            ? Math.min(1, presentation.opacity + 0.2)
-            : presentation.opacity * 0.34
-          : presentation.opacity
+        const selected = link.deletable && selectedManualLinkId === link.id
+        const dimmed = Boolean(
+          (selectedSurfaceKey && !incident) || (selectedManualLinkId && !selected)
+        )
+        if (link.deletable && onManualLinkSelect && onManualLinkDelete) {
+          const sourceTitle = snapshot.surfaces[link.source]?.title ?? link.source
+          const targetTitle = snapshot.surfaces[link.target]?.title ?? link.target
+          const accessibleLabel = translate(
+            'auto.components.maestro.links.manualAccessibleLabel',
+            'Manual link from {{value0}} to {{value1}}',
+            { value0: sourceTitle, value1: targetTitle }
+          )
+          return (
+            <MaestroWorkspaceManualLink
+              key={`${link.provenance}:${link.id}`}
+              link={link}
+              geometry={geometry}
+              presentation={presentation}
+              selected={selected}
+              dimmed={dimmed}
+              accessibleLabel={accessibleLabel}
+              onSelect={() => onManualLinkSelect(link.id)}
+              onDelete={() => onManualLinkDelete(link.id)}
+            />
+          )
+        }
         return (
           <g
             key={`${link.provenance}:${link.id}`}
@@ -210,49 +290,17 @@ export const MaestroWorkspaceLinks = memo(function MaestroWorkspaceLinks({
             data-link-source={link.source}
             data-link-target={link.target}
             data-link-selected={incident ? 'true' : undefined}
+            aria-hidden
           >
             <title>{presentation.label ?? 'Coordinates'}</title>
-            <path
-              d={geometry.path}
-              fill="none"
-              stroke={
-                incident
-                  ? 'var(--ring)'
-                  : link.kind === 'delegates'
-                    ? 'color-mix(in srgb, var(--ring) 48%, var(--muted-foreground))'
-                    : 'var(--muted-foreground)'
-              }
-              strokeWidth={presentation.width}
-              strokeDasharray={presentation.dash}
-              opacity={opacity}
-              vectorEffect="non-scaling-stroke"
+            <MaestroWorkspaceLinkArtwork
+              kind={link.kind}
+              geometry={geometry}
+              presentation={presentation}
+              incident={incident}
+              selected={false}
+              dimmed={dimmed}
             />
-            {presentation.label ? (
-              <>
-                <rect
-                  x={geometry.label.x - labelWidth / 2}
-                  y={geometry.label.y - 9}
-                  width={labelWidth}
-                  height={18}
-                  rx={6}
-                  fill="var(--card)"
-                  stroke="var(--border)"
-                  opacity={selectedSurfaceKey && !incident ? 0.38 : 0.92}
-                  vectorEffect="non-scaling-stroke"
-                />
-                <text
-                  x={geometry.label.x}
-                  y={geometry.label.y + 3.5}
-                  textAnchor="middle"
-                  fontSize={10}
-                  fontWeight={600}
-                  fill="var(--foreground)"
-                  opacity={selectedSurfaceKey && !incident ? 0.42 : 0.88}
-                >
-                  {presentation.label}
-                </text>
-              </>
-            ) : null}
           </g>
         )
       })}

@@ -40,7 +40,12 @@ export function useMaestroWorkspaceAgentTopology(
   const orchestrationByPaneKey = useAppStore(
     useShallow((state) =>
       Object.fromEntries(
-        paneKeys.map((paneKey) => [paneKey, state.runtimeAgentOrchestrationByPaneKey[paneKey]])
+        paneKeys.map((paneKey) => [
+          paneKey,
+          state.runtimeAgentOrchestrationByPaneKey[paneKey] ??
+            state.agentStatusByPaneKey[paneKey]?.orchestration ??
+            state.retainedAgentsByPaneKey[paneKey]?.entry.orchestration
+        ])
       )
     )
   )
@@ -50,7 +55,9 @@ export function useMaestroWorkspaceAgentTopology(
         paneKeys.map((paneKey) => [
           paneKey,
           state.agentStatusByPaneKey[paneKey]?.terminalHandle ??
-            state.retainedAgentsByPaneKey[paneKey]?.entry.terminalHandle
+            (state.retainedAgentsByPaneKey[paneKey]?.entry.orchestration
+              ? state.retainedAgentsByPaneKey[paneKey]?.entry.terminalHandle
+              : undefined)
         ])
       )
     )
@@ -60,23 +67,12 @@ export function useMaestroWorkspaceAgentTopology(
     if (!snapshot) {
       return { nodes: [], relations: [] }
     }
-    const sessionHandleByPaneKey = Object.fromEntries(
-      Object.values(snapshot.surfaces).flatMap((surface) => {
-        const paneKey = maestroTerminalSurfacePaneKey(surface)
-        return paneKey && surface.binding.kind === 'terminal' && surface.binding.session_id
-          ? [[paneKey, surface.binding.session_id]]
-          : []
-      })
-    )
     return projectMaestroAgentTopology({
       surfaces: snapshot.surfaces,
       orchestrationByPaneKey: definedOrchestration(orchestrationByPaneKey),
-      terminalHandleByPaneKey: {
-        ...sessionHandleByPaneKey,
-        ...Object.fromEntries(
-          Object.entries(statusTerminalHandleByPaneKey).filter(([, handle]) => handle !== undefined)
-        )
-      },
+      terminalHandleByPaneKey: Object.fromEntries(
+        Object.entries(statusTerminalHandleByPaneKey).filter(([, handle]) => handle !== undefined)
+      ),
       formalProjection
     })
   }, [formalProjection, orchestrationByPaneKey, snapshot, statusTerminalHandleByPaneKey])

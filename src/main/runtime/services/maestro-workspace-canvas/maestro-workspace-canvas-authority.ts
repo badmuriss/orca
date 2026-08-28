@@ -37,22 +37,9 @@ import {
   maestroWorkspaceScopeKey,
   type MaestroWorkspaceSnapshotState
 } from './maestro-workspace-snapshot-state'
+import type { MaestroWorkspaceCanvasRuntime } from './maestro-workspace-canvas-runtime'
 
-export type MaestroWorkspaceCanvasRuntime = Pick<
-  OrcaRuntimeService,
-  | 'activateMobileSessionTab'
-  | 'closeMobileSessionTab'
-  | 'createMobileSessionTerminal'
-  | 'browserTabCreate'
-  | 'createMaestroWorkspaceAnnotation'
-  | 'commandMaestroWorkspaceTab'
-  | 'getTerminalProcessIncarnation'
-  | 'getOrchestrationDb'
-  | 'listMobileSessionTabs'
-  | 'readMobileFile'
-  | 'readMobileMarkdownTab'
-  | 'saveMobileMarkdownTab'
->
+export type { MaestroWorkspaceCanvasRuntime } from './maestro-workspace-canvas-runtime'
 
 export class MaestroWorkspaceCanvasAuthority {
   private readonly snapshots = new Map<string, MaestroWorkspaceSnapshotState>()
@@ -186,6 +173,18 @@ export class MaestroWorkspaceCanvasAuthority {
     }
     if (before.snapshot.authority_revision !== request.expected_authority_revision) {
       return { status: 'stale', authority_revision: before.snapshot.authority_revision }
+    }
+    if (
+      request.action === 'create' &&
+      request.placement &&
+      request.expected_canvas_revision == null
+    ) {
+      return {
+        status: 'stale',
+        authority_revision: before.snapshot.authority_revision,
+        canvas_revision: before.canvas.revision,
+        reason: 'canvas_revision_required'
+      }
     }
     if (
       'expected_canvas_revision' in request &&

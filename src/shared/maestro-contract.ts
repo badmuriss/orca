@@ -17,7 +17,7 @@ import {
 export const MAX_MAESTRO_DOCUMENT_BYTES = 512 * 1024
 export const MAX_MAESTRO_DELTAS = 128
 export const MAX_MAESTRO_LAYOUT_COORDINATE = 1_000_000
-export const MIN_MAESTRO_LAYOUT_ZOOM = 0.1
+export const MIN_MAESTRO_LAYOUT_ZOOM = 0.025
 export const MAX_MAESTRO_LAYOUT_ZOOM = 4
 const identifier = z.string().regex(/^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$/)
 const opaqueKey = z

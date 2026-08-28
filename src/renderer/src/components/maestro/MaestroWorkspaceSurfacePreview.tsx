@@ -12,9 +12,11 @@ type MaestroWorkspaceSurfacePreviewProps = {
   surface: WorkspaceSurface
   runtimeTarget: RuntimeClientTarget
   previewMode: MaestroWorkspacePreviewMode
+  selected: boolean
+  focusTerminalOnMount: boolean
+  onRequestTerminalInput: () => void
   agentFunctionLabel?: string
   agentRole?: 'coordinator' | 'worker'
-  onUpdateAnnotationTone: (tone: 'decision' | 'warning' | 'blocked' | 'observation') => void
   onUpdateAnnotationContent?: (content: string) => void
 }
 
@@ -71,12 +73,14 @@ export function MaestroWorkspaceSurfacePreview({
   surface,
   runtimeTarget,
   previewMode,
+  selected,
+  focusTerminalOnMount,
+  onRequestTerminalInput,
   agentFunctionLabel,
   agentRole,
-  onUpdateAnnotationTone,
   onUpdateAnnotationContent
 }: MaestroWorkspaceSurfacePreviewProps): React.JSX.Element {
-  if (previewMode !== 'full') {
+  if (previewMode === 'suspended') {
     return (
       <LowDetailSurfacePreview
         surface={surface}
@@ -90,27 +94,34 @@ export function MaestroWorkspaceSurfacePreview({
   if (binding.kind === 'terminal') {
     if (binding.session_id && binding.liveness === 'live') {
       return (
-        <RecoverableRenderErrorBoundary
-          boundaryId={`maestro-workspace-terminal-${binding.session_id}`}
-          surface="overlay"
-          resetKey={`${binding.session_id}:${binding.pty_incarnation ?? 'unknown'}`}
-          title={translate(
-            'auto.components.maestro.MaestroWorkspaceWindow.52cce7f247',
-            'Terminal output could not attach.'
-          )}
-          description={translate(
-            'auto.components.maestro.MaestroWorkspaceWindow.c6b6befac1',
-            'The exact terminal remains available in its own tab.'
-          )}
+        <div
+          className="size-full"
+          data-maestro-terminal-input-surface=""
+          onPointerDown={() => onRequestTerminalInput()}
         >
-          <AgentTerminalPreview
-            ptyId={binding.session_id}
-            autoFocus={false}
-            mode="canvas"
-            liveRefreshIntervalMs={80}
-            className="size-full"
-          />
-        </RecoverableRenderErrorBoundary>
+          <RecoverableRenderErrorBoundary
+            boundaryId={`maestro-workspace-terminal-${binding.session_id}`}
+            surface="overlay"
+            resetKey={`${binding.session_id}:${binding.pty_incarnation ?? 'unknown'}`}
+            title={translate(
+              'auto.components.maestro.MaestroWorkspaceWindow.52cce7f247',
+              'Terminal output could not attach.'
+            )}
+            description={translate(
+              'auto.components.maestro.MaestroWorkspaceWindow.c6b6befac1',
+              'The exact terminal remains available in its own tab.'
+            )}
+          >
+            <AgentTerminalPreview
+              ptyId={binding.session_id}
+              autoFocus={focusTerminalOnMount}
+              mode="canvas"
+              inputEnabled={selected}
+              liveRefreshIntervalMs={previewMode === 'identity' ? 240 : selected ? 64 : 140}
+              className="size-full"
+            />
+          </RecoverableRenderErrorBoundary>
+        </div>
       )
     }
     return (
@@ -148,7 +159,6 @@ export function MaestroWorkspaceSurfacePreview({
     <MaestroWorkspaceContentPreview
       target={runtimeTarget}
       surface={surface}
-      onUpdateAnnotationTone={onUpdateAnnotationTone}
       onUpdateAnnotationContent={onUpdateAnnotationContent}
     />
   )

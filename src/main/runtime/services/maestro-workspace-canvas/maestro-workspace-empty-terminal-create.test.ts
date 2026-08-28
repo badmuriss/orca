@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { RuntimeMobileSessionTabsResult } from '../../../../shared/runtime-types'
+import { workspaceSurfaceKey } from '../../../../shared/maestro-workspace-canvas'
 import { OrchestrationDb } from '../../orchestration/db/orchestration-db'
 import {
   MaestroWorkspaceCanvasAuthority,
@@ -85,6 +86,12 @@ describe('Maestro workspace empty terminal creation', () => {
       throw new Error('missing empty workspace snapshot')
     }
 
+    const placement = {
+      position: { x: 120, y: 84 },
+      size: { width: 760, height: 530 },
+      collapsed: false,
+      z_order: 2
+    }
     const result = await authority.mutate({
       action: 'create',
       surface_type: 'terminal',
@@ -92,6 +99,8 @@ describe('Maestro workspace empty terminal creation', () => {
       scope,
       actor_id: 'actor-1',
       expected_authority_revision: current.snapshot.authority_revision,
+      expected_canvas_revision: current.canvas.revision,
+      placement,
       idempotency_key: 'terminal-create-empty-1'
     })
 
@@ -116,6 +125,11 @@ describe('Maestro workspace empty terminal creation', () => {
         binding: { kind: 'terminal', terminal_tab_id: createdTab.parentTabId }
       }
     ])
+    expect(
+      projected.canvas.document.placements[
+        workspaceSurfaceKey({ ...scope, unified_tab_id: createdTab.parentTabId })
+      ]
+    ).toEqual(placement)
     database.close()
   })
 

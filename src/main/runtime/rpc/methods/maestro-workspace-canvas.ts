@@ -1,5 +1,9 @@
 import { z } from 'zod'
 import { WorkspaceSurfaceIdSchema } from '../../../../shared/maestro-workspace-canvas'
+import {
+  MAX_MAESTRO_LAYOUT_ZOOM,
+  MIN_MAESTRO_LAYOUT_ZOOM
+} from '../../../../shared/maestro-contract'
 import { ALL_TUI_AGENTS } from '../../../../shared/tui-agent-display-names'
 import type { TuiAgent } from '../../../../shared/tui-agent'
 import { resolveMaestroLayoutPrincipal } from '../maestro-principal'
@@ -23,6 +27,19 @@ const documentMutationBase = {
   expected_canvas_revision: z.number().int().min(0)
 }
 const surfaceKey = z.string().min(1).max(12_288)
+const placementSchema = z
+  .object({
+    position: z.object({ x: z.number().finite(), y: z.number().finite() }).strict(),
+    size: z
+      .object({
+        width: z.number().finite().min(160).max(4096),
+        height: z.number().finite().min(96).max(4096)
+      })
+      .strict(),
+    collapsed: z.boolean(),
+    z_order: z.number().int().min(0).max(1_000_000)
+  })
+  .strict()
 const tuiAgentSchema = z.custom<TuiAgent>(
   (value) => typeof value === 'string' && ALL_TUI_AGENTS.includes(value as TuiAgent)
 )
@@ -33,7 +50,9 @@ const mutationSchema = z.union([
       action: z.literal('create'),
       surface_type: z.literal('terminal'),
       title: z.string().min(1).max(512).optional(),
-      agent: tuiAgentSchema.optional()
+      agent: tuiAgentSchema.optional(),
+      expected_canvas_revision: z.number().int().min(0).optional(),
+      placement: placementSchema.optional()
     })
     .strict(),
   z
@@ -41,7 +60,9 @@ const mutationSchema = z.union([
       ...mutationBase,
       action: z.literal('create'),
       surface_type: z.literal('browser'),
-      title: z.string().min(1).max(512).optional()
+      title: z.string().min(1).max(512).optional(),
+      expected_canvas_revision: z.number().int().min(0).optional(),
+      placement: placementSchema.optional()
     })
     .strict(),
   z
@@ -51,7 +72,7 @@ const mutationSchema = z.union([
       viewport: z
         .object({
           center: z.object({ x: z.number().finite(), y: z.number().finite() }).strict(),
-          zoom: z.number().finite().min(0.1).max(4)
+          zoom: z.number().finite().min(MIN_MAESTRO_LAYOUT_ZOOM).max(MAX_MAESTRO_LAYOUT_ZOOM)
         })
         .strict()
     })
@@ -67,7 +88,8 @@ const mutationSchema = z.union([
           text: z.string().max(65_536),
           tone: z.enum(['decision', 'warning', 'blocked', 'observation'])
         })
-        .strict()
+        .strict(),
+      placement: placementSchema.optional()
     })
     .strict(),
   z
@@ -106,19 +128,7 @@ const mutationSchema = z.union([
       ...documentMutationBase,
       action: z.literal('set-placement'),
       surface_id: WorkspaceSurfaceIdSchema,
-      placement: z
-        .object({
-          position: z.object({ x: z.number().finite(), y: z.number().finite() }).strict(),
-          size: z
-            .object({
-              width: z.number().finite().min(160).max(4096),
-              height: z.number().finite().min(96).max(4096)
-            })
-            .strict(),
-          collapsed: z.boolean(),
-          z_order: z.number().int().min(0).max(1_000_000)
-        })
-        .strict()
+      placement: placementSchema
     })
     .strict(),
   z

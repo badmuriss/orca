@@ -7,7 +7,7 @@ const MAESTRO_DOCUMENT_AUTHORING_MUTATION_PROTOCOL =
   'maestro-document-authoring-mutation/v1' as const
 const MAX_MAESTRO_DELTAS = 128
 const MAX_MAESTRO_LAYOUT_COORDINATE = 1_000_000
-const MIN_MAESTRO_LAYOUT_ZOOM = 0.1
+const MIN_MAESTRO_LAYOUT_ZOOM = 0.025
 const MAX_MAESTRO_LAYOUT_ZOOM = 4
 
 const identifier = z.string().regex(/^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$/)

@@ -15,6 +15,25 @@ import type { MaestroWorkspaceCanvasRuntime } from './maestro-workspace-canvas-a
 type CreateRequest = Extract<RuntimeMaestroWorkspaceCanvasMutation, { action: 'create' }>
 type Available = Extract<RuntimeMaestroWorkspaceCanvasQueryResult, { status: 'available' }>
 
+function persistInitialPlacement(params: {
+  database: OrchestrationDb
+  request: CreateRequest
+  canvas: Available['canvas']
+  surfaceId: WorkspaceSurfaceId
+}): number {
+  if (!params.request.placement) {
+    return params.canvas.revision
+  }
+  const document = structuredClone(params.canvas.document)
+  document.placements[workspaceSurfaceKey(params.surfaceId)] = params.request.placement
+  return writeWorkspaceCanvasDocument(params.database, {
+    scope: params.request.scope,
+    expected_revision: params.canvas.revision,
+    idempotency_key: `placement:${params.request.idempotency_key}`,
+    document
+  }).revision
+}
+
 export async function createMaestroWorkspaceSurface(params: {
   runtime: MaestroWorkspaceCanvasRuntime
   database: OrchestrationDb
@@ -35,9 +54,15 @@ export async function createMaestroWorkspaceSurface(params: {
       // before the Canvas preview can attach, render, and accept input.
       runtimeOwned: true
     })
+    const surfaceId = { ...request.scope, unified_tab_id: created.tab.parentTabId }
     return {
-      surfaceId: { ...request.scope, unified_tab_id: created.tab.parentTabId },
-      canvasRevision: before.canvas.revision
+      surfaceId,
+      canvasRevision: persistInitialPlacement({
+        database,
+        request,
+        canvas: before.canvas,
+        surfaceId
+      })
     }
   }
   if (request.surface_type === 'browser') {
@@ -62,7 +87,15 @@ export async function createMaestroWorkspaceSurface(params: {
     if (!surface) {
       throw new Error('browser_surface_identity_unverifiable')
     }
-    return { surfaceId: surface.id, canvasRevision: projected.canvas.revision }
+    return {
+      surfaceId: surface.id,
+      canvasRevision: persistInitialPlacement({
+        database,
+        request,
+        canvas: projected.canvas,
+        surfaceId: surface.id
+      })
+    }
   }
   const suffix = createHash('sha256').update(request.idempotency_key).digest('hex').slice(0, 24)
   const relativePath = `.orca/maestro/annotation-${suffix}.md`
@@ -97,6 +130,9 @@ export async function createMaestroWorkspaceSurface(params: {
     tone: request.annotation.tone,
     created_by: request.actor_id,
     created_at: new Date().toISOString()
+  }
+  if (request.placement) {
+    document.placements[key] = request.placement
   }
   const receipt = writeWorkspaceCanvasDocument(database, {
     scope: request.scope,

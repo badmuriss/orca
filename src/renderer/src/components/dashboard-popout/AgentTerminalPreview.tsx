@@ -42,6 +42,18 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
+function syncTerminalPreviewInput(terminal: Terminal, inputEnabled: boolean): void {
+  terminal.options.disableStdin = !inputEnabled
+  const textarea = terminal.textarea
+  if (!textarea) {
+    return
+  }
+  textarea.setAttribute('tabindex', inputEnabled ? '0' : '-1')
+  if (!inputEnabled && document.activeElement === textarea) {
+    textarea.blur()
+  }
+}
+
 export type AgentTerminalPreviewMode = 'interactive' | 'canvas' | 'passive'
 
 /** Renders the exact PTY through a DOM xterm, with optional interactive ownership. */
@@ -51,6 +63,7 @@ export function AgentTerminalPreview({
   autoFocus = true,
   className,
   mode = 'interactive',
+  inputEnabled: inputEnabledProp,
   liveRefreshIntervalMs = 0
 }: {
   ptyId: string
@@ -59,6 +72,7 @@ export function AgentTerminalPreview({
   autoFocus?: boolean
   className?: string
   mode?: AgentTerminalPreviewMode
+  inputEnabled?: boolean
   liveRefreshIntervalMs?: number
 }): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -73,6 +87,7 @@ export function AgentTerminalPreview({
   const macOptionAsAltRef = useRef(macOptionAsAlt)
   const terminalInputRef = useRef(terminalInput)
   const acceptsInput = mode !== 'passive'
+  const inputEnabled = acceptsInput && (inputEnabledProp ?? true)
   const ownsPtyGrid = mode !== 'passive'
   const usesBufferedRendering = mode !== 'interactive'
   const { terminalTheme, terminalMode } = useMemo(() => {
@@ -86,6 +101,11 @@ export function AgentTerminalPreview({
     )
     return { terminalTheme: theme, terminalMode: appearance.mode }
   }, [settings, systemPrefersDark])
+  const inputEnabledRef = useRef(inputEnabled)
+  const autoFocusRef = useRef(autoFocus)
+  const liveRefreshIntervalMsRef = useRef(liveRefreshIntervalMs)
+  const terminalThemeRef = useRef(terminalTheme)
+  const terminalModeRef = useRef(terminalMode)
   // A null snapshot means no serializer knows this pty (it died or was never
   // spawned this session) — say so instead of painting a silent blank terminal.
   const [ptyGone, setPtyGone] = useState(false)
@@ -98,7 +118,21 @@ export function AgentTerminalPreview({
     settingsRef.current = settings
     macOptionAsAltRef.current = macOptionAsAlt
     terminalInputRef.current = terminalInput
-  }, [settings, macOptionAsAlt, terminalInput])
+    inputEnabledRef.current = inputEnabled
+    autoFocusRef.current = autoFocus
+    liveRefreshIntervalMsRef.current = liveRefreshIntervalMs
+    terminalThemeRef.current = terminalTheme
+    terminalModeRef.current = terminalMode
+  }, [
+    settings,
+    macOptionAsAlt,
+    terminalInput,
+    inputEnabled,
+    autoFocus,
+    liveRefreshIntervalMs,
+    terminalTheme,
+    terminalMode
+  ])
 
   useEffect(() => {
     setPtyGone(false)
@@ -147,14 +181,16 @@ export function AgentTerminalPreview({
     })
     const passiveLiveQueue = createPassiveAgentTerminalLiveQueue({
       ptyId,
-      intervalMs: liveRefreshIntervalMs,
+      get intervalMs() {
+        return liveRefreshIntervalMsRef.current
+      },
       isDisposed: () => disposed,
       write: previewWriter.writeLive
     })
     const writeLive = (
       payload: Extract<TerminalPreviewDataPayload, { type: 'data' }>
     ): Promise<void> => {
-      if (!usesBufferedRendering || liveRefreshIntervalMs <= 0) {
+      if (!usesBufferedRendering || liveRefreshIntervalMsRef.current <= 0) {
         return previewWriter.writeLive(payload)
       }
       return passiveLiveQueue.write(payload)
@@ -169,6 +205,7 @@ export function AgentTerminalPreview({
           getSettings: () => settingsRef.current,
           getMacOptionAsAlt: () => macOptionAsAltRef.current,
           getKittyKeyboardFlags: () => previewWriter.kittyKeyboardModes.flags,
+          getInputEnabled: () => inputEnabledRef.current,
           isDisposed: () => disposed,
           isReplaying: previewWriter.isReplaying
         })
@@ -221,13 +258,13 @@ export function AgentTerminalPreview({
             settings: settingsRef.current,
             terminalInput: terminalInputRef.current,
             macOptionIsMeta: macOptionAsAltRef.current === 'true',
-            theme: terminalTheme,
-            themeMode: terminalMode,
+            theme: terminalThemeRef.current,
+            themeMode: terminalModeRef.current,
             cols: sourceGrid.cols,
             rows: sourceGrid.rows,
             scrollback: PREVIEW_SCROLLBACK_BUFFER_ROWS
           }),
-          ...(!acceptsInput ? { disableStdin: true } : {})
+          disableStdin: !inputEnabledRef.current
         })
         try {
           terminal.open(container)
@@ -242,6 +279,7 @@ export function AgentTerminalPreview({
         } else {
           interaction?.install()
         }
+        syncTerminalPreviewInput(terminal, inputEnabledRef.current)
       } else if (replaceExisting) {
         // Why: keep the old frame visible during capture, then atomically replace it once the authoritative snapshot arrives.
         terminal.resize(sourceGrid.cols, sourceGrid.rows)
@@ -271,7 +309,7 @@ export function AgentTerminalPreview({
         scheduleFit()
         gridClaim?.schedule()
       }
-      if (ownsPtyGrid && autoFocus) {
+      if (ownsPtyGrid && inputEnabledRef.current && autoFocusRef.current) {
         terminal.focus()
       }
     }
@@ -307,7 +345,7 @@ export function AgentTerminalPreview({
           replayConnection(connection, replaceExisting, () => void setup(true))
         }
       }
-      if (usesBufferedRendering && liveRefreshIntervalMs > 0 && !terminal) {
+      if (usesBufferedRendering && liveRefreshIntervalMsRef.current > 0 && !terminal) {
         cancelPendingTerminalMount?.()
         cancelPendingTerminalMount = scheduleAgentTerminalPreviewFrameTask(replay)
       } else {
@@ -330,17 +368,18 @@ export function AgentTerminalPreview({
       disposed = true
       releaseResources()
     }
-  }, [
-    acceptsInput,
-    autoFocus,
-    liveRefreshIntervalMs,
-    mode,
-    ownsPtyGrid,
-    ptyId,
-    terminalTheme,
-    terminalMode,
-    usesBufferedRendering
-  ])
+  }, [acceptsInput, ownsPtyGrid, ptyId, usesBufferedRendering])
+
+  useLayoutEffect(() => {
+    const terminal = terminalRef.current
+    if (!terminal) {
+      return
+    }
+    syncTerminalPreviewInput(terminal, inputEnabled)
+    if (inputEnabled && autoFocus) {
+      terminal.focus()
+    }
+  }, [autoFocus, inputEnabled])
 
   // Why: appearance settings must land on the open terminal, and the OS input
   // source can flip Option-as-Alt with no settings change at all. A remount
@@ -365,6 +404,7 @@ export function AgentTerminalPreview({
     // clipped to fit; fitToBox anchors whichever end keeps the cursor in view.
     <div
       data-terminal-preview-mode={mode}
+      data-terminal-preview-input={inputEnabled ? 'enabled' : 'disabled'}
       data-terminal-preview-pty-id={ptyId}
       className={cn(
         'relative h-[calc(100vh-140px)] w-full overflow-hidden bg-background p-1.5',
@@ -386,10 +426,7 @@ export function AgentTerminalPreview({
       >
         <div
           ref={containerRef}
-          className={cn(
-            'origin-bottom-left',
-            mode === 'passive' && 'pointer-events-none select-none'
-          )}
+          className={cn('origin-bottom-left', !inputEnabled && 'pointer-events-none select-none')}
         />
       </div>
     </div>

@@ -231,6 +231,22 @@ export function useMaestroWorkspaceViewport(params: {
       )
     })
   }, [animateTo, params.placements, reset, size])
+  const clientPointToWorld = useCallback(
+    (point: { x: number; y: number }): { x: number; y: number } => {
+      const bounds = canvasElement?.getBoundingClientRect()
+      const canvasSize = sizeRef.current
+      const local = {
+        x: point.x - (bounds?.left ?? 0),
+        y: point.y - (bounds?.top ?? 0)
+      }
+      const current = viewportRef.current
+      return {
+        x: current.center.x + (local.x - canvasSize.width / 2) / current.zoom,
+        y: current.center.y + (local.y - canvasSize.height / 2) / current.zoom
+      }
+    },
+    [canvasElement]
+  )
 
   const gridStep = maestroBoardGridStep(viewport.zoom) * viewport.zoom
   return {
@@ -243,6 +259,7 @@ export function useMaestroWorkspaceViewport(params: {
     reset,
     fit,
     reveal,
+    clientPointToWorld,
     onWheel,
     onPointerDown,
     onPointerMove,

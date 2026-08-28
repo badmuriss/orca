@@ -19,6 +19,7 @@ type PreviewTerminal = {
   focus: ReturnType<typeof vi.fn>
   dispose: ReturnType<typeof vi.fn>
   resize: ReturnType<typeof vi.fn>
+  onData: ReturnType<typeof vi.fn>
   textarea: HTMLTextAreaElement
 }
 
@@ -54,6 +55,7 @@ vi.mock('@xterm/xterm', () => ({
     dispose = vi.fn()
     resize = vi.fn()
     reset = vi.fn()
+    onData = vi.fn(() => ({ dispose: vi.fn() }))
     loadAddon = vi.fn()
 
     constructor(options: Record<string, unknown>) {
@@ -127,6 +129,13 @@ describe('agent terminal preview stream', () => {
       }
     })
     vi.clearAllMocks()
+    ownershipHarness.claimGrid.mockReturnValue({ schedule: vi.fn(), dispose: vi.fn() })
+    ownershipHarness.createClipboardPaster.mockReturnValue(vi.fn())
+    ownershipHarness.installAppMenuClipboard.mockReturnValue(vi.fn())
+    ownershipHarness.installCompatibility.mockReturnValue(vi.fn())
+    ownershipHarness.installImeBridge.mockReturnValue(null)
+    ownershipHarness.installKeyHandler.mockReturnValue(vi.fn())
+    ownershipHarness.subscribeUserInput.mockReturnValue({ dispose: vi.fn() })
   })
 
   afterEach(() => {
@@ -300,6 +309,50 @@ describe('agent terminal preview stream', () => {
     view.unmount()
     await waitFor(() => expect(unsubscribe).toHaveBeenCalledExactlyOnceWith('pty-1'))
     expect(terminal.dispose).toHaveBeenCalledOnce()
+  })
+
+  it('preserves one Canvas terminal while selection changes input ownership', async () => {
+    const view = render(
+      createElement(AgentTerminalPreview, {
+        ptyId: 'pty-canvas',
+        mode: 'canvas',
+        inputEnabled: false,
+        autoFocus: false,
+        liveRefreshIntervalMs: 140
+      })
+    )
+    await waitFor(() => expect(terminalHarness.instances).toHaveLength(1))
+    const terminal = terminalHarness.instances[0]!
+    expect(terminal.options.disableStdin).toBe(true)
+
+    view.rerender(
+      createElement(AgentTerminalPreview, {
+        ptyId: 'pty-canvas',
+        mode: 'canvas',
+        inputEnabled: true,
+        autoFocus: true,
+        liveRefreshIntervalMs: 64
+      })
+    )
+    expect(terminalHarness.instances).toHaveLength(1)
+    expect(connect).toHaveBeenCalledOnce()
+    expect(terminal.dispose).not.toHaveBeenCalled()
+    expect(terminal.options.disableStdin).toBe(false)
+    expect(terminal.focus).toHaveBeenCalled()
+
+    view.rerender(
+      createElement(AgentTerminalPreview, {
+        ptyId: 'pty-canvas',
+        mode: 'canvas',
+        inputEnabled: false,
+        autoFocus: false,
+        liveRefreshIntervalMs: 140
+      })
+    )
+    expect(terminalHarness.instances).toHaveLength(1)
+    expect(connect).toHaveBeenCalledOnce()
+    expect(terminal.dispose).not.toHaveBeenCalled()
+    expect(terminal.options.disableStdin).toBe(true)
   })
 
   it('keeps a shared PTY connection until its final preview releases it', async () => {

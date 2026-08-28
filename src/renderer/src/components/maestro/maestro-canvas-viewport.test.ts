@@ -17,7 +17,7 @@ describe('Maestro canvas viewport', () => {
     )
 
     expect(zoomed.zoom).toBe(MAESTRO_MIN_ZOOM)
-    expect(zoomed.zoom).toBe(0.1)
+    expect(zoomed.zoom).toBe(0.025)
   })
 
   it('keeps the pointer world coordinate stable while zooming', () => {

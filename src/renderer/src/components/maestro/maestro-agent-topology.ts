@@ -1,18 +1,16 @@
-import type { AgentStatusOrchestrationContext } from '../../../../shared/agent-status-types'
 import type { WorkspaceSurface } from '../../../../shared/maestro-workspace-canvas'
 import {
   acceptFormalRelations,
   formalLabelCandidates,
   formalRelationsFromProjection
 } from './maestro-agent-formal-relations'
+import { acceptedDelegateRelations } from './maestro-agent-runtime-lineage'
 import {
   terminalSurfaces,
   uniqueSurfaceByPaneKey,
-  uniqueSurfaceByTerminalHandle,
-  type TerminalSurface
+  uniqueSurfaceByTerminalHandle
 } from './maestro-agent-terminal-bindings'
 import type {
-  AcceptedFormalRelation,
   CanvasAgentNode,
   CanvasAgentRelation,
   CanvasAgentTopology,
@@ -29,76 +27,12 @@ export type {
 } from './maestro-agent-topology-types'
 export { maestroTerminalSurfacePaneKey } from './maestro-agent-terminal-bindings'
 
-function acceptedDelegateRelations(
-  formalRelations: readonly AcceptedFormalRelation[],
-  terminals: readonly TerminalSurface[],
-  surfaceByPaneKey: ReadonlyMap<string, string>,
-  orchestrationByPaneKey: Readonly<Record<string, AgentStatusOrchestrationContext>>
-): CanvasAgentRelation[] {
-  const formalParentsByChild = new Map<string, Set<string>>()
-  for (const relation of formalRelations) {
-    if (relation.kind !== 'delegates') {
-      continue
-    }
-    const parents = formalParentsByChild.get(relation.targetSurfaceId) ?? new Set<string>()
-    parents.add(relation.sourceSurfaceId)
-    formalParentsByChild.set(relation.targetSurfaceId, parents)
-  }
-  const disputedChildren = new Set(
-    [...formalParentsByChild.entries()]
-      .filter(([, parents]) => parents.size !== 1)
-      .map(([child]) => child)
-  )
-  const formalDelegates = formalRelations
-    .filter(
-      (relation) => relation.kind === 'delegates' && !disputedChildren.has(relation.targetSurfaceId)
-    )
-    .map((relation) => ({
-      id: relation.id,
-      sourceSurfaceId: relation.sourceSurfaceId,
-      targetSurfaceId: relation.targetSurfaceId,
-      kind: 'delegates' as const,
-      provenance: relation.provenance,
-      authorityId: relation.authorityId
-    }))
-  const formalChildren = new Set(formalParentsByChild.keys())
-  const runtimeDelegates = terminals.flatMap((terminal): CanvasAgentRelation[] => {
-    if (formalChildren.has(terminal.surfaceId)) {
-      return []
-    }
-    const parentPaneKey = orchestrationByPaneKey[terminal.paneKey]?.parentPaneKey
-    const parentSurfaceId = parentPaneKey ? surfaceByPaneKey.get(parentPaneKey) : undefined
-    if (!parentSurfaceId || parentSurfaceId === terminal.surfaceId) {
-      return []
-    }
-    return [
-      {
-        id: `runtime-lineage:delegates:${parentSurfaceId}\0${terminal.surfaceId}`,
-        sourceSurfaceId: parentSurfaceId,
-        targetSurfaceId: terminal.surfaceId,
-        kind: 'delegates',
-        provenance: 'runtime-lineage'
-      }
-    ]
-  })
-  return [...formalDelegates, ...runtimeDelegates]
-}
-
 function descendants(
   coordinatorSurfaceId: string,
   delegates: readonly CanvasAgentRelation[],
-  coordinatorTargets: ReadonlyMap<string, ReadonlySet<string>>,
-  formalRunSurfaces: ReadonlyMap<string, ReadonlySet<string>>,
-  formalCoordinatorRuns: ReadonlyMap<string, ReadonlySet<string>>
+  coordinatorTargets: ReadonlyMap<string, ReadonlySet<string>>
 ): Set<string> {
   const found = new Set(coordinatorTargets.get(coordinatorSurfaceId) ?? [])
-  for (const runId of formalCoordinatorRuns.get(coordinatorSurfaceId) ?? []) {
-    for (const surfaceId of formalRunSurfaces.get(runId) ?? []) {
-      if (surfaceId !== coordinatorSurfaceId) {
-        found.add(surfaceId)
-      }
-    }
-  }
   const childrenByParent = new Map<string, Set<string>>()
   for (const relation of delegates) {
     const children = childrenByParent.get(relation.sourceSurfaceId) ?? new Set<string>()
@@ -151,28 +85,35 @@ export function projectMaestroAgentTopology(params: {
     formalRelations,
     terminals,
     surfaceByPaneKey,
+    surfaceByHandle,
     params.orchestrationByPaneKey
   )
-  const delegateTargets = new Set(delegates.map((relation) => relation.targetSurfaceId))
-  const coordinatorCandidates = new Set(
-    delegates
-      .map((relation) => relation.sourceSurfaceId)
-      .filter((surfaceId) => !delegateTargets.has(surfaceId))
+  const parentBySurfaceId = new Map(
+    delegates.map((relation) => [relation.targetSurfaceId, relation.sourceSurfaceId])
   )
+  const coordinatorCandidates = new Set<string>()
   const coordinatorTargets = new Map<string, Set<string>>()
-  const formalCoordinatorCandidates = new Set<string>()
+  const runtimeFormalCoordinatorCandidates = new Set<string>()
   for (const terminal of terminals) {
     const orchestration = params.orchestrationByPaneKey[terminal.paneKey]
     const coordinatorHandle = orchestration?.coordinatorHandle
-    const coordinatorSurfaceId = coordinatorHandle
+    const directCoordinatorId = coordinatorHandle
       ? surfaceByHandle.get(coordinatorHandle)
       : undefined
+    const coordinatorIds = new Set<string>(directCoordinatorId ? [directCoordinatorId] : [])
+    if (coordinatorHandle && orchestration?.parentTerminalHandle === coordinatorHandle) {
+      const parentSurfaceId = parentBySurfaceId.get(terminal.surfaceId)
+      if (parentSurfaceId) {
+        coordinatorIds.add(parentSurfaceId)
+      }
+    }
+    const coordinatorSurfaceId = coordinatorIds.size === 1 ? [...coordinatorIds][0] : undefined
     if (!coordinatorSurfaceId || coordinatorSurfaceId === terminal.surfaceId) {
       continue
     }
     coordinatorCandidates.add(coordinatorSurfaceId)
     if (orchestration.orchestrationRunId) {
-      formalCoordinatorCandidates.add(coordinatorSurfaceId)
+      runtimeFormalCoordinatorCandidates.add(coordinatorSurfaceId)
     }
     const targets = coordinatorTargets.get(coordinatorSurfaceId) ?? new Set<string>()
     targets.add(terminal.surfaceId)
@@ -180,8 +121,9 @@ export function projectMaestroAgentTopology(params: {
   }
 
   const formalRunSurfaces = new Map<string, Set<string>>()
-  const formalCoordinatorRuns = new Map<string, Set<string>>()
   const formalSurfaceIds = new Set<string>()
+  const formalCoordinatorRuns = new Map<string, Set<string>>()
+  const formalWorkerSurfaceIds = new Set<string>()
   for (const relation of formalRelations) {
     formalSurfaceIds.add(relation.sourceSurfaceId)
     formalSurfaceIds.add(relation.targetSurfaceId)
@@ -193,27 +135,37 @@ export function projectMaestroAgentTopology(params: {
       [relation.sourceSurfaceId, relation.sourceRole],
       [relation.targetSurfaceId, relation.targetRole]
     ] as const) {
-      if (role !== 'coordinator') {
+      if (role === 'worker') {
+        formalWorkerSurfaceIds.add(surfaceId)
         continue
       }
-      coordinatorCandidates.add(surfaceId)
-      formalCoordinatorCandidates.add(surfaceId)
       const runs = formalCoordinatorRuns.get(surfaceId) ?? new Set<string>()
       runs.add(relation.runId)
       formalCoordinatorRuns.set(surfaceId, runs)
     }
   }
+  const formalCoordinatorCandidates = new Set<string>()
+  for (const [surfaceId, runs] of formalCoordinatorRuns) {
+    if (formalWorkerSurfaceIds.has(surfaceId)) {
+      continue
+    }
+    formalCoordinatorCandidates.add(surfaceId)
+    coordinatorCandidates.add(surfaceId)
+    const targets = coordinatorTargets.get(surfaceId) ?? new Set<string>()
+    for (const runId of runs) {
+      for (const runSurfaceId of formalRunSurfaces.get(runId) ?? []) {
+        if (runSurfaceId !== surfaceId) {
+          targets.add(runSurfaceId)
+        }
+      }
+    }
+    coordinatorTargets.set(surfaceId, targets)
+  }
 
   const descendantsByCandidate = new Map(
     [...coordinatorCandidates].map((surfaceId) => [
       surfaceId,
-      descendants(
-        surfaceId,
-        delegates,
-        coordinatorTargets,
-        formalRunSurfaces,
-        formalCoordinatorRuns
-      )
+      descendants(surfaceId, delegates, coordinatorTargets)
     ])
   )
   const rootsWithDescendants = [...coordinatorCandidates].filter(
@@ -226,11 +178,7 @@ export function projectMaestroAgentTopology(params: {
     : new Set<string>()
   const coordinatorIsFormal =
     Boolean(coordinatorSurfaceId && formalCoordinatorCandidates.has(coordinatorSurfaceId)) ||
-    delegates.some(
-      (relation) =>
-        relation.sourceSurfaceId === coordinatorSurfaceId &&
-        relation.provenance === 'orca-orchestration'
-    )
+    Boolean(coordinatorSurfaceId && runtimeFormalCoordinatorCandidates.has(coordinatorSurfaceId))
   const coordinateRelations: CanvasAgentRelation[] = coordinatorSurfaceId
     ? [...coordinatorDescendants].map((targetSurfaceId) => ({
         id: `topology:coordinates:${coordinatorSurfaceId}\0${targetSurfaceId}`,
@@ -250,32 +198,40 @@ export function projectMaestroAgentTopology(params: {
       provenance: relation.provenance,
       authorityId: relation.authorityId
     }))
-  const parentBySurfaceId = new Map(
-    delegates.map((relation) => [relation.targetSurfaceId, relation.sourceSurfaceId])
-  )
   const formalLabels = formalLabelCandidates(formalRelations)
-  const nodes = terminals.map((terminal): CanvasAgentNode => {
+  const nodes = terminals.flatMap((terminal): CanvasAgentNode[] => {
     const orchestration = params.orchestrationByPaneKey[terminal.paneKey]
     const functionLabel =
       orchestration?.displayName?.trim() ||
       orchestration?.taskTitle?.trim() ||
       formalLabels.get(terminal.surfaceId) ||
-      terminal.title
+      ''
     const inCoordinatorLineage =
       terminal.surfaceId === coordinatorSurfaceId || coordinatorDescendants.has(terminal.surfaceId)
-    return {
-      surfaceId: terminal.surfaceId,
-      paneKey: terminal.paneKey,
-      parentSurfaceId: parentBySurfaceId.get(terminal.surfaceId),
-      coordinatorSurfaceId: inCoordinatorLineage ? coordinatorSurfaceId : undefined,
-      functionLabel,
-      provenance:
-        formalSurfaceIds.has(terminal.surfaceId) ||
-        orchestration?.orchestrationRunId ||
-        (terminal.surfaceId === coordinatorSurfaceId && coordinatorIsFormal)
-          ? 'orca-orchestration'
-          : 'runtime-lineage'
+    const parentSurfaceId = parentBySurfaceId.get(terminal.surfaceId)
+    if (
+      !orchestration &&
+      !formalSurfaceIds.has(terminal.surfaceId) &&
+      !parentSurfaceId &&
+      !inCoordinatorLineage
+    ) {
+      return []
     }
+    return [
+      {
+        surfaceId: terminal.surfaceId,
+        paneKey: terminal.paneKey,
+        parentSurfaceId,
+        coordinatorSurfaceId: inCoordinatorLineage ? coordinatorSurfaceId : undefined,
+        functionLabel,
+        provenance:
+          formalSurfaceIds.has(terminal.surfaceId) ||
+          orchestration?.orchestrationRunId ||
+          (terminal.surfaceId === coordinatorSurfaceId && coordinatorIsFormal)
+            ? 'orca-orchestration'
+            : 'runtime-lineage'
+      }
+    ]
   })
   return {
     coordinatorSurfaceId,

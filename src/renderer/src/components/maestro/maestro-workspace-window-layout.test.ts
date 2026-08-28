@@ -3,6 +3,7 @@ import type { WorkspaceSurface } from '../../../../shared/maestro-workspace-canv
 import {
   createMaestroSurfaceAdditionTracker,
   findWorkspaceWindowPlacementNearPosition,
+  placeWorkspaceWindowAtCanvasPoint,
   placeWorkspaceWindowNearViewport,
   workspaceWindowPlacementsOverlap,
   workspaceWindowPlacement
@@ -178,5 +179,36 @@ describe('Maestro workspace window layout', () => {
     expect(attempt.placement.size).toEqual(preferred.size)
     expect(attempt.placement.z_order).toBe(5)
     expect(workspaceWindowPlacementsOverlap(attempt.placement, occupied)).toBe(false)
+  })
+
+  it('places a context-menu terminal above a cursor near the viewport bottom', () => {
+    const viewport = { center: { x: 0, y: 0 }, zoom: 0.5 }
+    const canvas = { width: 1709, height: 935 }
+    const cursor = { x: 800, y: 820 }
+    const cursorWorld = {
+      x: viewport.center.x + (cursor.x - canvas.width / 2) / viewport.zoom,
+      y: viewport.center.y + (cursor.y - canvas.height / 2) / viewport.zoom
+    }
+    const placement = placeWorkspaceWindowAtCanvasPoint(
+      {
+        position: cursorWorld,
+        size: { width: 760, height: 530 },
+        collapsed: false,
+        z_order: 3
+      },
+      cursorWorld,
+      viewport,
+      canvas,
+      { top: 64, right: 16, bottom: 16, left: 16 }
+    )
+    const screenLeft = canvas.width / 2 + (placement.position.x - viewport.center.x) * viewport.zoom
+    const screenTop = canvas.height / 2 + (placement.position.y - viewport.center.y) * viewport.zoom
+    const screenRight = screenLeft + placement.size.width * viewport.zoom
+    const screenBottom = screenTop + placement.size.height * viewport.zoom
+
+    expect(screenLeft).toBe(610)
+    expect(screenRight).toBe(990)
+    expect(screenBottom).toBe(cursor.y - 16)
+    expect(screenTop).toBeGreaterThanOrEqual(64)
   })
 })

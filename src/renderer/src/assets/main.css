@@ -3028,14 +3028,32 @@ html.native-shell .app-layout {
     0 10px 24px rgba(0, 0, 0, 0.18);
 }
 
-.maestro-workspace-window[data-maestro-presence='entering'] {
-  animation: maestro-workspace-surface-enter 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
-  will-change: opacity, transform;
+.maestro-workspace-window[data-maestro-agent-role='coordinator'] {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--ai-action-accent) 52%, transparent),
+    0 -6px 20px color-mix(in srgb, var(--ai-action-accent) 10%, transparent),
+    0 10px 28px rgba(0, 0, 0, 0.18);
 }
 
-.maestro-workspace-window[data-maestro-agent-role='coordinator'] {
-  outline: 1px solid color-mix(in srgb, var(--ring) 38%, transparent);
-  outline-offset: 2px;
+.maestro-workspace-window[data-maestro-agent-role='coordinator']::before {
+  content: '';
+  position: absolute;
+  z-index: 8;
+  top: -4px;
+  right: 12%;
+  left: 12%;
+  height: 2px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--ai-action-accent) 82%, var(--foreground)) 28%,
+    var(--ai-action-accent) 50%,
+    color-mix(in srgb, var(--ai-action-accent) 82%, var(--foreground)) 72%,
+    transparent
+  );
+  box-shadow: 0 0 12px color-mix(in srgb, var(--ai-action-accent) 32%, transparent);
+  pointer-events: none;
 }
 
 .maestro-workspace-window[data-maestro-agent-role='coordinator']::after {
@@ -3047,199 +3065,43 @@ html.native-shell .app-layout {
   left: -2px;
   width: 3px;
   border-radius: 9999px;
-  background: color-mix(in srgb, var(--ring) 72%, var(--border));
+  background: color-mix(in srgb, var(--ai-action-accent) 72%, var(--border));
   pointer-events: none;
+}
+
+.maestro-workspace-window[data-maestro-selected='true'] {
+  box-shadow:
+    0 0 0 2px var(--ring),
+    0 0 0 5px color-mix(in srgb, var(--ring) 18%, transparent),
+    0 14px 32px rgba(0, 0, 0, 0.24);
+}
+
+.maestro-workspace-window[data-maestro-presence='entering'] {
+  animation: maestro-workspace-surface-enter 180ms cubic-bezier(0, 0, 0.2, 1) both;
+  will-change: opacity;
 }
 
 .maestro-workspace-window[data-maestro-presence='exiting'] {
   pointer-events: none;
-  animation: maestro-workspace-surface-exit 210ms cubic-bezier(0.7, 0, 0.84, 0) both;
-  will-change: opacity, transform;
-}
-
-.maestro-workspace-smoke {
-  position: absolute;
-  z-index: 60;
-  inset: -42px;
-  overflow: visible;
-  pointer-events: none;
-  opacity: 0;
-  transform-origin: 50% 58%;
-  background:
-    radial-gradient(
-      ellipse at 28% 66%,
-      color-mix(in srgb, var(--foreground) 18%, transparent) 0 11%,
-      transparent 42%
-    ),
-    radial-gradient(
-      ellipse at 72% 58%,
-      color-mix(in srgb, var(--muted-foreground) 18%, transparent) 0 10%,
-      transparent 40%
-    );
-}
-
-.maestro-workspace-smoke::before,
-.maestro-workspace-smoke::after,
-.maestro-workspace-smoke > span {
-  content: '';
-  position: absolute;
-  inset: 12% 4%;
-  border-radius: 50%;
-  opacity: 0;
-  transform-origin: 50% 65%;
-  background:
-    radial-gradient(
-      ellipse at 22% 62%,
-      color-mix(in srgb, var(--foreground) 16%, transparent) 0 9%,
-      transparent 34%
-    ),
-    radial-gradient(
-      ellipse at 50% 72%,
-      color-mix(in srgb, var(--muted-foreground) 20%, transparent) 0 12%,
-      transparent 39%
-    ),
-    radial-gradient(
-      ellipse at 78% 56%,
-      color-mix(in srgb, var(--foreground) 13%, transparent) 0 8%,
-      transparent 31%
-    );
-}
-
-.maestro-workspace-smoke::after {
-  inset: 2% 12% 18%;
-  transform-origin: 38% 72%;
-}
-
-.maestro-workspace-smoke > span {
-  inset: 18% 18% 0;
-  display: block;
-  transform-origin: 68% 58%;
-}
-
-.maestro-workspace-window[data-maestro-presence='entering'] .maestro-workspace-smoke {
-  animation: maestro-workspace-smoke-enter 260ms ease-out both;
-}
-
-.maestro-workspace-window[data-maestro-presence='entering'] .maestro-workspace-smoke::before {
-  animation: maestro-workspace-smoke-plume-left 250ms ease-out both;
-}
-
-.maestro-workspace-window[data-maestro-presence='entering'] .maestro-workspace-smoke::after {
-  animation: maestro-workspace-smoke-plume-right 260ms ease-out both;
-}
-
-.maestro-workspace-window[data-maestro-presence='entering'] .maestro-workspace-smoke > span {
-  animation: maestro-workspace-smoke-plume-center 240ms ease-out both;
-}
-
-.maestro-workspace-window[data-maestro-presence='exiting'] .maestro-workspace-smoke {
-  animation: maestro-workspace-smoke-exit 210ms ease-in both;
-}
-
-.maestro-workspace-window[data-maestro-presence='exiting'] .maestro-workspace-smoke::before,
-.maestro-workspace-window[data-maestro-presence='exiting'] .maestro-workspace-smoke::after,
-.maestro-workspace-window[data-maestro-presence='exiting'] .maestro-workspace-smoke > span {
-  animation: maestro-workspace-smoke-plume-exit 210ms ease-in both;
+  animation: maestro-workspace-surface-exit 160ms cubic-bezier(0.4, 0, 1, 1) both;
+  will-change: opacity;
 }
 
 @keyframes maestro-workspace-surface-enter {
-  0% {
+  from {
     opacity: 0;
-    transform: translate3d(0, 5px, 0) scale(0.975);
   }
-  42% {
-    opacity: 0.72;
-  }
-  100% {
+  to {
     opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
   }
 }
 
 @keyframes maestro-workspace-surface-exit {
-  0%,
-  48% {
+  from {
     opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
   }
-  100% {
+  to {
     opacity: 0;
-    transform: translate3d(0, -4px, 0) scale(0.982);
-  }
-}
-
-@keyframes maestro-workspace-smoke-enter {
-  0% {
-    opacity: 0.78;
-    transform: translate3d(0, 9px, 0) scale(0.68, 0.48);
-  }
-  55% {
-    opacity: 0.56;
-  }
-  100% {
-    opacity: 0;
-    transform: translate3d(0, -12px, 0) scale(1.08, 1.18);
-  }
-}
-
-@keyframes maestro-workspace-smoke-plume-left {
-  0% {
-    opacity: 0.72;
-    transform: translate3d(8px, 12px, 0) scale(0.62);
-  }
-  100% {
-    opacity: 0;
-    transform: translate3d(-22px, -18px, 0) scale(1.16);
-  }
-}
-
-@keyframes maestro-workspace-smoke-plume-right {
-  0% {
-    opacity: 0.64;
-    transform: translate3d(-8px, 14px, 0) scale(0.66);
-  }
-  100% {
-    opacity: 0;
-    transform: translate3d(25px, -13px, 0) scale(1.12);
-  }
-}
-
-@keyframes maestro-workspace-smoke-plume-center {
-  0% {
-    opacity: 0.7;
-    transform: translate3d(0, 16px, 0) scale(0.58);
-  }
-  100% {
-    opacity: 0;
-    transform: translate3d(6px, -24px, 0) scale(1.2);
-  }
-}
-
-@keyframes maestro-workspace-smoke-exit {
-  0% {
-    opacity: 0;
-    transform: translate3d(0, -8px, 0) scale(1.08, 1.14);
-  }
-  58% {
-    opacity: 0.62;
-  }
-  100% {
-    opacity: 0;
-    transform: translate3d(0, 10px, 0) scale(0.7, 0.52);
-  }
-}
-
-@keyframes maestro-workspace-smoke-plume-exit {
-  0% {
-    opacity: 0;
-    transform: translate3d(0, -16px, 0) scale(1.16);
-  }
-  52% {
-    opacity: 0.64;
-  }
-  100% {
-    opacity: 0;
-    transform: translate3d(0, 12px, 0) scale(0.62);
   }
 }
 
@@ -3263,14 +3125,10 @@ html.native-shell .app-layout {
 
 @media (prefers-reduced-motion: reduce) {
   .maestro-workspace-window[data-maestro-presence='entering'] {
-    animation: maestro-workspace-surface-dissolve-in 100ms linear both;
+    animation: maestro-workspace-surface-dissolve-in 120ms ease-out both;
   }
 
   .maestro-workspace-window[data-maestro-presence='exiting'] {
-    animation: maestro-workspace-surface-dissolve-out 100ms linear both;
-  }
-
-  .maestro-workspace-smoke {
-    display: none;
+    animation: maestro-workspace-surface-dissolve-out 100ms ease-in both;
   }
 }

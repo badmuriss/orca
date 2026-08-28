@@ -15,6 +15,7 @@ import {
 import { useAgentDetectionTargetForWorktree } from '@/hooks/useAgentDetectionTarget'
 import { useDetectedAgents } from '@/hooks/useDetectedAgents'
 import type { MaestroWorkspaceCanvasResource } from '@/hooks/useMaestroWorkspaceCanvas'
+import type { MaestroWorkspaceWindowPlacement } from './maestro-workspace-window-layout'
 import { translate } from '@/i18n/i18n'
 import { AgentIcon } from '@/lib/agent-catalog'
 import { useAppStore } from '@/store'
@@ -27,11 +28,13 @@ import { maestroWorkspaceMutationKey } from './maestro-workspace-mutation-key'
 type MaestroWorkspaceContextMenuProps = {
   resource: MaestroWorkspaceCanvasResource
   workspaceKey: string
+  placementFor: (surfaceType: 'terminal' | 'browser' | 'content') => MaestroWorkspaceWindowPlacement
 }
 
 export function MaestroWorkspaceContextMenu({
   resource,
-  workspaceKey
+  workspaceKey,
+  placementFor
 }: MaestroWorkspaceContextMenuProps): React.JSX.Element {
   const workspace = parseWorkspaceKey(workspaceKey)
   const worktreeId =
@@ -49,16 +52,26 @@ export function MaestroWorkspaceContextMenu({
       ),
     [defaultAgent, detectedIds, disabledAgents]
   )
+  const createAtPlacement = (
+    surfaceType: 'terminal' | 'browser' | 'content',
+    create: (placement: MaestroWorkspaceWindowPlacement) => Promise<void>
+  ): void => {
+    const placement = placementFor(surfaceType)
+    void create(placement)
+  }
   const createTerminal = (agent?: TuiAgent): void => {
-    void resource.mutate({
-      action: 'create',
-      surface_type: 'terminal',
-      ...(agent ? { agent } : {}),
-      idempotency_key: maestroWorkspaceMutationKey(
-        agent ? `create-${agent}` : 'create-terminal',
-        workspaceKey
-      )
-    })
+    createAtPlacement('terminal', (placement) =>
+      resource.mutate({
+        action: 'create',
+        surface_type: 'terminal',
+        placement,
+        ...(agent ? { agent } : {}),
+        idempotency_key: maestroWorkspaceMutationKey(
+          agent ? `create-${agent}` : 'create-terminal',
+          workspaceKey
+        )
+      })
+    )
   }
 
   return (
@@ -107,11 +120,14 @@ export function MaestroWorkspaceContextMenu({
       </ContextMenuSub>
       <ContextMenuItem
         onSelect={() =>
-          void resource.mutate({
-            action: 'create',
-            surface_type: 'browser',
-            idempotency_key: maestroWorkspaceMutationKey('create-browser', workspaceKey)
-          })
+          createAtPlacement('browser', (placement) =>
+            resource.mutate({
+              action: 'create',
+              surface_type: 'browser',
+              placement,
+              idempotency_key: maestroWorkspaceMutationKey('create-browser', workspaceKey)
+            })
+          )
         }
       >
         <Globe2 />
@@ -119,16 +135,19 @@ export function MaestroWorkspaceContextMenu({
       </ContextMenuItem>
       <ContextMenuItem
         onSelect={() =>
-          void resource.mutate({
-            action: 'create',
-            surface_type: 'content',
-            title: translate(
-              'auto.components.maestro.MaestroWorkspaceContextMenu.c27dd0d722b',
-              'New annotation'
-            ),
-            annotation: { text: '', tone: 'observation' },
-            idempotency_key: maestroWorkspaceMutationKey('create-annotation', workspaceKey)
-          })
+          createAtPlacement('content', (placement) =>
+            resource.mutate({
+              action: 'create',
+              surface_type: 'content',
+              placement,
+              title: translate(
+                'auto.components.maestro.MaestroWorkspaceContextMenu.c27dd0d722b',
+                'New annotation'
+              ),
+              annotation: { text: '', tone: 'observation' },
+              idempotency_key: maestroWorkspaceMutationKey('create-annotation', workspaceKey)
+            })
+          )
         }
       >
         <FilePlus2 />

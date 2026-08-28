@@ -95,6 +95,7 @@ function snapshot(automaticLinks: WorkspaceAutomaticLink[]): WorkspaceSurfaceSna
     surfaces: {
       coordinator: terminal('coordinator'),
       worker: terminal('worker'),
+      independent: terminal('independent'),
       browser: browser('browser')
     },
     unsupported: [],
@@ -132,7 +133,7 @@ describe('Maestro topology layout input', () => {
     const nodes = buildMaestroWorkspaceTopologyLayoutNodes({
       snapshot: snapshot([automaticLink('browser-owner', 'worker', 'browser')]),
       document,
-      surfaceKeys: ['browser', 'coordinator', 'worker'],
+      surfaceKeys: ['browser', 'coordinator', 'independent', 'worker'],
       topology
     })
 
@@ -146,6 +147,11 @@ describe('Maestro topology layout input', () => {
     })
     expect(nodes.find((node) => node.surfaceKey === 'browser')).toMatchObject({
       ownerSurfaceKey: 'worker'
+    })
+    expect(nodes.find((node) => node.surfaceKey === 'independent')).toMatchObject({
+      parentSurfaceKey: undefined,
+      functionLabel: undefined,
+      isCoordinator: false
     })
   })
 

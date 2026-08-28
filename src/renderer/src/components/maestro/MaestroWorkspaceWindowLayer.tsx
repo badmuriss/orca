@@ -1,6 +1,8 @@
 import {
+  memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -8,12 +10,10 @@ import {
   type MutableRefObject,
   type SetStateAction
 } from 'react'
-import type { WorkspaceCanvasDocument } from '../../../../shared/maestro-document-contract'
 import type { WorkspaceSurfaceSnapshot } from '../../../../shared/maestro-workspace-canvas'
 import type { RuntimeClientTarget } from '@/runtime/runtime-client-target'
 import type { MaestroWorkspaceCanvasResource } from '@/hooks/useMaestroWorkspaceCanvas'
-import { MaestroWorkspaceInspector } from './MaestroWorkspaceInspector'
-import { MaestroWorkspaceWindow } from './MaestroWorkspaceWindow'
+import { MaestroWorkspaceWindow, type MaestroWorkspaceWindowProps } from './MaestroWorkspaceWindow'
 import {
   moveWorkspaceWindow,
   resizeWorkspaceWindow,
@@ -40,7 +40,6 @@ type WindowLayerProps = {
   target: RuntimeClientTarget
   resource: MaestroWorkspaceCanvasResource
   snapshot: WorkspaceSurfaceSnapshot
-  document: WorkspaceCanvasDocument
   surfaceKeys: readonly string[]
   pendingSurfaceKey: string | null
   placements: PlacementMap
@@ -54,29 +53,109 @@ type WindowLayerProps = {
   worldZoom?: number
   viewport: MaestroCanvasViewport
   canvasSize: MaestroCanvasSize
-  onRevealPlacement: (
-    placement: MaestroWorkspaceWindowPlacement,
-    reserveInspector?: boolean
-  ) => void
+  onRevealPlacement: (placement: MaestroWorkspaceWindowPlacement) => void
   onManualLinkCreated: (sourceKey: string, targetKey: string) => void
 }
 
+function sameRuntimeTarget(previous: RuntimeClientTarget, next: RuntimeClientTarget): boolean {
+  return (
+    previous.kind === next.kind &&
+    (previous.kind !== 'environment' ||
+      (next.kind === 'environment' && previous.environmentId === next.environmentId))
+  )
+}
+
+function samePlacement(
+  previous: MaestroWorkspaceWindowPlacement,
+  next: MaestroWorkspaceWindowPlacement
+): boolean {
+  return (
+    previous.position.x === next.position.x &&
+    previous.position.y === next.position.y &&
+    previous.size.width === next.size.width &&
+    previous.size.height === next.size.height &&
+    previous.collapsed === next.collapsed &&
+    previous.z_order === next.z_order
+  )
+}
+
+function sameWindowRender(
+  previous: MaestroWorkspaceWindowProps,
+  next: MaestroWorkspaceWindowProps
+): boolean {
+  return (
+    previous.surfaceKey === next.surfaceKey &&
+    previous.surface.id.unified_tab_id === next.surface.id.unified_tab_id &&
+    previous.surface.revision === next.surface.revision &&
+    previous.surface.title === next.surface.title &&
+    previous.surface.availability === next.surface.availability &&
+    samePlacement(previous.placement, next.placement) &&
+    previous.selected === next.selected &&
+    previous.pending === next.pending &&
+    previous.linkTarget === next.linkTarget &&
+    sameRuntimeTarget(previous.runtimeTarget, next.runtimeTarget) &&
+    previous.worldZoom === next.worldZoom &&
+    previous.presencePhase === next.presencePhase &&
+    previous.previewMode === next.previewMode &&
+    previous.agentFunctionLabel === next.agentFunctionLabel &&
+    previous.agentRole === next.agentRole
+  )
+}
+
+const MemoizedMaestroWorkspaceWindow = memo(MaestroWorkspaceWindow, sameWindowRender)
+
 export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.Element {
-  const { onManualLinkCreated, snapshot } = props
-  const [inspectorKey, setInspectorKey] = useState<string | null>(null)
-  const [editingKey, setEditingKey] = useState<string | null>(null)
   const [linkDrag, setLinkDrag] = useState<LinkDrag | null>(null)
   const linkOverlayRef = useRef<SVGSVGElement | null>(null)
   const linkDragCleanupRef = useRef<(() => void) | null>(null)
   const lastPlacementsRef = useRef<Record<string, MaestroWorkspaceWindowPlacement>>({})
   const previewModesRef = useRef<Record<string, MaestroWorkspacePreviewMode>>({})
-  const presenceItems = useMaestroWorkspacePresence(props.snapshot, props.surfaceKeys)
+  const renderableSurfaceKeys = useMemo(
+    () => new Set(Object.keys(props.placements)),
+    [props.placements]
+  )
+  const presenceItems = useMaestroWorkspacePresence(
+    props.snapshot,
+    props.surfaceKeys,
+    renderableSurfaceKeys
+  )
   const topologyBySurfaceKey = useMemo(
     () => new Map(props.topology.nodes.map((node) => [node.surfaceId, node])),
     [props.topology.nodes]
   )
-  const inspectedSurface = inspectorKey ? props.snapshot.surfaces[inspectorKey] : undefined
-  const mutate = props.resource.mutate
+  const latestActionsRef = useRef({
+    mutate: props.resource.mutate,
+    onManualLinkCreated: props.onManualLinkCreated,
+    onRevealPlacement: props.onRevealPlacement,
+    onSelectedKeyChange: props.onSelectedKeyChange,
+    surfaces: props.snapshot.surfaces
+  })
+  useLayoutEffect(() => {
+    latestActionsRef.current = {
+      mutate: props.resource.mutate,
+      onManualLinkCreated: props.onManualLinkCreated,
+      onRevealPlacement: props.onRevealPlacement,
+      onSelectedKeyChange: props.onSelectedKeyChange,
+      surfaces: props.snapshot.surfaces
+    }
+  }, [
+    props.onManualLinkCreated,
+    props.onRevealPlacement,
+    props.onSelectedKeyChange,
+    props.resource.mutate,
+    props.snapshot.surfaces
+  ])
+  const mutate = useCallback<MaestroWorkspaceCanvasResource['mutate']>(
+    (mutation) => latestActionsRef.current.mutate(mutation),
+    []
+  )
+  const selectSurface = useCallback(
+    (surfaceKey: string, placement: MaestroWorkspaceWindowPlacement): void => {
+      latestActionsRef.current.onRevealPlacement(placement)
+      latestActionsRef.current.onSelectedKeyChange(surfaceKey)
+    },
+    []
+  )
   useEffect(() => () => linkDragCleanupRef.current?.(), [])
   useEffect(() => {
     const retainedKeys = new Set(presenceItems.map((item) => item.surfaceKey))
@@ -113,7 +192,9 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
           ?.closest<HTMLElement>('[data-maestro-workspace-surface]')
         const candidate = target?.dataset.maestroWorkspaceSurface ?? null
         const targetKey =
-          candidate && candidate !== sourceKey && snapshot.surfaces[candidate] ? candidate : null
+          candidate && candidate !== sourceKey && latestActionsRef.current.surfaces[candidate]
+            ? candidate
+            : null
         hoveredTargetKey = targetKey
         setLinkDrag({
           sourceKey,
@@ -131,9 +212,9 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
           .elementFromPoint(upEvent.clientX, upEvent.clientY)
           ?.closest<HTMLElement>('[data-maestro-workspace-surface]')
         const targetKey = hoveredTargetKey ?? target?.dataset.maestroWorkspaceSurface
-        if (targetKey && targetKey !== sourceKey && snapshot.surfaces[targetKey]) {
-          onManualLinkCreated(sourceKey, targetKey)
-          void mutate({
+        if (targetKey && targetKey !== sourceKey && latestActionsRef.current.surfaces[targetKey]) {
+          latestActionsRef.current.onManualLinkCreated(sourceKey, targetKey)
+          void latestActionsRef.current.mutate({
             action: 'create-manual-link',
             source_surface_key: sourceKey,
             target_surface_key: targetKey,
@@ -161,7 +242,7 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
       window.addEventListener('pointercancel', cancel, true)
       linkDragCleanupRef.current = cleanup
     },
-    [mutate, onManualLinkCreated, snapshot.surfaces]
+    []
   )
   return (
     <>
@@ -202,7 +283,7 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
           const key = (action: string, identity = surface.id.unified_tab_id) =>
             maestroWorkspaceMutationKey(action, identity)
           return (
-            <MaestroWorkspaceWindow
+            <MemoizedMaestroWorkspaceWindow
               key={surfaceKey}
               surfaceKey={surfaceKey}
               surface={surface}
@@ -223,15 +304,16 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
                     : undefined
               }
               onSelect={() => {
-                props.onRevealPlacement(placement)
-                props.onSelectedKeyChange(surfaceKey)
+                selectSurface(surfaceKey, placement)
               }}
-              onEdit={() => {
-                props.onSelectedKeyChange(surfaceKey)
-                setInspectorKey(surfaceKey)
-                setEditingKey(surfaceKey)
-                props.onRevealPlacement(placement, true)
-              }}
+              onRename={(title) =>
+                void mutate({
+                  action: 'rename',
+                  surface_id: surface.id,
+                  title,
+                  idempotency_key: key('rename')
+                })
+              }
               onLinkPointerDown={(event) => beginLink(surfaceKey, event)}
               onFocus={() =>
                 void mutate({
@@ -241,7 +323,7 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
                 })
               }
               onClose={() =>
-                void mutate({
+                mutate({
                   action: 'close',
                   surface_id: surface.id,
                   idempotency_key: key('close')
@@ -252,14 +334,6 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
               }
               onResizeCommit={(delta) =>
                 commitPlacement('resize', resizeWorkspaceWindow(placement, delta))
-              }
-              onUpdateAnnotationTone={(tone) =>
-                void mutate({
-                  action: 'update-annotation',
-                  surface_id: surface.id,
-                  tone,
-                  idempotency_key: key('annotation-tone')
-                })
               }
               onUpdateAnnotationContent={(content) =>
                 void mutate({
@@ -296,38 +370,6 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
           </g>
         ) : null}
       </svg>
-      {inspectorKey && inspectedSurface ? (
-        <MaestroWorkspaceInspector
-          surfaceKey={inspectorKey}
-          surface={inspectedSurface}
-          snapshot={props.snapshot}
-          document={props.document}
-          editingTitle={editingKey === inspectorKey}
-          onClose={() => {
-            setInspectorKey(null)
-            setEditingKey(null)
-          }}
-          onRename={(title) => {
-            setEditingKey(null)
-            void mutate({
-              action: 'rename',
-              surface_id: inspectedSurface.id,
-              title,
-              idempotency_key: maestroWorkspaceMutationKey(
-                'rename',
-                inspectedSurface.id.unified_tab_id
-              )
-            })
-          }}
-          onDeleteManualLink={(linkId) =>
-            void mutate({
-              action: 'delete-manual-link',
-              link_id: linkId,
-              idempotency_key: maestroWorkspaceMutationKey('delete-link', linkId)
-            })
-          }
-        />
-      ) : null}
     </>
   )
 }

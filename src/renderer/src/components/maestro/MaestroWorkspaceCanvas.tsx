@@ -1,21 +1,20 @@
 import { Loader2, RefreshCw, TriangleAlert } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { WorkspaceCanvasDocument } from '../../../../shared/maestro-document-contract'
 import { workspaceSurfaceKey } from '../../../../shared/maestro-workspace-canvas'
 import type { RuntimeMaestroWorkspaceCanvasScope } from '../../../../shared/runtime-types'
 import { Button } from '@/components/ui/button'
 import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu'
 import type { RuntimeClientTarget } from '@/runtime/runtime-client-target'
+import { useMaestroWorkspaceCanvas } from '@/hooks/useMaestroWorkspaceCanvas'
 import {
-  useMaestroWorkspaceCanvas,
-  type MaestroWorkspaceCanvasResource
-} from '@/hooks/useMaestroWorkspaceCanvas'
-import { MaestroWorkspaceLinks } from './MaestroWorkspaceLinks'
+  MaestroWorkspaceLinks,
+  unconfirmedOptimisticMaestroManualLinks
+} from './MaestroWorkspaceLinks'
 import type { OptimisticMaestroManualLink } from './MaestroWorkspaceLinks'
 import { MaestroWorkspaceHarnessOverlay } from './MaestroWorkspaceHarnessOverlay'
 import {
+  placeWorkspaceWindowAtCanvasPoint,
   workspaceWindowBounds,
-  workspaceWindowPlacement,
   type MaestroWorkspaceWindowPlacement
 } from './maestro-workspace-window-layout'
 import { useMaestroWorkspaceViewport } from './useMaestroWorkspaceViewport'
@@ -27,36 +26,17 @@ import { useMaestroWorkspaceProjection } from './useMaestroWorkspaceRunProgress'
 import { useMaestroWorkspaceAgentTopology } from './useMaestroWorkspaceAgentTopology'
 import { buildMaestroWorkspaceTopologyLayoutNodes } from './maestro-workspace-topology-layout-input'
 import {
-  MAESTRO_INSPECTOR_REVEAL_INSETS,
   MAESTRO_REVEAL_INSETS,
   useMaestroWorkspaceAutomaticPlacement
 } from './useMaestroWorkspaceAutomaticPlacement'
-
-function initialPlacements(
-  document: WorkspaceCanvasDocument,
-  snapshot: NonNullable<MaestroWorkspaceCanvasResource['result']>['snapshot'],
-  surfaceKeys: readonly string[]
-) {
-  return Object.fromEntries(
-    surfaceKeys.map((surfaceKey, index) => [
-      surfaceKey,
-      workspaceWindowPlacement(surfaceKey, index, document, snapshot.surfaces[surfaceKey])
-    ])
-  )
-}
-
-function samePlacementGeometry(
-  left: MaestroWorkspaceWindowPlacement,
-  right: MaestroWorkspaceWindowPlacement
-): boolean {
-  return (
-    left.position.x === right.position.x &&
-    left.position.y === right.position.y &&
-    left.size.width === right.size.width &&
-    left.size.height === right.size.height &&
-    left.collapsed === right.collapsed
-  )
-}
+import {
+  clearMaestroWorkspaceCanvasFocus,
+  useMaestroWorkspaceSelection
+} from './useMaestroWorkspaceSelection'
+import {
+  initialMaestroWorkspacePlacements,
+  sameMaestroWorkspacePlacementGeometry
+} from './maestro-workspace-placement-state'
 
 export function MaestroWorkspaceCanvas({
   target,
@@ -77,7 +57,7 @@ export function MaestroWorkspaceCanvas({
   const [optimisticManualLinks, setOptimisticManualLinks] = useState<
     readonly OptimisticMaestroManualLink[]
   >([])
-  const [selectedSurfaceKey, setSelectedSurfaceKey] = useState<string | null>(null)
+  const contextMenuWorldPoint = useRef<{ x: number; y: number } | null>(null)
   const optimisticPlacements = useRef<Record<string, MaestroWorkspaceWindowPlacement>>({})
   const automaticallyPlacedSurfaceKeys = useRef(new Set<string>())
   const projection = useMaestroWorkspaceProjection(target, scope)
@@ -100,7 +80,11 @@ export function MaestroWorkspaceCanvas({
     if (!result) {
       return
     }
-    const authoritative = initialPlacements(result.canvas.document, result.snapshot, surfaceKeys)
+    const authoritative = initialMaestroWorkspacePlacements(
+      result.canvas.document,
+      result.snapshot,
+      surfaceKeys
+    )
     setPlacements(() =>
       Object.fromEntries(
         surfaceKeys.map((surfaceKey) => {
@@ -109,7 +93,7 @@ export function MaestroWorkspaceCanvas({
           if (!optimistic || !confirmed) {
             return [surfaceKey, confirmed]
           }
-          if (samePlacementGeometry(optimistic, confirmed)) {
+          if (sameMaestroWorkspacePlacementGeometry(optimistic, confirmed)) {
             delete optimisticPlacements.current[surfaceKey]
             return [surfaceKey, confirmed]
           }
@@ -129,14 +113,7 @@ export function MaestroWorkspaceCanvas({
 
   useEffect(() => {
     setOptimisticManualLinks((current) =>
-      current.filter(
-        (link) =>
-          !result?.canvas.document.manual_links.some(
-            (confirmed) =>
-              confirmed.source_surface_key === link.source &&
-              confirmed.target_surface_key === link.target
-          )
-      )
+      unconfirmedOptimisticMaestroManualLinks(current, result?.canvas.document.manual_links ?? [])
     )
   }, [result?.canvas.document.manual_links])
 
@@ -151,11 +128,11 @@ export function MaestroWorkspaceCanvas({
     }
   }, [resource.mutation?.status])
 
-  useEffect(() => {
-    if (selectedSurfaceKey && !surfaceKeys.includes(selectedSurfaceKey)) {
-      setSelectedSurfaceKey(null)
-    }
-  }, [selectedSurfaceKey, surfaceKeys])
+  const selection = useMaestroWorkspaceSelection({
+    surfaceKeys,
+    manualLinks: result?.canvas.document.manual_links ?? [],
+    mutate: resource.mutate
+  })
 
   const pendingSurfaceKey = useMemo(
     () =>
@@ -247,6 +224,7 @@ export function MaestroWorkspaceCanvas({
       data-maestro-workspace-canvas=""
       data-authority-state={resource.status}
       ref={board.rootRef}
+      onKeyDown={selection.onKeyDown}
     >
       <ContextMenu>
         <ContextMenuTrigger asChild>
@@ -260,13 +238,59 @@ export function MaestroWorkspaceCanvas({
             }}
             ref={board.canvasRef}
             onWheel={board.onWheel}
-            onPointerDown={board.onPointerDown}
+            onPointerDown={(event) => {
+              if (event.button === 0 && event.target === event.currentTarget) {
+                selection.clearSelection()
+                clearMaestroWorkspaceCanvasFocus()
+              }
+              if (event.button === 2) {
+                contextMenuWorldPoint.current = board.clientPointToWorld({
+                  x: event.clientX,
+                  y: event.clientY
+                })
+              }
+              board.onPointerDown(event)
+            }}
             onPointerMove={board.onPointerMove}
             onPointerUp={board.onPointerUp}
             onPointerCancel={board.onPointerUp}
+            onContextMenuCapture={(event) => {
+              contextMenuWorldPoint.current = board.clientPointToWorld({
+                x: event.clientX,
+                y: event.clientY
+              })
+            }}
           />
         </ContextMenuTrigger>
-        <MaestroWorkspaceContextMenu resource={resource} workspaceKey={scope.workspace_key} />
+        <MaestroWorkspaceContextMenu
+          resource={resource}
+          workspaceKey={scope.workspace_key}
+          placementFor={(surfaceType) => {
+            const point = contextMenuWorldPoint.current ?? board.viewport.center
+            const size =
+              surfaceType === 'terminal'
+                ? { width: 760, height: 530 }
+                : surfaceType === 'browser'
+                  ? { width: 680, height: 480 }
+                  : { width: 440, height: 360 }
+            const zOrder = Math.min(
+              1_000_000,
+              Math.max(0, ...Object.values(placements).map((placement) => placement.z_order + 1))
+            )
+            return placeWorkspaceWindowAtCanvasPoint(
+              {
+                position: point,
+                size,
+                collapsed: false,
+                z_order: zOrder
+              },
+              point,
+              board.viewport,
+              board.size,
+              MAESTRO_REVEAL_INSETS
+            )
+          }}
+        />
       </ContextMenu>
       <MaestroWorkspaceToolbar board={board} />
 
@@ -327,7 +351,10 @@ export function MaestroWorkspaceCanvas({
         document={document}
         placements={placements}
         optimisticManualLinks={optimisticManualLinks}
-        selectedSurfaceKey={selectedSurfaceKey}
+        selectedSurfaceKey={selection.selectedSurfaceKey}
+        selectedManualLinkId={selection.selectedManualLinkId}
+        onManualLinkSelect={selection.selectManualLink}
+        onManualLinkDelete={selection.deleteManualLink}
         topology={agentTopology}
         style={board.worldStyle}
       />
@@ -335,13 +362,12 @@ export function MaestroWorkspaceCanvas({
         target={target}
         resource={resource}
         snapshot={snapshot}
-        document={document}
         surfaceKeys={surfaceKeys}
         pendingSurfaceKey={pendingSurfaceKey}
         placements={placements}
         setPlacements={setPlacements}
-        selectedKey={selectedSurfaceKey}
-        onSelectedKeyChange={setSelectedSurfaceKey}
+        selectedKey={selection.selectedSurfaceKey}
+        onSelectedKeyChange={selection.selectSurface}
         topology={agentTopology}
         optimisticPlacements={optimisticPlacements}
         automaticallyPlacedSurfaceKeys={automaticallyPlacedSurfaceKeys}
@@ -355,11 +381,8 @@ export function MaestroWorkspaceCanvas({
             { id: crypto.randomUUID(), source, target: targetKey }
           ])
         }
-        onRevealPlacement={(placement, reserveInspector) =>
-          board.reveal(
-            workspaceWindowBounds(placement),
-            reserveInspector ? MAESTRO_INSPECTOR_REVEAL_INSETS : MAESTRO_REVEAL_INSETS
-          )
+        onRevealPlacement={(placement) =>
+          board.reveal(workspaceWindowBounds(placement), MAESTRO_REVEAL_INSETS)
         }
       />
       {runProgress ? (

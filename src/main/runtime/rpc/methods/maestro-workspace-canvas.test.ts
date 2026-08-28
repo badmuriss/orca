@@ -473,6 +473,25 @@ describe('Maestro workspace Canvas authority', () => {
         actor_id: 'actor-1',
         expected_authority_revision: linked.snapshot.authority_revision,
         expected_canvas_revision: linked.canvas.revision,
+        idempotency_key: 'manual-link-reversed',
+        source_surface_key: keys[1]!,
+        target_surface_key: keys[0]!,
+        link_type: 'context-for',
+        label: null
+      })
+    ).resolves.toMatchObject({ status: 'applied', canvas_revision: linked.canvas.revision })
+    const deduplicated = await authority.query(scope, 'actor-1')
+    if (deduplicated.status !== 'available') {
+      throw new Error('missing deduplicated snapshot')
+    }
+    expect(deduplicated.canvas.document.manual_links).toHaveLength(1)
+    await expect(
+      authority.mutate({
+        action: 'create-manual-link',
+        scope,
+        actor_id: 'actor-1',
+        expected_authority_revision: deduplicated.snapshot.authority_revision,
+        expected_canvas_revision: deduplicated.canvas.revision,
         idempotency_key: 'manual-link-invalid',
         source_surface_key: keys[0]!,
         target_surface_key: 'missing',

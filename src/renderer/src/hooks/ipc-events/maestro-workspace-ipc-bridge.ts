@@ -107,7 +107,11 @@ export function executeMaestroWorkspaceTabCommand(
     if (!tab) {
       throw new Error('Exact workspace tab was not found.')
     }
-    store.setTabCustomLabel(tab.id, command.title)
+    if (tab.contentType === 'terminal') {
+      store.setTabCustomTitle(tab.entityId, command.title)
+    } else {
+      store.setTabCustomLabel(tab.id, command.title)
+    }
     return { ok: true, tabId: tab.id }
   }
   const targetGroupId = store.activeGroupIdByWorktree[command.worktreeId]

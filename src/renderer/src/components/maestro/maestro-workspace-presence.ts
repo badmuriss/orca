@@ -12,34 +12,39 @@ export type MaestroWorkspacePresenceItem = {
   phase: MaestroWorkspacePresencePhase
 }
 
-const ENTER_DURATION_MS = 260
-const EXIT_DURATION_MS = 210
+const ENTER_DURATION_MS = 180
+const EXIT_DURATION_MS = 160
 
 export function reconcileMaestroWorkspacePresence(
   current: readonly MaestroWorkspacePresenceItem[],
   snapshot: WorkspaceSurfaceSnapshot,
   surfaceKeys: readonly string[]
 ): MaestroWorkspacePresenceItem[] {
-  const currentByKey = new Map(current.map((item) => [item.surfaceKey, item]))
   const visibleKeys = new Set(surfaceKeys)
+  const retainedKeys = new Set<string>()
   const next: MaestroWorkspacePresenceItem[] = []
 
-  for (const surfaceKey of surfaceKeys) {
-    const surface = snapshot.surfaces[surfaceKey]
-    if (!surface) {
+  for (const existing of current) {
+    const surface = snapshot.surfaces[existing.surfaceKey]
+    if (!visibleKeys.has(existing.surfaceKey) || !surface) {
+      next.push({ ...existing, phase: 'exiting' })
       continue
     }
-    const existing = currentByKey.get(surfaceKey)
+    retainedKeys.add(existing.surfaceKey)
     next.push({
-      surfaceKey,
+      surfaceKey: existing.surfaceKey,
       surface,
-      phase: existing ? (existing.phase === 'exiting' ? 'entering' : existing.phase) : 'entering'
+      phase: existing.phase === 'exiting' ? 'entering' : existing.phase
     })
   }
 
-  for (const item of current) {
-    if (!visibleKeys.has(item.surfaceKey)) {
-      next.push({ ...item, phase: 'exiting' })
+  for (const surfaceKey of surfaceKeys) {
+    if (retainedKeys.has(surfaceKey)) {
+      continue
+    }
+    const surface = snapshot.surfaces[surfaceKey]
+    if (surface) {
+      next.push({ surfaceKey, surface, phase: 'entering' })
     }
   }
 
@@ -59,6 +64,20 @@ export function settleMaestroWorkspacePresence(
   )
 }
 
+export function transientMaestroWorkspacePresence(
+  items: readonly MaestroWorkspacePresenceItem[],
+  renderableSurfaceKeys: ReadonlySet<string>
+): ReadonlyMap<string, Exclude<MaestroWorkspacePresencePhase, 'present'>> {
+  return new Map(
+    items.flatMap((item) =>
+      item.phase === 'present' ||
+      (item.phase === 'entering' && !renderableSurfaceKeys.has(item.surfaceKey))
+        ? []
+        : [[item.surfaceKey, item.phase] as const]
+    )
+  )
+}
+
 function initialPresenceItems(
   snapshot: WorkspaceSurfaceSnapshot,
   surfaceKeys: readonly string[]
@@ -71,7 +90,8 @@ function initialPresenceItems(
 
 export function useMaestroWorkspacePresence(
   snapshot: WorkspaceSurfaceSnapshot,
-  surfaceKeys: readonly string[]
+  surfaceKeys: readonly string[],
+  renderableSurfaceKeys: ReadonlySet<string>
 ): readonly MaestroWorkspacePresenceItem[] {
   const [items, setItems] = useState(() => initialPresenceItems(snapshot, surfaceKeys))
   const timers = useRef(
@@ -90,11 +110,7 @@ export function useMaestroWorkspacePresence(
 
   useEffect(() => {
     const activeTimers = timers.current
-    const transientByKey = new Map(
-      items.flatMap((item) =>
-        item.phase === 'present' ? [] : [[item.surfaceKey, item.phase] as const]
-      )
-    )
+    const transientByKey = transientMaestroWorkspacePresence(items, renderableSurfaceKeys)
 
     for (const [surfaceKey, entry] of activeTimers) {
       if (transientByKey.get(surfaceKey) !== entry.phase) {
@@ -114,7 +130,7 @@ export function useMaestroWorkspacePresence(
       }, duration)
       activeTimers.set(surfaceKey, { phase, timer })
     }
-  }, [items])
+  }, [items, renderableSurfaceKeys])
 
   useEffect(
     () => () => {

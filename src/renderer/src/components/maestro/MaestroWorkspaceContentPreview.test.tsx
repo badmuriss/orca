@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceSurface } from '../../../../shared/maestro-workspace-canvas'
 
@@ -54,6 +54,10 @@ function surface(
 describe('MaestroWorkspaceContentPreview', () => {
   afterEach(cleanup)
   beforeEach(() => {
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: { ui: { setMarkdownEditorFocused: vi.fn() } }
+    })
     readAnnotation
       .mockReset()
       .mockResolvedValue({ content: '# New annotation', version: '1', source: 'file' })
@@ -106,18 +110,17 @@ describe('MaestroWorkspaceContentPreview', () => {
     expect(readContent.mock.calls[0][2]).toMatchObject({ unified_tab_id: 'tab-2' })
   })
 
-  it('changes annotation tone from the compact color controls', async () => {
-    const onUpdateAnnotationTone = vi.fn()
+  it('renders an annotation as a neutral mini editor without tone controls', async () => {
     render(
       <MaestroWorkspaceContentPreview
         target={{ kind: 'local' }}
         surface={surface('observation')}
-        onUpdateAnnotationTone={onUpdateAnnotationTone}
+        onUpdateAnnotationContent={vi.fn()}
       />
     )
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Set annotation color to Decision' }))
-    expect(onUpdateAnnotationTone).toHaveBeenCalledWith('decision')
-    expect(document.querySelector('[data-annotation-tone="decision"]')).not.toBeNull()
+    expect(await screen.findByRole('button', { name: 'Bold' })).not.toBeNull()
+    expect(screen.queryByLabelText('Annotation color')).toBeNull()
+    expect(document.querySelector('[data-annotation-tone]')).toBeNull()
   })
 })

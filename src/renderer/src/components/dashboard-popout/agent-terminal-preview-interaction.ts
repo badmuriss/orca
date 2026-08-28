@@ -19,6 +19,7 @@ export function createInteractiveAgentTerminalPreviewController(args: {
   getSettings: () => GlobalSettings | null
   getMacOptionAsAlt: () => MacOptionAsAlt
   getKittyKeyboardFlags: () => number
+  getInputEnabled: () => boolean
   isDisposed: () => boolean
   isReplaying: () => boolean
 }): { install: () => void; dispose: () => void } {
@@ -32,6 +33,7 @@ export function createInteractiveAgentTerminalPreviewController(args: {
     container: args.container,
     getTerminal: args.getTerminal,
     getTerminalInput: args.getTerminalInput,
+    isInputEnabled: args.getInputEnabled,
     isDisposed: args.isDisposed
   })
   const disposeAppMenuClipboard = installPreviewTerminalAppMenuClipboard({
@@ -54,6 +56,10 @@ export function createInteractiveAgentTerminalPreviewController(args: {
         pendingUserInputSignals = Math.min(32, pendingUserInputSignals + 1)
       })
       terminal.onData((data) => {
+        if (!args.getInputEnabled()) {
+          pendingUserInputSignals = 0
+          return
+        }
         const signaledUserInput = pendingUserInputSignals > 0
         if (signaledUserInput) {
           pendingUserInputSignals--
@@ -72,6 +78,7 @@ export function createInteractiveAgentTerminalPreviewController(args: {
         pasteClipboardText: (activeElement, source) =>
           void pasteClipboardText(activeElement, source),
         sendInput: (data) => args.getTerminal()?.input(data),
+        getInputEnabled: args.getInputEnabled,
         getShortcutContext: () => ({
           clientPlatform: getShortcutPlatform(),
           macOptionAsAlt: args.getMacOptionAsAlt(),

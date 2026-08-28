@@ -7,6 +7,7 @@ import {
   findWorkspaceWindowPlacementNearPosition,
   type MaestroWorkspaceWindowPlacement
 } from './maestro-workspace-window-layout'
+import { placeMaestroWorkspaceTopologyRoot } from './maestro-workspace-topology-root-placement'
 
 const TOPOLOGY_LAYER_GAP = 96
 const TOPOLOGY_SIBLING_GAP = 64
@@ -285,11 +286,20 @@ export function layoutIncrementalMaestroWorkspaceTopology({
         : parentPlacement
           ? lineagePosition(node, siblings, parentPlacement, placements)
           : viewportPosition(node.preferredPlacement, viewport, canvas, insets)
-    const attempt = findWorkspaceWindowPlacementNearPosition(
-      node.preferredPlacement,
-      occupied,
-      preferredPosition
-    )
+    const attempt = parent
+      ? findWorkspaceWindowPlacementNearPosition(
+          node.preferredPlacement,
+          occupied,
+          preferredPosition
+        )
+      : placeMaestroWorkspaceTopologyRoot(
+          node.preferredPlacement,
+          occupied,
+          preferredPosition,
+          viewport,
+          canvas,
+          insets
+        )
     placements[node.surfaceKey] = attempt.placement
     occupied.push(attempt.placement)
     automaticallyPlacedSurfaceKeys.push(node.surfaceKey)

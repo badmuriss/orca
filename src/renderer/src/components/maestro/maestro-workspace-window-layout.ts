@@ -69,6 +69,7 @@ export function workspaceWindowBounds(placement: MaestroWorkspaceWindowPlacement
 }
 
 const NEW_WINDOW_GAP = 40
+const CURSOR_WINDOW_GAP_PX = 16
 const MAX_PLACEMENT_ROWS = 64
 const MAX_PLACEMENT_SCAN_RINGS = 16
 const MAX_LAYOUT_COORDINATE = 1_000_000
@@ -156,6 +157,55 @@ export function findWorkspaceWindowPlacementNearPosition(
       z_order: zOrder
     },
     collisionFree: false
+  }
+}
+
+function fitPlacementAxis(
+  preferred: number,
+  length: number,
+  visibleStart: number,
+  visibleEnd: number
+): number {
+  const available = visibleEnd - visibleStart
+  if (length >= available) {
+    return visibleStart + (available - length) / 2
+  }
+  return Math.max(visibleStart, Math.min(visibleEnd - length, preferred))
+}
+
+export function placeWorkspaceWindowAtCanvasPoint(
+  placement: MaestroWorkspaceWindowPlacement,
+  point: { x: number; y: number },
+  viewport: MaestroCanvasViewport,
+  canvas: MaestroCanvasSize,
+  insets: MaestroCanvasInsets
+): MaestroWorkspaceWindowPlacement {
+  const visibleLeft = viewport.center.x + (insets.left - canvas.width / 2) / viewport.zoom
+  const visibleRight =
+    viewport.center.x + (canvas.width - insets.right - canvas.width / 2) / viewport.zoom
+  const visibleTop = viewport.center.y + (insets.top - canvas.height / 2) / viewport.zoom
+  const visibleBottom =
+    viewport.center.y + (canvas.height - insets.bottom - canvas.height / 2) / viewport.zoom
+  const gap = CURSOR_WINDOW_GAP_PX / viewport.zoom
+  const above = point.y - placement.size.height - gap
+  const below = point.y + gap
+  const preferredY = above >= visibleTop ? above : below
+
+  return {
+    ...placement,
+    position: {
+      x: boundedLayoutCoordinate(
+        fitPlacementAxis(
+          point.x - placement.size.width / 2,
+          placement.size.width,
+          visibleLeft,
+          visibleRight
+        )
+      ),
+      y: boundedLayoutCoordinate(
+        fitPlacementAxis(preferredY, placement.size.height, visibleTop, visibleBottom)
+      )
+    }
   }
 }
 

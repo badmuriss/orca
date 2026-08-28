@@ -1329,7 +1329,13 @@ export function buildMobileSessionTabSnapshots(
         if (isWebOnlyMirroredTerminalTab(terminal, inputs.terminalLayoutByTabId.get(terminal.id))) {
           continue
         }
-        tabs.push(...buildMobileTerminalSurfaceTabs(inputs, terminal, item.tabId))
+        tabs.push(
+          ...buildMobileTerminalSurfaceTabs(
+            inputs,
+            terminal,
+            resolveVisibleUnifiedTab(item, unifiedTabByIdForWorktree, inputs.unifiedTabs)
+          )
+        )
       } else if (item.type === 'editor') {
         const file = openFilesForWorktree?.get(item.id)
         if (!file || !isMobilePublishableOpenFile(file)) {
@@ -1338,7 +1344,7 @@ export function buildMobileSessionTabSnapshots(
         const markdown = buildMobileMarkdownTab(
           inputs,
           file,
-          item.tabId ? unifiedTabByIdForWorktree.get(item.tabId) : undefined
+          resolveVisibleUnifiedTab(item, unifiedTabByIdForWorktree, inputs.unifiedTabs)
         )
         if (markdown) {
           tabs.push(markdown)
@@ -1347,7 +1353,7 @@ export function buildMobileSessionTabSnapshots(
             buildMobileFileTab(
               inputs,
               file,
-              item.tabId ? unifiedTabByIdForWorktree.get(item.tabId) : undefined
+              resolveVisibleUnifiedTab(item, unifiedTabByIdForWorktree, inputs.unifiedTabs)
             )
           )
         }
@@ -1362,7 +1368,7 @@ export function buildMobileSessionTabSnapshots(
           buildMobileBrowserTab(
             inputs,
             workspace,
-            item.tabId ? unifiedTabByIdForWorktree.get(item.tabId) : undefined
+            resolveVisibleUnifiedTab(item, unifiedTabByIdForWorktree, inputs.unifiedTabs)
           )
         )
       }
@@ -1772,6 +1778,17 @@ function buildMobileSessionGroupProjection(
   }
 }
 
+function resolveVisibleUnifiedTab(
+  item: VisibleTabRef,
+  unifiedTabById: ReadonlyMap<string, Tab>,
+  unifiedTabs: readonly Tab[]
+): Tab | undefined {
+  if (item.tabId) {
+    return unifiedTabById.get(item.tabId)
+  }
+  return unifiedTabs.find((tab) => tab.contentType === item.type && tab.entityId === item.id)
+}
+
 function getEditorDraftVersionByFileId(
   editorDrafts: AppState['editorDrafts']
 ): Map<string, string> {
@@ -1917,8 +1934,10 @@ function buildMobileLaunchDraftsByPaneKey(args: {
 function buildMobileTerminalSurfaceTabs(
   inputs: MobileSessionWorktreeInputs,
   terminal: NonNullable<AppState['tabsByWorktree'][string]>[number],
-  unifiedTabId?: string
+  unifiedTab?: Tab
 ): RuntimeMobileSessionSnapshotTab[] {
+  const unifiedTabId = unifiedTab?.id
+  const customTitle = unifiedTab?.customLabel?.trim() || terminal.customTitle?.trim() || null
   const capture = inputs.mountedSurfaceCaptureByTabId.get(terminal.id)
   const isDesktopTabActive = unifiedTabId
     ? isUnifiedTabActiveInActiveGroup(inputs, unifiedTabId)
@@ -1973,10 +1992,13 @@ function buildMobileTerminalSurfaceTabs(
     const tabWideFallbackSafe =
       isNativeChatTabWideFallbackSafe(parentLayout) && launchAgentLeafId === leafId
     const title = tabWideFallbackSafe
-      ? resolveRuntimeTerminalTitle(
-          terminal,
-          generatedTitlesEnabled,
-          leafTitle ?? terminal.title ?? 'Terminal'
+      ? resolveUnifiedTabTitle(
+          unifiedTab,
+          resolveRuntimeTerminalTitle(
+            terminal,
+            generatedTitlesEnabled,
+            leafTitle ?? terminal.title ?? 'Terminal'
+          )
         )
       : (leafTitle ?? 'Terminal')
     const agentStatusTitle = leafTitle ?? (tabWideFallbackSafe ? terminal.title : '') ?? ''
@@ -1999,6 +2021,7 @@ function buildMobileTerminalSurfaceTabs(
       type: 'terminal' as const,
       id: mobileTerminalSurfaceId(terminal.id, leafId),
       title,
+      ...(tabWideFallbackSafe && customTitle ? { customTitle } : {}),
       ...(tabWideFallbackSafe && terminal.quickCommandLabel?.trim()
         ? { quickCommandLabel: terminal.quickCommandLabel.trim() }
         : {}),

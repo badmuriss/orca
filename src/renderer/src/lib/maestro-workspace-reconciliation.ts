@@ -46,8 +46,19 @@ export function reconcileMaestroWorkspaceCanvasQuery(
   ) {
     return current
   }
+  const nextStatus = incoming.snapshot.state === 'unavailable' ? 'unavailable' : 'ready'
+  if (
+    current.result &&
+    current.status === nextStatus &&
+    current.result.actor_id === incoming.actor_id &&
+    current.result.snapshot.authority_revision === incoming.snapshot.authority_revision &&
+    current.result.canvas.revision === incoming.canvas.revision &&
+    current.unavailableReason === incoming.snapshot.capability.reason
+  ) {
+    return current
+  }
   return {
-    status: incoming.snapshot.state === 'unavailable' ? 'unavailable' : 'ready',
+    status: nextStatus,
     result: incoming,
     unavailableReason: incoming.snapshot.capability.reason,
     mutation: current.mutation

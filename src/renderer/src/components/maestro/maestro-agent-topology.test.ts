@@ -51,7 +51,6 @@ describe('Maestro agent topology', () => {
     const coordinatorPaneKey = paneKey('terminal-coordinator', LEAF_COORDINATOR)
     const implementationPaneKey = paneKey('terminal-implementation', LEAF_IMPLEMENTATION)
     const verificationPaneKey = paneKey('terminal-verification', LEAF_VERIFICATION)
-    const unrelatedPaneKey = paneKey('terminal-unrelated', LEAF_UNRELATED)
     const surfaces = {
       coordinator: terminalSurface(
         'terminal-coordinator',
@@ -63,11 +62,7 @@ describe('Maestro agent topology', () => {
         LEAF_IMPLEMENTATION,
         'Implement feature'
       ),
-      verification: terminalSurface(
-        'terminal-verification',
-        LEAF_VERIFICATION,
-        'Run checks'
-      ),
+      verification: terminalSurface('terminal-verification', LEAF_VERIFICATION, 'Run checks'),
       unrelated: terminalSurface('terminal-unrelated', LEAF_UNRELATED, 'Implement feature')
     }
     const topology = projectMaestroAgentTopology({
@@ -75,8 +70,7 @@ describe('Maestro agent topology', () => {
       terminalHandleByPaneKey: {
         [coordinatorPaneKey]: 'handle-coordinator',
         [implementationPaneKey]: 'handle-implementation',
-        [verificationPaneKey]: 'handle-verification',
-        [unrelatedPaneKey]: 'handle-unrelated'
+        [verificationPaneKey]: 'handle-verification'
       },
       orchestrationByPaneKey: {
         [implementationPaneKey]: orchestration({
@@ -100,7 +94,7 @@ describe('Maestro agent topology', () => {
       expect.objectContaining({
         surfaceId: 'coordinator',
         coordinatorSurfaceId: 'coordinator',
-        functionLabel: 'Coordinator terminal',
+        functionLabel: '',
         provenance: 'runtime-lineage'
       }),
       expect.objectContaining({
@@ -110,18 +104,13 @@ describe('Maestro agent topology', () => {
         functionLabel: 'Implementation'
       }),
       expect.objectContaining({
-        surfaceId: 'unrelated',
-        functionLabel: 'Implement feature',
-        coordinatorSurfaceId: undefined,
-        parentSurfaceId: undefined
-      }),
-      expect.objectContaining({
         surfaceId: 'verification',
         parentSurfaceId: 'implementation',
         coordinatorSurfaceId: 'coordinator',
         functionLabel: 'Verification'
       })
     ])
+    expect(topology.nodes.some((node) => node.surfaceId === 'unrelated')).toBe(false)
     expect(
       topology.relations.map(({ sourceSurfaceId, targetSurfaceId, kind, provenance }) => ({
         sourceSurfaceId,
@@ -154,6 +143,127 @@ describe('Maestro agent topology', () => {
         kind: 'delegates',
         provenance: 'runtime-lineage'
       }
+    ])
+  })
+
+  it('resolves a reminted parent only through its stable pane identity', () => {
+    const currentCoordinatorPaneKey = paneKey('coordinator-reminted', LEAF_COORDINATOR)
+    const staleCoordinatorPaneKey = paneKey('coordinator-original', LEAF_COORDINATOR)
+    const workerPaneKey = paneKey('worker', LEAF_IMPLEMENTATION)
+    const topology = projectMaestroAgentTopology({
+      surfaces: {
+        coordinator: terminalSurface('coordinator-reminted', LEAF_COORDINATOR, 'Manual title'),
+        worker: terminalSurface('worker', LEAF_IMPLEMENTATION, 'Worker title')
+      },
+      terminalHandleByPaneKey: {
+        [currentCoordinatorPaneKey]: 'handle-coordinator-reminted',
+        [workerPaneKey]: 'handle-worker'
+      },
+      orchestrationByPaneKey: {
+        [workerPaneKey]: orchestration({
+          taskTitle: 'Authoritative worker function',
+          parentPaneKey: staleCoordinatorPaneKey,
+          parentTerminalHandle: 'handle-coordinator-original',
+          coordinatorHandle: 'handle-coordinator-original',
+          orchestrationRunId: 'run-1'
+        })
+      }
+    })
+
+    expect(topology.coordinatorSurfaceId).toBe('coordinator')
+    expect(topology.nodes).toEqual([
+      expect.objectContaining({
+        surfaceId: 'coordinator',
+        coordinatorSurfaceId: 'coordinator',
+        functionLabel: ''
+      }),
+      expect.objectContaining({
+        surfaceId: 'worker',
+        parentSurfaceId: 'coordinator',
+        coordinatorSurfaceId: 'coordinator',
+        functionLabel: 'Authoritative worker function'
+      })
+    ])
+    expect(
+      topology.relations.map(({ sourceSurfaceId, targetSurfaceId, kind }) => ({
+        sourceSurfaceId,
+        targetSurfaceId,
+        kind
+      }))
+    ).toEqual([
+      { sourceSurfaceId: 'coordinator', targetSurfaceId: 'worker', kind: 'coordinates' },
+      { sourceSurfaceId: 'coordinator', targetSurfaceId: 'worker', kind: 'delegates' }
+    ])
+  })
+
+  it('does not guess a restored coordinator from unrelated manual surfaces', () => {
+    const firstWorkerPaneKey = paneKey('first-worker', LEAF_IMPLEMENTATION)
+    const secondWorkerPaneKey = paneKey('second-worker', LEAF_VERIFICATION)
+    const topology = projectMaestroAgentTopology({
+      surfaces: {
+        manual: terminalSurface('manual', LEAF_COORDINATOR, 'Looks like a coordinator'),
+        first: terminalSurface('first-worker', LEAF_IMPLEMENTATION, 'First worker'),
+        second: terminalSurface('second-worker', LEAF_VERIFICATION, 'Second worker')
+      },
+      terminalHandleByPaneKey: {
+        [firstWorkerPaneKey]: 'handle-first-worker',
+        [secondWorkerPaneKey]: 'handle-second-worker'
+      },
+      orchestrationByPaneKey: {
+        [firstWorkerPaneKey]: orchestration({
+          displayName: 'First function',
+          parentTerminalHandle: 'missing-coordinator-handle',
+          coordinatorHandle: 'missing-coordinator-handle',
+          orchestrationRunId: 'run-1'
+        }),
+        [secondWorkerPaneKey]: orchestration({
+          taskId: 'task-2',
+          dispatchId: 'dispatch-2',
+          displayName: 'Second function',
+          parentTerminalHandle: 'missing-coordinator-handle',
+          coordinatorHandle: 'missing-coordinator-handle',
+          orchestrationRunId: 'run-1'
+        })
+      }
+    })
+
+    expect(topology.coordinatorSurfaceId).toBeUndefined()
+    expect(topology.relations).toEqual([])
+    expect(topology.nodes.map((node) => node.surfaceId)).toEqual(['first', 'second'])
+  })
+
+  it('keeps parent lineage without promoting an unowned root to coordinator', () => {
+    const parentPaneKey = paneKey('parent', LEAF_COORDINATOR)
+    const workerPaneKey = paneKey('worker', LEAF_IMPLEMENTATION)
+    const topology = projectMaestroAgentTopology({
+      surfaces: {
+        parent: terminalSurface('parent', LEAF_COORDINATOR, 'Independent terminal'),
+        worker: terminalSurface('worker', LEAF_IMPLEMENTATION, 'Worker terminal')
+      },
+      terminalHandleByPaneKey: {},
+      orchestrationByPaneKey: {
+        [workerPaneKey]: orchestration({
+          taskTitle: 'Owned work',
+          parentPaneKey
+        })
+      }
+    })
+
+    expect(topology.coordinatorSurfaceId).toBeUndefined()
+    expect(topology.relations).toEqual([
+      expect.objectContaining({
+        sourceSurfaceId: 'parent',
+        targetSurfaceId: 'worker',
+        kind: 'delegates'
+      })
+    ])
+    expect(topology.nodes).toEqual([
+      expect.objectContaining({
+        surfaceId: 'worker',
+        parentSurfaceId: 'parent',
+        coordinatorSurfaceId: undefined,
+        functionLabel: 'Owned work'
+      })
     ])
   })
 
@@ -327,6 +437,13 @@ describe('Maestro agent topology', () => {
 
     expect(topology.coordinatorSurfaceId).toBeUndefined()
     expect(topology.relations).toEqual([])
-    expect(topology.nodes.every((node) => node.functionLabel !== '')).toBe(true)
+    expect(topology.nodes).toEqual([
+      expect.objectContaining({
+        surfaceId: 'child',
+        parentSurfaceId: undefined,
+        coordinatorSurfaceId: undefined,
+        functionLabel: ''
+      })
+    ])
   })
 })

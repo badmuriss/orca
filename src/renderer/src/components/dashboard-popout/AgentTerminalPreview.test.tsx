@@ -26,6 +26,7 @@ const terminalHarness = vi.hoisted(() => ({
     scrollToTop: ReturnType<typeof vi.fn>
     scrollToBottom: ReturnType<typeof vi.fn>
     selectAll: ReturnType<typeof vi.fn>
+    options: { disableStdin?: boolean }
     modes: { bracketedPasteMode: boolean }
     selectionText: string
     customKeyHandler: ((event: KeyboardEvent) => boolean) | null
@@ -86,6 +87,7 @@ vi.mock('@xterm/xterm', () => ({
     scrollToTop = vi.fn()
     scrollToBottom = vi.fn()
     selectAll = vi.fn()
+    options: { disableStdin?: boolean }
     getSelection = vi.fn(() => this.selectionText)
     attachCustomKeyEventHandler = vi.fn((handler: (event: KeyboardEvent) => boolean) => {
       this.customKeyHandler = handler
@@ -95,7 +97,8 @@ vi.mock('@xterm/xterm', () => ({
       return { dispose: vi.fn() }
     })
 
-    constructor() {
+    constructor(options: { disableStdin?: boolean } = {}) {
+      this.options = options
       terminalHarness.instances.push(this)
     }
   }
