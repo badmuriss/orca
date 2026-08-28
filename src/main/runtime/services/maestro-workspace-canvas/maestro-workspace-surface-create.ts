@@ -29,7 +29,11 @@ export async function createMaestroWorkspaceSurface(params: {
       clientMutationId: request.idempotency_key,
       ...(request.agent ? { agent: request.agent } : {}),
       activate: false,
-      select: false
+      select: false,
+      // Canvas is the first-class live surface. Spawn through main so a
+      // background tab does not depend on its hidden desktop pane mounting
+      // before the Canvas preview can attach, render, and accept input.
+      runtimeOwned: true
     })
     return {
       surfaceId: { ...request.scope, unified_tab_id: created.tab.parentTabId },

@@ -17,6 +17,7 @@ const terminalHarness = vi.hoisted(() => ({
     write: ReturnType<typeof vi.fn>
     writeCallbacks: (() => void)[]
     onDataListener: ((data: string) => void) | null
+    focus: ReturnType<typeof vi.fn>
     dispose: ReturnType<typeof vi.fn>
     resize: ReturnType<typeof vi.fn>
     reset: ReturnType<typeof vi.fn>
@@ -865,9 +866,9 @@ describe('AgentTerminalPreview', () => {
     expect(view.queryByText(/No live terminal/)).not.toBeInTheDocument()
   })
 
-  it('claims a grid sized to the dialog box and never re-requests an unchanged target', async () => {
+  it('claims a Canvas grid sized to its window and never re-requests an unchanged target', async () => {
     vi.useFakeTimers()
-    const view = render(<AgentTerminalPreview ptyId="pty-1" />)
+    const view = render(<AgentTerminalPreview ptyId="pty-1" mode="canvas" autoFocus={false} />)
     await vi.waitFor(() => expect(terminalHarness.instances).toHaveLength(1))
 
     const host = view.container.querySelector<HTMLElement>('.origin-bottom-left')!

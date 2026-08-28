@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TerminalPreviewDataPayload } from '../../../../shared/terminal-preview'
 import {
   createPassiveAgentTerminalLiveQueue,
+  retainAgentTerminalPreviewConnection,
   scheduleAgentTerminalPreviewFrameTask,
   subscribeAgentTerminalPreviewStream
 } from './agent-terminal-preview-stream'
@@ -297,7 +298,7 @@ describe('agent terminal preview stream', () => {
     expect(fit).not.toHaveBeenCalled()
 
     view.unmount()
-    expect(unsubscribe).toHaveBeenCalledExactlyOnceWith('pty-1')
+    await waitFor(() => expect(unsubscribe).toHaveBeenCalledExactlyOnceWith('pty-1'))
     expect(terminal.dispose).toHaveBeenCalledOnce()
   })
 
@@ -314,7 +315,19 @@ describe('agent terminal preview stream', () => {
     first.unmount()
     expect(unsubscribe).not.toHaveBeenCalled()
     second.unmount()
-    expect(unsubscribe).toHaveBeenCalledExactlyOnceWith('pty-shared')
+    await waitFor(() => expect(unsubscribe).toHaveBeenCalledExactlyOnceWith('pty-shared'))
+  })
+
+  it('keeps a remounted PTY connection across the release microtask', async () => {
+    const releaseFirst = retainAgentTerminalPreviewConnection('pty-remount')
+    releaseFirst()
+    const releaseReplacement = retainAgentTerminalPreviewConnection('pty-remount')
+
+    await Promise.resolve()
+    expect(unsubscribe).not.toHaveBeenCalled()
+
+    releaseReplacement()
+    await waitFor(() => expect(unsubscribe).toHaveBeenCalledExactlyOnceWith('pty-remount'))
   })
 
   it('batches passive Canvas output while acknowledging each exact payload', async () => {
@@ -395,7 +408,7 @@ describe('agent terminal preview stream', () => {
     view.unmount()
     expect(cancelFrame).toHaveBeenCalledExactlyOnceWith(2)
     expect(disconnectResizeObserver).toHaveBeenCalledOnce()
-    expect(unsubscribe).toHaveBeenCalledExactlyOnceWith('pty-1')
+    await waitFor(() => expect(unsubscribe).toHaveBeenCalledExactlyOnceWith('pty-1'))
     expect(terminal.dispose).toHaveBeenCalledOnce()
   })
 })

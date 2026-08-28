@@ -6,8 +6,12 @@ import type { WorkspaceSurface } from '../../../../shared/maestro-workspace-canv
 import { TooltipProvider } from '@/components/ui/tooltip'
 
 vi.mock('@/components/dashboard-popout/AgentTerminalPreview', () => ({
-  AgentTerminalPreview: ({ ptyId }: { ptyId: string }) => (
-    <input aria-label="Exact terminal input" data-terminal-preview={ptyId} />
+  AgentTerminalPreview: ({ ptyId, mode }: { ptyId: string; mode: string }) => (
+    <input
+      aria-label="Exact terminal input"
+      data-terminal-preview={ptyId}
+      data-terminal-preview-mode={mode}
+    />
   )
 }))
 vi.mock('./MaestroWorkspaceBrowserPreview', () => ({
@@ -76,7 +80,11 @@ describe('MaestroWorkspaceWindow', () => {
         />
       </TooltipProvider>
     )
-    expect(document.querySelector('[data-terminal-preview="pty-1"]')).not.toBeNull()
+    expect(
+      document
+        .querySelector('[data-terminal-preview="pty-1"]')
+        ?.getAttribute('data-terminal-preview-mode')
+    ).toBe('canvas')
   })
 
   it('lets terminal input receive pointer and focus without a Canvas focus mutation', () => {

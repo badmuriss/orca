@@ -103,7 +103,8 @@ describe('Maestro workspace empty terminal creation', () => {
       clientMutationId: 'terminal-create-empty-1',
       agent: 'opencode',
       activate: false,
-      select: false
+      select: false,
+      runtimeOwned: true
     })
     const projected = await authority.query(scope, 'actor-1')
     if (projected.status !== 'available') {

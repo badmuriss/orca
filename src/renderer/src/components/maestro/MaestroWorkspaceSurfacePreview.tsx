@@ -106,7 +106,7 @@ export function MaestroWorkspaceSurfacePreview({
           <AgentTerminalPreview
             ptyId={binding.session_id}
             autoFocus={false}
-            mode="passive"
+            mode="canvas"
             liveRefreshIntervalMs={80}
             className="size-full"
           />

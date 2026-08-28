@@ -38,7 +38,11 @@ export function createAgentTerminalPreviewFitScheduler(args: {
     if (!screen || !box || !terminal) {
       return
     }
-    const scale = Math.min(1, box.clientWidth / Math.max(1, screen.offsetWidth))
+    const scale = Math.min(
+      1,
+      box.clientWidth / Math.max(1, screen.offsetWidth),
+      box.clientHeight / Math.max(1, screen.offsetHeight)
+    )
     args.container.style.transform = scale < 1 ? `scale(${scale})` : ''
     const cellHeight = screen.offsetHeight / Math.max(1, terminal.rows)
     const cursorBottom = (terminal.buffer.active.cursorY + 1) * cellHeight * scale

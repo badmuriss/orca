@@ -42,7 +42,7 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
-export type AgentTerminalPreviewMode = 'interactive' | 'passive'
+export type AgentTerminalPreviewMode = 'interactive' | 'canvas' | 'passive'
 
 /** Renders the exact PTY through a DOM xterm, with optional interactive ownership. */
 export function AgentTerminalPreview({
@@ -72,6 +72,9 @@ export function AgentTerminalPreview({
   const settingsRef = useRef(settings)
   const macOptionAsAltRef = useRef(macOptionAsAlt)
   const terminalInputRef = useRef(terminalInput)
+  const acceptsInput = mode !== 'passive'
+  const ownsPtyGrid = mode !== 'passive'
+  const usesBufferedRendering = mode !== 'interactive'
   const { terminalTheme, terminalMode } = useMemo(() => {
     if (!settings) {
       return { terminalTheme: null, terminalMode: 'dark' as const }
@@ -118,16 +121,15 @@ export function AgentTerminalPreview({
     scheduleFitRef.current = scheduleFit
     const releaseConnection = retainAgentTerminalPreviewConnection(ptyId)
 
-    let gridClaim =
-      mode === 'interactive'
-        ? createPreviewGridClaim({
-            ptyId,
-            container,
-            getTerminal: () => terminal
-          })
-        : null
+    let gridClaim = ownsPtyGrid
+      ? createPreviewGridClaim({
+          ptyId,
+          container,
+          getTerminal: () => terminal
+        })
+      : null
     const resizeScheduler = createAgentTerminalPreviewResizeScheduler({
-      passive: mode === 'passive',
+      passive: !ownsPtyGrid,
       settleMs: PASSIVE_RESIZE_SETTLE_MS,
       scheduleFit,
       scheduleGrid: () => gridClaim?.schedule()
@@ -141,7 +143,7 @@ export function AgentTerminalPreview({
     const previewWriter = createAgentTerminalPreviewWriter({
       getTerminal: () => terminal,
       isDisposed: () => disposed,
-      onParsedWrite: mode === 'interactive' ? scheduleFit : () => undefined
+      onParsedWrite: ownsPtyGrid ? scheduleFit : () => undefined
     })
     const passiveLiveQueue = createPassiveAgentTerminalLiveQueue({
       ptyId,
@@ -152,26 +154,25 @@ export function AgentTerminalPreview({
     const writeLive = (
       payload: Extract<TerminalPreviewDataPayload, { type: 'data' }>
     ): Promise<void> => {
-      if (mode !== 'passive' || liveRefreshIntervalMs <= 0) {
+      if (!usesBufferedRendering || liveRefreshIntervalMs <= 0) {
         return previewWriter.writeLive(payload)
       }
       return passiveLiveQueue.write(payload)
     }
 
-    const interaction =
-      mode === 'interactive'
-        ? createInteractiveAgentTerminalPreviewController({
-            ptyId,
-            container,
-            getTerminal: () => terminal,
-            getTerminalInput: () => terminalInputRef.current,
-            getSettings: () => settingsRef.current,
-            getMacOptionAsAlt: () => macOptionAsAltRef.current,
-            getKittyKeyboardFlags: () => previewWriter.kittyKeyboardModes.flags,
-            isDisposed: () => disposed,
-            isReplaying: previewWriter.isReplaying
-          })
-        : null
+    const interaction = acceptsInput
+      ? createInteractiveAgentTerminalPreviewController({
+          ptyId,
+          container,
+          getTerminal: () => terminal,
+          getTerminalInput: () => terminalInputRef.current,
+          getSettings: () => settingsRef.current,
+          getMacOptionAsAlt: () => macOptionAsAltRef.current,
+          getKittyKeyboardFlags: () => previewWriter.kittyKeyboardModes.flags,
+          isDisposed: () => disposed,
+          isReplaying: previewWriter.isReplaying
+        })
+      : null
 
     let resourcesReleased = false
     const releaseResources = (): void => {
@@ -210,6 +211,10 @@ export function AgentTerminalPreview({
       requestRefresh: () => void
     ): void => {
       const snap = connection.snapshot!
+      const sourceGrid = {
+        cols: clamp(snap.cols ?? FALLBACK_COLS, 2, 500),
+        rows: clamp(snap.rows ?? FALLBACK_ROWS, 2, 200)
+      }
       if (!terminal) {
         terminal = new Terminal({
           ...buildPreviewTerminalOptions({
@@ -218,11 +223,11 @@ export function AgentTerminalPreview({
             macOptionIsMeta: macOptionAsAltRef.current === 'true',
             theme: terminalTheme,
             themeMode: terminalMode,
-            cols: clamp(snap.cols ?? FALLBACK_COLS, 2, 500),
-            rows: clamp(snap.rows ?? FALLBACK_ROWS, 2, 200),
+            cols: sourceGrid.cols,
+            rows: sourceGrid.rows,
             scrollback: PREVIEW_SCROLLBACK_BUFFER_ROWS
           }),
-          ...(mode === 'passive' ? { disableStdin: true } : {})
+          ...(!acceptsInput ? { disableStdin: true } : {})
         })
         try {
           terminal.open(container)
@@ -232,17 +237,14 @@ export function AgentTerminalPreview({
           return
         }
         terminalRef.current = terminal
-        if (mode === 'passive') {
+        if (!acceptsInput) {
           preparePassiveAgentTerminalOutput(terminal, settingsRef.current)
         } else {
           interaction?.install()
         }
       } else if (replaceExisting) {
         // Why: keep the old frame visible during capture, then atomically replace it once the authoritative snapshot arrives.
-        terminal.resize(
-          clamp(snap.cols ?? FALLBACK_COLS, 2, 500),
-          clamp(snap.rows ?? FALLBACK_ROWS, 2, 200)
-        )
+        terminal.resize(sourceGrid.cols, sourceGrid.rows)
         terminal.reset()
       }
       previewWriter.replay(connection)
@@ -263,13 +265,13 @@ export function AgentTerminalPreview({
         // Queue behind every replay write so replacement never clears a half-parsed frame.
         previewWriter.writeBarrier(requestRefresh)
       }
-      if (mode === 'passive') {
+      if (!ownsPtyGrid) {
         previewWriter.writeBarrier(scheduleFit)
       } else {
         scheduleFit()
         gridClaim?.schedule()
       }
-      if (mode === 'interactive' && autoFocus) {
+      if (ownsPtyGrid && autoFocus) {
         terminal.focus()
       }
     }
@@ -305,7 +307,7 @@ export function AgentTerminalPreview({
           replayConnection(connection, replaceExisting, () => void setup(true))
         }
       }
-      if (mode === 'passive' && liveRefreshIntervalMs > 0 && !terminal) {
+      if (usesBufferedRendering && liveRefreshIntervalMs > 0 && !terminal) {
         cancelPendingTerminalMount?.()
         cancelPendingTerminalMount = scheduleAgentTerminalPreviewFrameTask(replay)
       } else {
@@ -328,7 +330,17 @@ export function AgentTerminalPreview({
       disposed = true
       releaseResources()
     }
-  }, [autoFocus, liveRefreshIntervalMs, mode, ptyId, terminalTheme, terminalMode])
+  }, [
+    acceptsInput,
+    autoFocus,
+    liveRefreshIntervalMs,
+    mode,
+    ownsPtyGrid,
+    ptyId,
+    terminalTheme,
+    terminalMode,
+    usesBufferedRendering
+  ])
 
   // Why: appearance settings must land on the open terminal, and the OS input
   // source can flip Option-as-Alt with no settings change at all. A remount

@@ -29510,6 +29510,39 @@ describe('OrcaRuntimeService', () => {
     ])
   })
 
+  it('creates a headed runtime-owned terminal without mounting its background tab', async () => {
+    const spawn = vi.fn().mockResolvedValue({ id: 'pty-canvas-owned' })
+    const send = vi.fn()
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn,
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
+    electronMocks.BrowserWindow.fromId.mockReturnValue({
+      isDestroyed: () => false,
+      webContents: { isDestroyed: () => false, send, setBackgroundThrottling: vi.fn() }
+    })
+
+    const result = await runtime.createMobileSessionTerminal(`id:${TEST_WORKTREE_ID}`, {
+      activate: false,
+      select: false,
+      runtimeOwned: true
+    })
+
+    expect(spawn).toHaveBeenCalledOnce()
+    expect(send).not.toHaveBeenCalledWith('terminal:requestTabCreate', expect.anything())
+    expect(result.tab).toMatchObject({
+      type: 'terminal',
+      ptyId: 'pty-canvas-owned',
+      status: 'ready',
+      isActive: false
+    })
+  })
+
   it('leases renderer publication for a paired create and preserves host-owned inventory', async () => {
     const leafId = '91919191-9191-4919-8919-919191919191'
     const spawn = vi.fn()

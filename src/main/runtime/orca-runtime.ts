@@ -13592,7 +13592,7 @@ export class OrcaRuntimeService {
   }
 
   private reconcileSubscriberDrivenProviderAttach(ptyId: string): void {
-    if (!this.hasRemoteTerminalViewSubscriber(ptyId)) {
+    if (!this.hasRawTerminalViewSubscriber(ptyId)) {
       return
     }
     const pending = this.subscriberDrivenProviderAttachesByPtyId.get(ptyId)
@@ -13606,7 +13606,7 @@ export class OrcaRuntimeService {
     this.subscriberDrivenProviderAttachInventoryWaiters.add(ptyId)
     void pending.then((attached) => {
       this.subscriberDrivenProviderAttachInventoryWaiters.delete(ptyId)
-      if (attached || !this.hasRemoteTerminalViewSubscriber(ptyId)) {
+      if (attached || !this.hasRawTerminalViewSubscriber(ptyId)) {
         return
       }
       if (this.subscriberDrivenProviderAttachesByPtyId.get(ptyId) === pending) {
@@ -13622,6 +13622,10 @@ export class OrcaRuntimeService {
       ptyId,
       (this.rawTerminalViewSubscriberCounts.get(ptyId) ?? 0) + 1
     )
+    // Canvas previews consume raw bytes without becoming terminal-query
+    // authority, but a daemon-backed PTY still needs an attach before it emits
+    // those bytes. Keep ownership and ingestion as separate decisions.
+    this.ensureSubscriberDrivenProviderAttach(ptyId)
     this.notifyRemoteTerminalViewPresenceChanged(ptyId)
     let released = false
     return () => {
@@ -30259,6 +30263,7 @@ export class OrcaRuntimeService {
       clientNavigationId?: string
       navigation?: RuntimeNavigationTarget
       clientMutationId?: string
+      runtimeOwned?: boolean
       signal?: AbortSignal
     } = {}
   ): Promise<RuntimeMobileSessionCreateTerminalResult> {
@@ -30327,6 +30332,7 @@ export class OrcaRuntimeService {
       activate?: boolean
       clientNavigationId?: string
       clientMutationId?: string
+      runtimeOwned?: boolean
       signal?: AbortSignal
     } = {}
   ): Promise<RuntimeMobileSessionCreateTerminalResult> {
@@ -30351,7 +30357,7 @@ export class OrcaRuntimeService {
       throw new Error('client_disconnected')
     }
     const win = this.getAvailableAuthoritativeWindow()
-    if (!win) {
+    if (!win || opts.runtimeOwned) {
       return await this.createRuntimeOwnedMobileSessionTerminal(
         worktreeId,
         opts.activate !== false,

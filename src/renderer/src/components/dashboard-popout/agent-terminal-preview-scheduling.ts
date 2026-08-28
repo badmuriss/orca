@@ -6,6 +6,7 @@ import type {
 export type TerminalPreviewLivePayload = Extract<TerminalPreviewDataPayload, { type: 'data' }>
 
 const connectionConsumersByPtyId = new Map<string, number>()
+const pendingConnectionReleasesByPtyId = new Map<string, symbol>()
 const pendingConnectionsByPtyId = new Map<string, Promise<TerminalPreviewConnectResult>>()
 type PreviewMountJob = { cancelled: boolean; mount: () => void }
 const previewMountQueue: PreviewMountJob[] = []
@@ -55,6 +56,7 @@ function scheduleAgentTerminalPreviewFlush(task: () => void): () => void {
 }
 
 export function retainAgentTerminalPreviewConnection(ptyId: string): () => void {
+  pendingConnectionReleasesByPtyId.delete(ptyId)
   connectionConsumersByPtyId.set(ptyId, (connectionConsumersByPtyId.get(ptyId) ?? 0) + 1)
   let retained = true
   return () => {
@@ -68,7 +70,18 @@ export function retainAgentTerminalPreviewConnection(ptyId: string): () => void 
       return
     }
     connectionConsumersByPtyId.delete(ptyId)
-    void window.api.terminalPreview.unsubscribe(ptyId)
+    const release = Symbol(ptyId)
+    pendingConnectionReleasesByPtyId.set(ptyId, release)
+    queueMicrotask(() => {
+      if (
+        pendingConnectionReleasesByPtyId.get(ptyId) !== release ||
+        connectionConsumersByPtyId.has(ptyId)
+      ) {
+        return
+      }
+      pendingConnectionReleasesByPtyId.delete(ptyId)
+      void window.api.terminalPreview.unsubscribe(ptyId)
+    })
   }
 }
 
