@@ -127,7 +127,13 @@ export type RuntimeMaestroWorkspaceTabCommand =
     }
   | {
       requestId: string
-      kind: 'read-content' | 'focus'
+      kind: 'read-content'
+      worktreeId: string
+      tabId: string
+    }
+  | {
+      requestId: string
+      kind: 'focus'
       worktreeId: string
       tabId: string
     }

@@ -253,14 +253,17 @@ describe('registerPtyHandlers', () => {
     expect(runtime.onPtyExit).toHaveBeenCalledWith('local-pty', 0, TEST_PTY_INCARNATION)
     expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:exit', {
       id: 'local-pty',
-      code: 0
+      code: 0,
+      incarnationId: TEST_PTY_INCARNATION
     })
   })
   it('does not synthesize a duplicate renderer exit when kill emits provider exit', async () => {
-    const exitListeners = new Set<(payload: { id: string; code: number }) => void>()
+    const exitListeners = new Set<
+      (payload: { id: string; code: number; incarnationId: string }) => void
+    >()
     const shutdown = vi.fn(async (id: string, opts: { expectedIncarnationId: string }) => {
       for (const listener of exitListeners) {
-        listener({ id, code: 0 })
+        listener({ id, code: 0, incarnationId: opts.expectedIncarnationId })
       }
       return exitedPtyStopReceipt(id, opts)
     })
@@ -284,10 +287,12 @@ describe('registerPtyHandlers', () => {
       revive: vi.fn(),
       onData: vi.fn(() => () => {}),
       onReplay: vi.fn(() => () => {}),
-      onExit: vi.fn((listener: (payload: { id: string; code: number }) => void) => {
-        exitListeners.add(listener)
-        return () => exitListeners.delete(listener)
-      }),
+      onExit: vi.fn(
+        (listener: (payload: { id: string; code: number; incarnationId: string }) => void) => {
+          exitListeners.add(listener)
+          return () => exitListeners.delete(listener)
+        }
+      ),
       listProcesses: vi.fn(async () => []),
       attach: vi.fn(),
       getDefaultShell: vi.fn(),
@@ -300,15 +305,17 @@ describe('registerPtyHandlers', () => {
     await handlers.get('pty:kill')!(null, { id: 'local-pty' })
 
     expect(runtime.onPtyExit).toHaveBeenCalledTimes(1)
-    expect(runtime.onPtyExit).toHaveBeenCalledWith('local-pty', 0, undefined, {
+    expect(runtime.onPtyExit).toHaveBeenCalledWith('local-pty', 0, TEST_PTY_INCARNATION, {
       providerExitObserved: true
     })
     expect(mainWindow.webContents.send.mock.calls.filter((call) => call[0] === 'pty:exit')).toEqual(
-      [['pty:exit', { id: 'local-pty', code: 0 }]]
+      [['pty:exit', { id: 'local-pty', code: 0, incarnationId: TEST_PTY_INCARNATION }]]
     )
   })
   it('ignores a late provider exit after synthesizing kill exit', async () => {
-    const exitListeners = new Set<(payload: { id: string; code: number }) => void>()
+    const exitListeners = new Set<
+      (payload: { id: string; code: number; incarnationId: string }) => void
+    >()
     const runtime = {
       setPtyController: vi.fn(),
       onPtyExit: vi.fn()
@@ -331,10 +338,12 @@ describe('registerPtyHandlers', () => {
       revive: vi.fn(),
       onData: vi.fn(() => () => {}),
       onReplay: vi.fn(() => () => {}),
-      onExit: vi.fn((listener: (payload: { id: string; code: number }) => void) => {
-        exitListeners.add(listener)
-        return () => exitListeners.delete(listener)
-      }),
+      onExit: vi.fn(
+        (listener: (payload: { id: string; code: number; incarnationId: string }) => void) => {
+          exitListeners.add(listener)
+          return () => exitListeners.delete(listener)
+        }
+      ),
       listProcesses: vi.fn(async () => []),
       attach: vi.fn(),
       getDefaultShell: vi.fn(),
@@ -346,13 +355,13 @@ describe('registerPtyHandlers', () => {
 
     await handlers.get('pty:kill')!(null, { id: 'local-pty' })
     for (const listener of exitListeners) {
-      listener({ id: 'local-pty', code: 0 })
+      listener({ id: 'local-pty', code: 0, incarnationId: TEST_PTY_INCARNATION })
     }
 
     expect(runtime.onPtyExit).toHaveBeenCalledTimes(1)
     expect(runtime.onPtyExit).toHaveBeenCalledWith('local-pty', 0, TEST_PTY_INCARNATION)
     expect(mainWindow.webContents.send.mock.calls.filter((call) => call[0] === 'pty:exit')).toEqual(
-      [['pty:exit', { id: 'local-pty', code: 0 }]]
+      [['pty:exit', { id: 'local-pty', code: 0, incarnationId: TEST_PTY_INCARNATION }]]
     )
   })
   it('waits for the desktop startup barrier before renderer local spawns resolve the provider', async () => {

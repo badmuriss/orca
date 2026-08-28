@@ -330,7 +330,7 @@ describe('Maestro workspace Canvas authority', () => {
       runtime.listMobileSessionTabs.mockResolvedValue({
         ...session(2),
         activeTabId: 'annotation-tab-1',
-        activeTabType: 'editor',
+        activeTabType: 'markdown',
         tabGroups: [
           { id: 'group-1', activeTabId: 'annotation-tab-1', tabOrder: ['annotation-tab-1'] }
         ],

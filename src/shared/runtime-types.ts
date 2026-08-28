@@ -18,6 +18,8 @@ export {
   type ComputerWindowListWindow
 } from './computer-use-runtime-types'
 export type {
+  BrowserPaneFocusReceipt,
+  BrowserPanePaintVerdict,
   BrowserBackResult,
   BrowserCaptureStartResult,
   BrowserCaptureStopResult,

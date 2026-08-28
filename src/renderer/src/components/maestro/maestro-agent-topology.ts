@@ -1,4 +1,5 @@
 import type { WorkspaceSurface } from '../../../../shared/maestro-workspace-canvas'
+import type { AgentStatusOrchestrationContext } from '../../../../shared/agent-status-types'
 import {
   acceptFormalRelations,
   formalLabelCandidates,

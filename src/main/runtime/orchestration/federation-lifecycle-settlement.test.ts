@@ -129,6 +129,8 @@ describe('federated worker release', () => {
     })
     const task = db.createTask({ spec: 'Release remote terminal', runId: run.id })
     const { dispatch } = db.createStartingWorkerDispatch({
+      creator: { kind: 'system' },
+      maxDepth: 1,
       taskId: task.id,
       startOptions: {},
       federation: {

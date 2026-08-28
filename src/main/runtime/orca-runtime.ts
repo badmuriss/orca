@@ -9917,7 +9917,9 @@ export class OrcaRuntimeService {
         if (this.notifier?.focusEditorTab) {
           this.notifier.focusEditorTab(tab.id, worktreeId)
         } else if (tab.browserPageId) {
-          this.markHeadlessBrowserSessionTabActive(worktreeId, tab.browserPageId)
+          this.markHeadlessBrowserSessionTabActive(worktreeId, tab.browserPageId, {
+            focusesHost: true
+          })
         }
       }
     } else {
@@ -15289,7 +15291,7 @@ export class OrcaRuntimeService {
       isWsl: undefined,
       worktreeId: worktree.id,
       projectRuntime: this.resolveProjectRuntimeForWorktree(worktree.id),
-      isPackaged: app?.isPackaged ?? true,
+      isPackaged: getAppEnvironment().isPackaged(),
       launcherPath: connectionId ? this.requireInstalledManagedCliLauncherPath(connectionId) : null
     })
   }
@@ -15332,10 +15334,7 @@ export class OrcaRuntimeService {
       isWsl: args.isWsl,
       worktreeId: worktreeId ?? '',
       projectRuntime: worktreeId ? this.resolveProjectRuntimeForWorktree(worktreeId) : undefined,
-      // Why: `app` can be unavailable outside a real Electron process (some
-      // test doubles never mock 'electron' at all); default to the packaged
-      // resolution path rather than crashing on `app.isPackaged`.
-      isPackaged: app?.isPackaged ?? true,
+      isPackaged: getAppEnvironment().isPackaged(),
       launcherPath: connectionId ? this.requireInstalledManagedCliLauncherPath(connectionId) : null
     })
     return createManagedCliContext({

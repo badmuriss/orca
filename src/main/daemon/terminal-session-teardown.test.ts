@@ -1,16 +1,30 @@
-import { describe, expect, it, vi } from 'vitest'
-import { stopPtyProcessTree, TerminalSessionTeardown } from './terminal-session-teardown'
-import type { ProcessTableCapture } from '../pty-descendant-termination'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { TerminalSessionTeardown } from './terminal-session-teardown'
 import type { Session } from './session'
+import type * as PtyDescendantTermination from '../pty-descendant-termination'
 
-const ROOT_STARTED_AT = 'Mon Aug 24 08:00:00 2026'
-const CHILD_STARTED_AT = 'Mon Aug 24 08:00:01 2026'
-const INCARNATION = '11111111-1111-4111-8111-111111111111'
+const killWithDescendantSweepMock = vi.hoisted(() => vi.fn())
+const readProcessTableMock = vi.hoisted(() => vi.fn())
+vi.mock('../pty-descendant-termination', async (importOriginal) => ({
+  ...(await importOriginal<typeof PtyDescendantTermination>()),
+  DESCENDANT_KILL_GRACE_MS: 0,
+  killWithDescendantSweep: killWithDescendantSweepMock,
+  readProcessTable: readProcessTableMock
+}))
+
+const TEST_PTY_INCARNATION = '11111111-1111-4111-8111-111111111111'
+const ROOT_PROCESS_ROW = {
+  pid: 4242,
+  ppid: 1,
+  pgid: 4242,
+  startedAt: 'Fri Aug 28 12:00:00 2026'
+}
 
 function createPlainShellSession(overrides: Partial<Session> = {}): Session {
   return {
     launchAgent: undefined,
     pid: 4242,
+    incarnationId: TEST_PTY_INCARNATION,
     isAlive: true,
     forceKillAndWaitForExit: vi.fn(async () => {}),
     beginTermination: vi.fn(() => true),
@@ -22,79 +36,108 @@ function createPlainShellSession(overrides: Partial<Session> = {}): Session {
   } as unknown as Session
 }
 
-function capture(rows: ProcessTableCapture['rows']): ProcessTableCapture {
-  return { rows, capturedAtMs: Date.parse('2026-08-24T08:01:00Z') }
-}
+describe('TerminalSessionTeardown plain-shell teardown', () => {
+  let platformDescriptor: PropertyDescriptor | undefined
 
-describe('stopPtyProcessTree', () => {
-  it('proves every pre-stop POSIX identity absent before returning exited', async () => {
-    const readTable = vi
-      .fn()
-      .mockResolvedValueOnce(
-        capture([
-          { pid: 41, ppid: 1, pgid: 41, startedAt: ROOT_STARTED_AT },
-          { pid: 42, ppid: 41, pgid: 99, startedAt: CHILD_STARTED_AT }
-        ])
-      )
-      .mockResolvedValueOnce(capture([]))
-      .mockResolvedValueOnce(capture([]))
-    const sendSignal = vi.fn()
-    const killRoot = vi.fn()
-
-    const result = await stopPtyProcessTree(41, killRoot, {
-      platform: 'linux',
-      graceMs: 0,
-      readTable,
-      sendSignal
+  beforeEach(() => {
+    platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')
+    killWithDescendantSweepMock.mockReset()
+    killWithDescendantSweepMock.mockImplementation(async (_pid, killRoot: () => void) => {
+      killRoot()
     })
-
-    expect(sendSignal).toHaveBeenCalledWith(42, 'SIGTERM')
-    expect(killRoot).toHaveBeenCalledOnce()
-    expect(result).toMatchObject({ verdict: 'exited', processTreeVerified: true })
-    expect(result.observations.map(({ status }) => status)).toEqual(['absent', 'absent'])
+    readProcessTableMock.mockReset()
+    readProcessTableMock
+      .mockResolvedValueOnce({ rows: [ROOT_PROCESS_ROW], capturedAtMs: Date.now() })
+      .mockResolvedValue({ rows: [], capturedAtMs: Date.now() })
   })
 
-  it('fails closed when the pre-stop snapshot is unavailable', async () => {
-    const killRoot = vi.fn()
-    const result = await stopPtyProcessTree(41, killRoot, {
-      platform: 'linux',
-      readTable: vi.fn().mockRejectedValue(new Error('ps failed'))
-    })
-
-    expect(killRoot).toHaveBeenCalledOnce()
-    expect(result).toMatchObject({ verdict: 'unverifiable', processTreeVerified: false })
+  afterEach(() => {
+    if (platformDescriptor) {
+      Object.defineProperty(process, 'platform', platformDescriptor)
+    }
   })
 
-  it('returns capability_limited on Windows after the identity-gated tree kill', async () => {
-    const killRoot = vi.fn()
-    const killWindowsTree = vi.fn().mockResolvedValue(undefined)
-    const result = await stopPtyProcessTree(41, killRoot, {
-      platform: 'win32',
-      verifyTreeKillTarget: vi.fn().mockResolvedValue('own'),
-      killWindowsTree
-    })
+  function setPlatform(value: NodeJS.Platform): void {
+    Object.defineProperty(process, 'platform', { configurable: true, value })
+  }
 
-    expect(killWindowsTree).toHaveBeenCalledWith(41)
-    expect(killRoot).toHaveBeenCalledOnce()
-    expect(result).toMatchObject({ verdict: 'capability_limited', processTreeVerified: false })
-  })
-})
+  it('win32 immediate kill taskkills the descendant tree before force-kill', async () => {
+    // Why: a live pnpm/node child otherwise survives the ConPTY close, keeps the console
+    // non-empty, and holds the worktree cwd — failing destructive removal (#10004/#10100).
+    setPlatform('win32')
+    const session = createPlainShellSession()
+    const teardown = new TerminalSessionTeardown(new Map([['s1', session]]))
 
-describe('TerminalSessionTeardown', () => {
-  it('does not invent a receipt when termination ownership is unavailable', () => {
-    const session = {
-      pid: 41,
-      incarnationId: INCARNATION,
-      terminalHandle: 'terminal-1',
-      isAlive: true,
-      beginTermination: vi.fn(() => false)
-    } as unknown as Session
-    const teardown = new TerminalSessionTeardown(new Map([['pty-1', session]]))
+    await teardown.killSession('s1', session, true)
 
-    expect(() => teardown.killSession('pty-1', session, true)).toThrow(
-      'stop identity is unavailable'
+    expect(killWithDescendantSweepMock).toHaveBeenCalledWith(
+      4242,
+      expect.any(Function),
+      expect.objectContaining({ ownsRoot: expect.any(Function) })
     )
-    expect(session.beginTermination).toHaveBeenCalledOnce()
+    expect(session.forceKillAndWaitForExit).toHaveBeenCalled()
+    // The sweep owns the taskkill; the killRoot callback is a no-op so force-kill drives exit.
+    const killRoot = killWithDescendantSweepMock.mock.calls[0][1] as () => void
+    expect(() => killRoot()).not.toThrow()
+  })
+
+  it('win32 immediate kill claims termination before awaiting the sweep', async () => {
+    // Why: createOrAttach rejects a doomed plain shell only via isTerminating, so the claim
+    // must land before the taskkill await or an attach can bind a pane to a dying session.
+    setPlatform('win32')
+    const session = createPlainShellSession()
+    const beginTermination = session.beginTermination as unknown as ReturnType<typeof vi.fn>
+    let claimedBeforeSweep = false
+    killWithDescendantSweepMock.mockImplementation(async () => {
+      claimedBeforeSweep = beginTermination.mock.calls.length === 1
+    })
+    const teardown = new TerminalSessionTeardown(new Map([['s1', session]]))
+
+    await teardown.killSession('s1', session, true)
+
+    expect(claimedBeforeSweep).toBe(true)
+  })
+
+  it('win32 sweep ownsRoot guard requires the live session to still own the id', async () => {
+    setPlatform('win32')
+    const session = createPlainShellSession()
+    const sessions = new Map([['s1', session]])
+    const teardown = new TerminalSessionTeardown(sessions)
+
+    await teardown.killSession('s1', session, true)
+    const ownsRoot = (killWithDescendantSweepMock.mock.calls[0][2] as { ownsRoot: () => boolean })
+      .ownsRoot
+    expect(ownsRoot()).toBe(true)
+
+    // A natural exit or reap must stop us from taskkilling a recycled PID.
+    ;(session as unknown as { isAlive: boolean }).isAlive = false
+    expect(ownsRoot()).toBe(false)
+    sessions.delete('s1')
+    ;(session as unknown as { isAlive: boolean }).isAlive = true
+    expect(ownsRoot()).toBe(false)
+  })
+
+  it('non-win32 immediate kill verifies the tree before pgroup force-kill', async () => {
+    setPlatform('linux')
+    const session = createPlainShellSession()
+    const teardown = new TerminalSessionTeardown(new Map([['s1', session]]))
+
+    await teardown.killSession('s1', session, true)
+
+    expect(killWithDescendantSweepMock).toHaveBeenCalled()
+    expect(session.forceKillAndWaitForExit).toHaveBeenCalled()
+  })
+
+  it('non-immediate kill verifies the tree and signals the root gracefully', async () => {
+    setPlatform('win32')
+    const session = createPlainShellSession()
+    const teardown = new TerminalSessionTeardown(new Map([['s1', session]]))
+
+    await teardown.killSession('s1', session, false)
+
+    expect(killWithDescendantSweepMock).toHaveBeenCalled()
+    expect(session.forceKillAndWaitForExit).not.toHaveBeenCalled()
+    expect(session.signalTerminationRoot).toHaveBeenCalled()
   })
 })
 
@@ -108,7 +151,9 @@ describe('pty job ownership reaches the daemon teardown path', () => {
     platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
     killWithDescendantSweepMock.mockReset()
-    killWithDescendantSweepMock.mockResolvedValue(undefined)
+    killWithDescendantSweepMock.mockImplementation(async (_pid, killRoot: () => void) => {
+      killRoot()
+    })
   })
 
   afterEach(() => {

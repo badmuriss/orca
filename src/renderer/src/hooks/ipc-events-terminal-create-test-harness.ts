@@ -193,25 +193,17 @@ export async function setupTerminalCreateSurfacing(
   vi.doMock('@/lib/activate-tab-and-focus-pane', () => ({
     activateTabAndFocusPane: vi.fn()
   }))
-  const terminalCreateWindow = buildTerminalCreateWindow({
-    dispatchEvent,
-    replyTerminalCreate,
-    createTerminalListenerRef,
-    requestTerminalCreateListenerRef,
-    focusTerminalListenerRef,
-    newTerminalTabListenerRef
-  })
-  vi.stubGlobal('window', {
-    ...terminalCreateWindow,
-    api: {
-      ...terminalCreateWindow.api,
-      ui: {
-        ...terminalCreateWindow.api.ui,
-        onMaestroWorkspaceTabCommand: vi.fn(() => () => {}),
-        respondMaestroWorkspaceTabCommand: vi.fn()
-      }
-    }
-  })
+  vi.stubGlobal(
+    'window',
+    buildTerminalCreateWindow({
+      dispatchEvent,
+      replyTerminalCreate,
+      createTerminalListenerRef,
+      requestTerminalCreateListenerRef,
+      focusTerminalListenerRef,
+      newTerminalTabListenerRef
+    })
+  )
 
   const { useIpcEvents: registerIpcEvents } = await import('./useIpcEvents')
   registerIpcEvents()

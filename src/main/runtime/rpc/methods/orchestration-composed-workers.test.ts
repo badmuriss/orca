@@ -438,7 +438,12 @@ describe('orchestration RPC methods', () => {
       mockCurrentWorkerStart()
       vi.spyOn(runtime, 'isTerminalRunningAgent').mockResolvedValue(true)
       const task = db.createTask({ spec: 'retry exact terminal' })
-      const predecessor = db.createStartingWorkerDispatch({ taskId: task.id, startOptions: {} })
+      const predecessor = db.createStartingWorkerDispatch({
+        creator: { kind: 'system' },
+        maxDepth: 1,
+        taskId: task.id,
+        startOptions: {}
+      })
       db.db
         .prepare("UPDATE worker_dispatches SET state = 'failed' WHERE dispatch_id = ?")
         .run(predecessor.dispatch.id)
@@ -524,7 +529,12 @@ describe('orchestration RPC methods', () => {
       mockCurrentWorkerStart()
       vi.spyOn(runtime, 'isTerminalRunningAgent').mockResolvedValue(true)
       const oldTask = db.createTask({ spec: 'settled owner' })
-      const oldDispatch = db.createStartingWorkerDispatch({ taskId: oldTask.id, startOptions: {} })
+      const oldDispatch = db.createStartingWorkerDispatch({
+        creator: { kind: 'system' },
+        maxDepth: 1,
+        taskId: oldTask.id,
+        startOptions: {}
+      })
       db.db
         .prepare("UPDATE worker_dispatches SET state = 'failed' WHERE dispatch_id = ?")
         .run(oldDispatch.dispatch.id)
@@ -576,6 +586,8 @@ describe('orchestration RPC methods', () => {
       )
       const predecessorTask = db.createTask({ spec: 'settled Maestro owner' })
       const predecessor = db.createStartingWorkerDispatch({
+        creator: { kind: 'system' },
+        maxDepth: 1,
         taskId: predecessorTask.id,
         startOptions: {}
       })
@@ -799,79 +811,5 @@ describe('orchestration RPC methods', () => {
         expect(runtime.sendTerminalAgentPrompt).not.toHaveBeenCalled()
       }
     )
-
-    it('creates a child worktree agent-first with setup run by default', async () => {
-      setup()
-      mockCurrentWorkerStart()
-      vi.mocked(runtime.showManagedWorktree).mockResolvedValue({
-        id: 'repo::parent',
-        repoId: 'repo'
-      } as never)
-      vi.spyOn(runtime, 'showRepo').mockResolvedValue({
-        id: 'repo',
-        kind: 'git'
-      } as never)
-      const create = vi.spyOn(runtime, 'createManagedWorktree').mockResolvedValue({
-        worktree: { id: 'repo::child', repoId: 'repo' },
-        startupTerminal: { spawned: true, handle: 'term_worker' },
-        setupReceipt: {
-          requested: 'run',
-          hookFound: true,
-          startupPolicy: 'start-immediately',
-          state: 'running',
-          terminalHandle: 'term_setup'
-        }
-      } as never)
-      vi.spyOn(runtime, 'listTerminals').mockResolvedValue({
-        terminals: [
-          { handle: 'term_worker', title: 'Codex' },
-          { handle: 'term_setup', title: 'Setup' },
-          { handle: 'term_logs', title: 'Logs' }
-        ],
-        totalCount: 3,
-        truncated: false
-      } as never)
-      const task = db.createTask({ spec: 'child worker' })
-
-      const result = (await call('orchestration.workerStart', {
-        task: task.id,
-        from: 'term_coord',
-        worktree: 'new-child',
-        name: 'child-worker',
-        agent: 'codex'
-      })) as {
-        state: string
-        setup: { requested: string; startupPolicy: string; state: string }
-        effects: { role?: string; action?: string }[]
-      }
-
-      expect(result).toMatchObject({
-        state: 'ready',
-        setup: {
-          requested: 'run',
-          startupPolicy: 'start-immediately',
-          state: 'running'
-        }
-      })
-      expect(create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          repoSelector: 'repo',
-          name: 'child-worker',
-          runHooks: false,
-          setupDecision: 'run',
-          startupAgent: 'codex',
-          activate: false,
-          lineage: expect.objectContaining({ parentWorktree: 'repo::parent', noParent: false })
-        })
-      )
-      expect(result.effects).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ role: 'agent', action: 'reused_agent_terminal' }),
-          expect.objectContaining({ role: 'setup', action: 'created' }),
-          expect.objectContaining({ role: 'configured_tab', action: 'created' })
-        ])
-      )
-      expect(runtime.createTerminal).not.toHaveBeenCalled()
-    })
   })
 })

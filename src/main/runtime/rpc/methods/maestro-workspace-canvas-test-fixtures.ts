@@ -1,4 +1,4 @@
-import { vi } from 'vitest'
+import { vi, type MockedFunction } from 'vitest'
 import { OrchestrationDb } from '../../orchestration/db/orchestration-db'
 import { applyMaestroProjection } from '../../orchestration/db/maestro/maestro-projection-store'
 import {
@@ -15,6 +15,20 @@ import {
 } from './maestro-workspace-canvas-session-fixtures'
 
 export { editorSession, linkedSession, parentChildSession, scope, session }
+
+type CanvasRuntimeTestDouble = MaestroWorkspaceCanvasRuntime & {
+  listMobileSessionTabs: MockedFunction<MaestroWorkspaceCanvasRuntime['listMobileSessionTabs']>
+  browserTabCreate: MockedFunction<MaestroWorkspaceCanvasRuntime['browserTabCreate']>
+  commandMaestroWorkspaceTab: MockedFunction<
+    MaestroWorkspaceCanvasRuntime['commandMaestroWorkspaceTab']
+  >
+}
+
+type MaestroWorkspaceCanvasHarness = {
+  authority: MaestroWorkspaceCanvasAuthority
+  database: OrchestrationDb
+  runtime: CanvasRuntimeTestDouble
+}
 
 export function publishLinkGraph(
   database: OrchestrationDb,
@@ -243,7 +257,7 @@ export function attachParentLinkLease(database: OrchestrationDb): void {
   })
 }
 
-export function harness() {
+export function harness(): MaestroWorkspaceCanvasHarness {
   const database = new OrchestrationDb(':memory:')
   const listMobileSessionTabs = vi.fn().mockResolvedValue(session())
   const runtime = {
@@ -269,5 +283,9 @@ export function harness() {
     getTerminalProcessIncarnation: vi.fn().mockReturnValue('pty-1:incarnation-7'),
     getOrchestrationDb: () => database
   } satisfies MaestroWorkspaceCanvasRuntime
-  return { authority: new MaestroWorkspaceCanvasAuthority(runtime), database, runtime }
+  return {
+    authority: new MaestroWorkspaceCanvasAuthority(runtime),
+    database,
+    runtime: runtime as CanvasRuntimeTestDouble
+  }
 }

@@ -1893,7 +1893,7 @@ function applyGpuFallbackSwitchesForThisLaunch(crashesInWindow: number | undefin
   // Why: with no GPU child left, child-process-gone can't report a GPU fault, so
   // name the applied switches in the trail any later crash report carries.
   recordCrashBreadcrumb('gpu_fallback_applied', {
-    crashesInWindow,
+    ...(crashesInWindow === undefined ? {} : { crashesInWindow }),
     switches: appliedSwitches.join(',')
   })
 }
@@ -1904,7 +1904,11 @@ function maybeApplyGpuFallbackForThisLaunch(): void {
     if (isServeMode) {
       return
     }
-    const marker = readActiveGpuFallbackMarker(app.getPath('userData'), getGpuFallbackEnvironment())
+    const environment = getWindowsGpuFallbackEnvironment()
+    if (!environment) {
+      return
+    }
+    const marker = readActiveGpuFallbackMarker(app.getPath('userData'), environment)
     if (!marker) {
       return
     }

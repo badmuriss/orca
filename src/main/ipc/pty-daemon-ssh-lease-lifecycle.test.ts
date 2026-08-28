@@ -254,10 +254,12 @@ describe('registerPtyHandlers', () => {
         expect(runtime.onPtyExit).toHaveBeenCalledWith('remote-pty', 0, TEST_PTY_INCARNATION)
       })
       it('controller kill does not duplicate exits when the provider emits exit during shutdown', async () => {
-        const exitListeners = new Set<(payload: { id: string; code: number }) => void>()
+        const exitListeners = new Set<
+          (payload: { id: string; code: number; incarnationId: string }) => void
+        >()
         const shutdown = vi.fn(async (id: string, opts: { expectedIncarnationId: string }) => {
           for (const listener of exitListeners) {
-            listener({ id, code: 0 })
+            listener({ id, code: 0, incarnationId: opts.expectedIncarnationId })
           }
           return exitedPtyStopReceipt(id, opts)
         })
@@ -281,10 +283,12 @@ describe('registerPtyHandlers', () => {
           revive: vi.fn(),
           onData: vi.fn(() => () => {}),
           onReplay: vi.fn(() => () => {}),
-          onExit: vi.fn((listener: (payload: { id: string; code: number }) => void) => {
-            exitListeners.add(listener)
-            return () => exitListeners.delete(listener)
-          }),
+          onExit: vi.fn(
+            (listener: (payload: { id: string; code: number; incarnationId: string }) => void) => {
+              exitListeners.add(listener)
+              return () => exitListeners.delete(listener)
+            }
+          ),
           listProcesses: vi.fn(async () => []),
           attach: vi.fn(),
           getDefaultShell: vi.fn(),
@@ -302,19 +306,21 @@ describe('registerPtyHandlers', () => {
         await Promise.resolve()
 
         expect(runtime.onPtyExit).toHaveBeenCalledTimes(1)
-        expect(runtime.onPtyExit).toHaveBeenCalledWith('local-pty', 0, undefined, {
+        expect(runtime.onPtyExit).toHaveBeenCalledWith('local-pty', 0, TEST_PTY_INCARNATION, {
           providerExitObserved: true
         })
         expect(
           mainWindow.webContents.send.mock.calls.filter((call) => call[0] === 'pty:exit')
-        ).toEqual([['pty:exit', { id: 'local-pty', code: 0 }]])
+        ).toEqual([['pty:exit', { id: 'local-pty', code: 0, incarnationId: TEST_PTY_INCARNATION }]])
       })
       it('controller stopAndWait skips the synthetic exit when the provider emitted one', async () => {
         vi.useFakeTimers()
-        const exitListeners = new Set<(payload: { id: string; code: number }) => void>()
+        const exitListeners = new Set<
+          (payload: { id: string; code: number; incarnationId: string }) => void
+        >()
         const shutdown = vi.fn(async (id: string, opts: { expectedIncarnationId: string }) => {
           for (const listener of exitListeners) {
-            listener({ id, code: 0 })
+            listener({ id, code: 0, incarnationId: opts.expectedIncarnationId })
           }
           return exitedPtyStopReceipt(id, opts)
         })
@@ -338,10 +344,12 @@ describe('registerPtyHandlers', () => {
           revive: vi.fn(),
           onData: vi.fn(() => () => {}),
           onReplay: vi.fn(() => () => {}),
-          onExit: vi.fn((listener: (payload: { id: string; code: number }) => void) => {
-            exitListeners.add(listener)
-            return () => exitListeners.delete(listener)
-          }),
+          onExit: vi.fn(
+            (listener: (payload: { id: string; code: number; incarnationId: string }) => void) => {
+              exitListeners.add(listener)
+              return () => exitListeners.delete(listener)
+            }
+          ),
           listProcesses: vi.fn(async () => []),
           attach: vi.fn(),
           getDefaultShell: vi.fn(),
@@ -365,16 +373,18 @@ describe('registerPtyHandlers', () => {
         })
 
         expect(runtime.onPtyExit).toHaveBeenCalledTimes(1)
-        expect(runtime.onPtyExit).toHaveBeenCalledWith('local-pty', 0, undefined, {
+        expect(runtime.onPtyExit).toHaveBeenCalledWith('local-pty', 0, TEST_PTY_INCARNATION, {
           providerExitObserved: true
         })
         expect(
           mainWindow.webContents.send.mock.calls.filter((call) => call[0] === 'pty:exit')
-        ).toEqual([['pty:exit', { id: 'local-pty', code: 0 }]])
+        ).toEqual([['pty:exit', { id: 'local-pty', code: 0, incarnationId: TEST_PTY_INCARNATION }]])
       })
       it('classifies host reversible-stop exits for the attached renderer', async () => {
         vi.useFakeTimers()
-        const exitListeners = new Set<(payload: { id: string; code: number }) => void>()
+        const exitListeners = new Set<
+          (payload: { id: string; code: number; incarnationId: string }) => void
+        >()
         const runtime = {
           setPtyController: vi.fn(),
           onPtyExit: vi.fn()
@@ -385,7 +395,7 @@ describe('registerPtyHandlers', () => {
           resize: vi.fn(),
           shutdown: vi.fn(async (id: string, opts: { expectedIncarnationId: string }) => {
             for (const listener of exitListeners) {
-              listener({ id, code: 0 })
+              listener({ id, code: 0, incarnationId: opts.expectedIncarnationId })
             }
             return exitedPtyStopReceipt(id, opts)
           }),
@@ -400,10 +410,12 @@ describe('registerPtyHandlers', () => {
           revive: vi.fn(),
           onData: vi.fn(() => () => {}),
           onReplay: vi.fn(() => () => {}),
-          onExit: vi.fn((listener: (payload: { id: string; code: number }) => void) => {
-            exitListeners.add(listener)
-            return () => exitListeners.delete(listener)
-          }),
+          onExit: vi.fn(
+            (listener: (payload: { id: string; code: number; incarnationId: string }) => void) => {
+              exitListeners.add(listener)
+              return () => exitListeners.delete(listener)
+            }
+          ),
           listProcesses: vi.fn(async () => []),
           attach: vi.fn(),
           getDefaultShell: vi.fn(),
@@ -428,7 +440,17 @@ describe('registerPtyHandlers', () => {
 
         expect(
           mainWindow.webContents.send.mock.calls.filter((call) => call[0] === 'pty:exit')
-        ).toEqual([['pty:exit', { id: 'local-pty', code: 0, preserveRendererBinding: true }]])
+        ).toEqual([
+          [
+            'pty:exit',
+            {
+              id: 'local-pty',
+              code: 0,
+              incarnationId: TEST_PTY_INCARNATION,
+              preserveRendererBinding: true
+            }
+          ]
+        ])
       })
       it('passes keepHistory through runtime controller stopAndWait', async () => {
         vi.useFakeTimers()
