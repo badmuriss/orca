@@ -242,7 +242,7 @@ describe('agent terminal preview stream', () => {
     expect(frames).toHaveLength(0)
   })
 
-  it('flushes every ready passive queue in one animation frame', async () => {
+  it('flushes one ready passive queue per animation frame', async () => {
     vi.useFakeTimers()
     const frames: FrameRequestCallback[] = []
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
@@ -270,8 +270,13 @@ describe('agent terminal preview stream', () => {
 
     expect(frames).toHaveLength(1)
     frames.shift()!(16)
-    await Promise.all([firstDone, secondDone])
+    await firstDone
     expect(firstWrite).toHaveBeenCalledOnce()
+    expect(secondWrite).not.toHaveBeenCalled()
+    expect(frames).toHaveLength(1)
+
+    frames.shift()!(32)
+    await secondDone
     expect(secondWrite).toHaveBeenCalledOnce()
   })
 

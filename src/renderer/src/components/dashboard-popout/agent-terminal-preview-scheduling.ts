@@ -38,18 +38,24 @@ export function scheduleAgentTerminalPreviewFrameTask(task: () => void): () => v
   }
 }
 
+function scheduleNextPreviewFlush(): void {
+  if (previewFlushFrame !== null || readyPreviewFlushes.size === 0) {
+    return
+  }
+  previewFlushFrame = requestAnimationFrame(() => {
+    previewFlushFrame = null
+    const next = readyPreviewFlushes.values().next().value
+    if (next) {
+      readyPreviewFlushes.delete(next)
+      next()
+    }
+    scheduleNextPreviewFlush()
+  })
+}
+
 function scheduleAgentTerminalPreviewFlush(task: () => void): () => void {
   readyPreviewFlushes.add(task)
-  if (previewFlushFrame === null) {
-    previewFlushFrame = requestAnimationFrame(() => {
-      previewFlushFrame = null
-      const ready = [...readyPreviewFlushes]
-      readyPreviewFlushes.clear()
-      for (const flush of ready) {
-        flush()
-      }
-    })
-  }
+  scheduleNextPreviewFlush()
   return () => {
     readyPreviewFlushes.delete(task)
   }

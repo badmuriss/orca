@@ -117,7 +117,7 @@ export function MaestroWorkspaceSurfacePreview({
               autoFocus={focusTerminalOnMount}
               mode="canvas"
               inputEnabled={selected}
-              liveRefreshIntervalMs={previewMode === 'identity' ? 240 : selected ? 64 : 140}
+              liveRefreshIntervalMs={previewMode === 'identity' ? 420 : selected ? 64 : 240}
               className="size-full"
             />
           </RecoverableRenderErrorBoundary>

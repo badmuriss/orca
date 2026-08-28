@@ -37,6 +37,7 @@ const FALLBACK_COLS = 80
 const FALLBACK_ROWS = 24
 const RESYNC_RETRY_DELAY_MS = 150
 const PASSIVE_RESIZE_SETTLE_MS = 120
+const NOOP = (): void => undefined
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -177,7 +178,7 @@ export function AgentTerminalPreview({
     const previewWriter = createAgentTerminalPreviewWriter({
       getTerminal: () => terminal,
       isDisposed: () => disposed,
-      onParsedWrite: ownsPtyGrid ? scheduleFit : () => undefined
+      onParsedWrite: mode === 'interactive' ? scheduleFit : NOOP
     })
     const passiveLiveQueue = createPassiveAgentTerminalLiveQueue({
       ptyId,
@@ -368,7 +369,7 @@ export function AgentTerminalPreview({
       disposed = true
       releaseResources()
     }
-  }, [acceptsInput, ownsPtyGrid, ptyId, usesBufferedRendering])
+  }, [acceptsInput, mode, ownsPtyGrid, ptyId, usesBufferedRendering])
 
   useLayoutEffect(() => {
     const terminal = terminalRef.current
