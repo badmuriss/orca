@@ -1,4 +1,11 @@
 import { z } from 'zod'
+import { MaestroRunProgressV2Schema, type MaestroRunProgressV2 } from './maestro-run-progress-v2'
+
+export {
+  MAESTRO_RUN_PROGRESS_LIST_LIMIT,
+  MAESTRO_RUN_PROGRESS_TEXT_MAX_LENGTH,
+  MaestroRunProgressV2Schema
+} from './maestro-run-progress-v2'
 
 export const MAESTRO_RUN_PROGRESS_NODE_PREFIX = 'run-progress-'
 
@@ -131,12 +138,17 @@ export const MaestroRunProgressSummarySchema = z
     }
   })
 
+export const MaestroRunProgressV1Schema = MaestroRunProgressSummarySchema
+
 export type MaestroRunProgressState = z.infer<typeof RunProgressStateSchema>
 export type MaestroRunProgressReference = z.infer<typeof RunProgressReferenceSchema>
 export type MaestroRunProgressTaskReference = z.infer<typeof RunProgressTaskReferenceSchema>
 export type MaestroRunProgressCleanupGroup = z.infer<typeof RunProgressCleanupGroupSchema>
 export type MaestroRunProgressCoordination = z.infer<typeof RunProgressCoordinationSchema>
 export type MaestroRunProgressSummary = z.infer<typeof MaestroRunProgressSummarySchema>
+export type MaestroRunProgressV1 = MaestroRunProgressSummary
+export type MaestroRunProgressPayload = MaestroRunProgressV1 | MaestroRunProgressV2
+export type { MaestroRunProgressV2 }
 
 export type MaestroRunProgressAuthority = {
   runId: string
@@ -163,13 +175,26 @@ export function unavailableMaestroRunProgress(): MaestroRunProgress {
 
 export function parseNegotiatedMaestroRunProgress(
   value: unknown,
+  negotiatedVersion: 1 | 2
+): MaestroRunProgressPayload
+export function parseNegotiatedMaestroRunProgress(
+  value: unknown,
   authority: MaestroRunProgressAuthority | null
-): MaestroRunProgress {
-  if (authority === null) {
+): MaestroRunProgress
+export function parseNegotiatedMaestroRunProgress(
+  value: unknown,
+  negotiation: 1 | 2 | MaestroRunProgressAuthority | null
+): MaestroRunProgressPayload | MaestroRunProgress {
+  if (typeof negotiation === 'number') {
+    return negotiation === 1
+      ? MaestroRunProgressV1Schema.parse(value)
+      : MaestroRunProgressV2Schema.parse(value)
+  }
+  if (negotiation === null) {
     return unavailableMaestroRunProgress()
   }
   const parsed = MaestroRunProgressSummarySchema.safeParse(value)
   return parsed.success
-    ? { available: true, summary: parsed.data, authority }
+    ? { available: true, summary: parsed.data, authority: negotiation }
     : unavailableMaestroRunProgress()
 }

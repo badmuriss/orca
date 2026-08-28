@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   createWorkspaceBootstrapReceipt,
   isWorkspaceBootstrapReceipt,
+  parseNegotiatedWorkspaceBootstrapReceipt,
   parseWorkspaceBootstrapReceipt,
+  WorkspaceBootstrapReceiptV2Schema,
+  WORKSPACE_BOOTSTRAP_DIRTY_PATH_SAMPLE_LIMIT,
   workspaceIdentity
 } from './workspace-bootstrap-receipt'
 
@@ -153,6 +156,129 @@ describe('workspace bootstrap receipt', () => {
         ...receipt,
         orchestration_home: { ...receipt.orchestration_home, workspace_key: 'folder:another-run' }
       })
+    ).toBe(false)
+  })
+})
+
+const receiptV2Base = {
+  schema_version: 2,
+  repository_id: 'repo-1',
+  canonical_root: '/repo',
+  execution_host: { id: 'host-local', boundary: 'local' },
+  orchestration_home: {
+    execution_host_id: 'host-local',
+    workspace_key: 'folder:repo-1',
+    kind: 'folder',
+    path: '/repo'
+  },
+  authority: { kind: 'orca', scope: 'run', issued_for_run_id: 'run-1' }
+} as const
+
+const gitReceiptV2 = {
+  ...receiptV2Base,
+  execution_workspace: {
+    execution_host_id: 'host-local',
+    workspace_key: 'worktree:repo-1',
+    kind: 'git-worktree',
+    path: '/repo/worktree',
+    worktree_path: '/repo/worktree'
+  },
+  base_revision_kind: 'git_head',
+  base_revision: '0123456789abcdef0123456789abcdef01234567',
+  dirty_state: 'dirty',
+  dirty_path_count: 2,
+  dirty_paths: ['src/a.ts', 'src/b.ts'],
+  dirty_paths_truncated: false
+} as const
+
+describe('workspace bootstrap receipt v2', () => {
+  it('preserves negotiated v1 receipt meaning', () => {
+    const receiptV1 = {
+      ...receiptV2Base,
+      schema_version: 1,
+      execution_workspace: gitReceiptV2.execution_workspace,
+      base_revision: '0123456789abcdef0123456789abcdef01234567',
+      dirty_paths: ['src/index.ts']
+    }
+    expect(parseNegotiatedWorkspaceBootstrapReceipt(receiptV1, 1)).toEqual(receiptV1)
+  })
+
+  it('accepts deterministic bounded Git dirty evidence', () => {
+    expect(WorkspaceBootstrapReceiptV2Schema.parse(gitReceiptV2)).toEqual(gitReceiptV2)
+  })
+
+  it('accepts folder observation without invented Git state', () => {
+    const folderReceipt = {
+      ...receiptV2Base,
+      execution_workspace: receiptV2Base.orchestration_home,
+      base_revision_kind: 'folder_observation',
+      base_revision: 'folder-observation:opaque-1',
+      dirty_state: 'not_applicable',
+      dirty_path_count: 0,
+      dirty_paths: [],
+      dirty_paths_truncated: false
+    }
+    expect(WorkspaceBootstrapReceiptV2Schema.safeParse(folderReceipt).success).toBe(true)
+  })
+
+  it('rejects unsorted, absolute, parent-traversing, and noncanonical dirty paths', () => {
+    for (const dirtyPaths of [
+      ['src/b.ts', 'src/a.ts'],
+      ['/repo/secret.ts'],
+      ['src/../secret.ts'],
+      ['src\\secret.ts']
+    ]) {
+      expect(
+        WorkspaceBootstrapReceiptV2Schema.safeParse({
+          ...gitReceiptV2,
+          dirty_path_count: dirtyPaths.length,
+          dirty_paths: dirtyPaths
+        }).success
+      ).toBe(false)
+    }
+  })
+
+  it('rejects samples beyond the contract limit and contradictory truncation', () => {
+    const dirtyPaths = Array.from(
+      { length: WORKSPACE_BOOTSTRAP_DIRTY_PATH_SAMPLE_LIMIT + 1 },
+      (_, index) => `src/${String(index).padStart(3, '0')}.ts`
+    )
+    expect(
+      WorkspaceBootstrapReceiptV2Schema.safeParse({
+        ...gitReceiptV2,
+        dirty_path_count: dirtyPaths.length,
+        dirty_paths: dirtyPaths
+      }).success
+    ).toBe(false)
+    expect(
+      WorkspaceBootstrapReceiptV2Schema.safeParse({
+        ...gitReceiptV2,
+        dirty_path_count: 3,
+        dirty_paths_truncated: false
+      }).success
+    ).toBe(false)
+  })
+
+  it('rejects a folder receipt downgraded through the negotiated v1 parser', () => {
+    const folderReceipt = {
+      ...receiptV2Base,
+      execution_workspace: receiptV2Base.orchestration_home,
+      base_revision_kind: 'folder_observation',
+      base_revision: 'folder-observation:opaque-1',
+      dirty_state: 'not_applicable',
+      dirty_path_count: 0,
+      dirty_paths: [],
+      dirty_paths_truncated: false
+    }
+    expect(() => parseNegotiatedWorkspaceBootstrapReceipt(folderReceipt, 1)).toThrow()
+  })
+
+  it('rejects execution workspace identity from another host', () => {
+    expect(
+      WorkspaceBootstrapReceiptV2Schema.safeParse({
+        ...gitReceiptV2,
+        execution_workspace: { ...gitReceiptV2.execution_workspace, execution_host_id: 'other' }
+      }).success
     ).toBe(false)
   })
 })

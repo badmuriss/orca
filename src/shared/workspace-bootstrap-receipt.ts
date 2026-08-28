@@ -1,4 +1,14 @@
 import { z } from 'zod'
+import {
+  WorkspaceBootstrapReceiptV2Schema,
+  type WorkspaceBootstrapReceiptV2
+} from './workspace-bootstrap-receipt-v2'
+
+export {
+  WORKSPACE_BOOTSTRAP_DIRTY_PATH_SAMPLE_LIMIT,
+  WORKSPACE_BOOTSTRAP_REVISION_MAX_LENGTH,
+  WorkspaceBootstrapReceiptV2Schema
+} from './workspace-bootstrap-receipt-v2'
 
 export const WORKSPACE_BOOTSTRAP_RECEIPT_SCHEMA_VERSION = 1 as const
 
@@ -180,8 +190,15 @@ export const WorkspaceBootstrapReceiptSchema = z
     }
   })
 
+export const WorkspaceBootstrapReceiptV1Schema = WorkspaceBootstrapReceiptSchema
+
 export type WorkspaceBootstrapWorkspaceIdentity = z.infer<typeof workspaceIdentitySchema>
 export type WorkspaceBootstrapReceipt = z.infer<typeof WorkspaceBootstrapReceiptSchema>
+export type WorkspaceBootstrapReceiptV1 = WorkspaceBootstrapReceipt
+export type NegotiatedWorkspaceBootstrapReceipt =
+  | WorkspaceBootstrapReceiptV1
+  | WorkspaceBootstrapReceiptV2
+export type { WorkspaceBootstrapReceiptV2 }
 export type WorkspaceBootstrapReceiptInput = Omit<
   WorkspaceBootstrapReceipt,
   'schema_version' | 'authority'
@@ -209,6 +226,15 @@ export function createWorkspaceBootstrapReceipt(
 
 export function parseWorkspaceBootstrapReceipt(value: unknown): WorkspaceBootstrapReceipt {
   return WorkspaceBootstrapReceiptSchema.parse(value)
+}
+
+export function parseNegotiatedWorkspaceBootstrapReceipt(
+  value: unknown,
+  negotiatedVersion: 1 | 2
+): NegotiatedWorkspaceBootstrapReceipt {
+  return negotiatedVersion === 1
+    ? WorkspaceBootstrapReceiptSchema.parse(value)
+    : WorkspaceBootstrapReceiptV2Schema.parse(value)
 }
 
 export function isWorkspaceBootstrapReceipt(value: unknown): value is WorkspaceBootstrapReceipt {

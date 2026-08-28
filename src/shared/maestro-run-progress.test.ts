@@ -1,9 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import {
+  MaestroRunProgressV1Schema,
+  MaestroRunProgressV2Schema,
   MaestroRunProgressSummarySchema,
   parseNegotiatedMaestroRunProgress,
   unavailableMaestroRunProgress
 } from './maestro-run-progress'
+import {
+  MAESTRO_COMPOSED_BOOTSTRAP_RUNTIME_CAPABILITY,
+  MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY,
+  ORCHESTRATION_ACTOR_BOUND_SETTLEMENT_RUNTIME_CAPABILITY,
+  ORCHESTRATION_NESTED_ACTIVITY_RUNTIME_CAPABILITY,
+  RUNTIME_CAPABILITIES,
+  WORKSPACE_BOOTSTRAP_RECEIPT_V2_RUNTIME_CAPABILITY
+} from './protocol-version'
 
 const summary = {
   schema_version: 1,
@@ -174,5 +184,158 @@ describe('Maestro run progress', () => {
       available: false,
       state: 'outcome_unknown'
     })
+  })
+})
+
+const completedProgressV2 = {
+  schema_version: 2,
+  run: { id: 'run-1', title: 'Harden orchestration contracts' },
+  execution: {
+    state: 'completed',
+    progress_percent: 100,
+    completed: 2,
+    total: 2,
+    counts: {
+      pending: 0,
+      running: 0,
+      input_required: 0,
+      blocked: 0,
+      succeeded: 2,
+      failed: 0,
+      cancelled: 0
+    }
+  },
+  projection_health: {
+    state: 'partial',
+    revision: 4,
+    warning: 'The projected Canvas is missing one optional surface binding.'
+  },
+  cleanup_health: {
+    state: 'unverifiable',
+    count: 1,
+    warning: 'One remote worker cannot be verified after disconnect.'
+  },
+  current: [],
+  recently_completed: [
+    {
+      reference: 'task-1',
+      title: 'Define shared contracts',
+      worker_label: 'Contract writer',
+      outcome_summary: 'Published strict receipt and progress schemas.'
+    }
+  ],
+  next: [],
+  blocked: [],
+  nested_activity: [],
+  technical: {
+    execution_host_id: 'host-local',
+    workspace_key: 'worktree:repo-1',
+    run_id: 'run-1',
+    revision: 4
+  }
+} as const
+
+describe('Maestro Run progress v2 compatibility', () => {
+  it('advertises each additive hardening capability', () => {
+    expect(RUNTIME_CAPABILITIES).toEqual(
+      expect.arrayContaining([
+        WORKSPACE_BOOTSTRAP_RECEIPT_V2_RUNTIME_CAPABILITY,
+        MAESTRO_COMPOSED_BOOTSTRAP_RUNTIME_CAPABILITY,
+        ORCHESTRATION_ACTOR_BOUND_SETTLEMENT_RUNTIME_CAPABILITY,
+        ORCHESTRATION_NESTED_ACTIVITY_RUNTIME_CAPABILITY,
+        MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY
+      ])
+    )
+  })
+
+  it('preserves the negotiated v1 reader', () => {
+    expect(MaestroRunProgressV1Schema.parse(summary)).toEqual(summary)
+    expect(parseNegotiatedMaestroRunProgress(summary, 1)).toEqual(summary)
+    expect(() => parseNegotiatedMaestroRunProgress(summary, 2)).toThrow()
+  })
+
+  it('keeps terminal Task progress independent from projection and cleanup health', () => {
+    expect(MaestroRunProgressV2Schema.parse(completedProgressV2)).toEqual(completedProgressV2)
+  })
+
+  it('omits percentage for a zero-Task Run', () => {
+    const zeroTaskProgress = {
+      ...completedProgressV2,
+      execution: {
+        state: 'outcome_unknown',
+        completed: 0,
+        total: 0,
+        counts: {
+          pending: 0,
+          running: 0,
+          input_required: 0,
+          blocked: 0,
+          succeeded: 0,
+          failed: 0,
+          cancelled: 0
+        }
+      }
+    }
+    expect(MaestroRunProgressV2Schema.safeParse(zeroTaskProgress).success).toBe(true)
+    expect(
+      MaestroRunProgressV2Schema.safeParse({
+        ...zeroTaskProgress,
+        execution: { ...zeroTaskProgress.execution, progress_percent: 0 }
+      }).success
+    ).toBe(false)
+  })
+
+  it('rejects contradictory completion and authored percentages', () => {
+    expect(
+      MaestroRunProgressV2Schema.safeParse({
+        ...completedProgressV2,
+        execution: { ...completedProgressV2.execution, progress_percent: 90 }
+      }).success
+    ).toBe(false)
+    expect(
+      MaestroRunProgressV2Schema.safeParse({
+        ...completedProgressV2,
+        execution: { ...completedProgressV2.execution, state: 'active' }
+      }).success
+    ).toBe(false)
+  })
+
+  it('distinguishes terminal failures and cancellation from success', () => {
+    const failureCounts = { ...completedProgressV2.execution.counts, succeeded: 1, failed: 1 }
+    expect(
+      MaestroRunProgressV2Schema.safeParse({
+        ...completedProgressV2,
+        execution: {
+          ...completedProgressV2.execution,
+          state: 'completed_with_failures',
+          counts: failureCounts
+        }
+      }).success
+    ).toBe(true)
+    expect(
+      MaestroRunProgressV2Schema.safeParse({
+        ...completedProgressV2,
+        execution: {
+          ...completedProgressV2.execution,
+          state: 'cancelled',
+          counts: { ...failureCounts, failed: 0, cancelled: 1 }
+        }
+      }).success
+    ).toBe(true)
+  })
+
+  it('rejects cross-run identity and unbounded summaries', () => {
+    expect(
+      MaestroRunProgressV2Schema.safeParse({
+        ...completedProgressV2,
+        technical: { ...completedProgressV2.technical, run_id: 'run-other' }
+      }).success
+    ).toBe(false)
+    expect(
+      MaestroRunProgressV2Schema.safeParse({
+        ...completedProgressV2,
+        run: { ...completedProgressV2.run, title: 'x'.repeat(2_049) }
+      }).success
+    ).toBe(false)
   })
 })
