@@ -480,6 +480,7 @@ describe('orchestration worker release', () => {
   it('records an explicitly empty archive for an already-exited worker process', async () => {
     setup()
     const { dispatchId } = await startSettledWorker()
+    inspectProcessLiveness.mockResolvedValue('exited')
     vi.mocked(runtime.showTerminal).mockImplementation(
       async (handle) => ({ handle, worktreeId: 'repo::worktree', connected: false }) as never
     )

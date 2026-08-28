@@ -164,8 +164,8 @@ describe('orchestration worker release recovery', () => {
     const interrupted = (await call('orchestration.workerRelease', { dispatch: dispatchId })) as {
       state: string
     }
-    expect(interrupted.state).toBe('release_pending')
-    expect(db.getWorkerTerminalResourceByOwner(dispatchId)?.release_state).toBe('releasing')
+    expect(interrupted.state).toBe('release_unknown')
+    expect(db.getWorkerTerminalResourceByOwner(dispatchId)?.release_state).toBe('unknown')
 
     const result = await reconcileRequestedWorkerTerminalReleases(runtime)
     expect(result).toMatchObject({ attempted: 1, released: 1 })
@@ -181,8 +181,8 @@ describe('orchestration worker release recovery', () => {
     vi.mocked(runtime.showTerminal).mockRejectedValue(new Error('terminal_handle_stale'))
 
     const result = await reconcileRequestedWorkerTerminalReleases(runtime)
-    expect(result).toMatchObject({ attempted: 1, pending: 1, unknown: 0 })
-    expect(db.getWorkerTerminalResourceByOwner(dispatchId)?.release_state).toBe('releasing')
+    expect(result).toMatchObject({ attempted: 1, pending: 0, unknown: 1 })
+    expect(db.getWorkerTerminalResourceByOwner(dispatchId)?.release_state).toBe('unknown')
   })
 
   it('preserves archived output when an unconfirmed release retry cannot find the terminal', async () => {

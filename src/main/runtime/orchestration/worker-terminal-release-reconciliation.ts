@@ -1,12 +1,10 @@
 import type { OrcaRuntimeService } from '../orca-runtime'
-import {
-  archiveSummary,
-  completeWorkerTerminalRelease
-} from '../rpc/methods/orchestration-worker-release-completion'
-import { inspectWorkerTerminal } from '../rpc/methods/orchestration-worker-observation'
 import type { WorkerReleaseReceipt } from '../rpc/methods/orchestration-worker-release-completion'
-import type { WorkerTerminalResourceRow } from './worker-terminal-ownership'
+import { inspectWorkerTerminal } from '../rpc/methods/orchestration-worker-observation'
+import type { OrchestrationDb } from './db'
 import { workerTerminalLeaseIsCurrent } from './db/worker-terminal/worker-terminal-release-identity'
+import type { WorkerTerminalResourceRow } from './worker-terminal-ownership'
+import { archiveSummary } from '../rpc/methods/orchestration-worker-terminal-resource-view'
 
 export type WorkerTerminalReleaseReconciliationResult = {
   attempted: number
@@ -70,14 +68,14 @@ export async function autoReleaseSettledWorkerTerminal(args: {
     return null
   }
   const requested = db.requestWorkerTerminalRelease(dispatchId, { auto: true })
+  const { completeWorkerTerminalRelease } =
+    await import('../rpc/methods/orchestration-worker-release-completion')
   return requested.disposition === 'requested'
     ? completeWorkerTerminalRelease({ runtime, db, dispatchId, resource: requested.resource })
     : null
 }
 
-// Finishes ONLY previously requested releases after startup/reconnect terminal discovery.
-// It never invents release intent: resources outside requested/releasing are untouched, and
-// unresolved identity defers (release_pending) rather than settling or broadening the close.
+// Finishes only exact requested or archived-unknown releases after terminal discovery.
 export function reconcileRequestedWorkerTerminalReleases(
   runtime: OrcaRuntimeService
 ): Promise<WorkerTerminalReleaseReconciliationResult> {
@@ -121,8 +119,10 @@ async function runReconciliationPasses(
 async function reconcileRequestedWorkerTerminalReleasesOnce(
   runtime: OrcaRuntimeService
 ): Promise<WorkerTerminalReleaseReconciliationResult> {
+  const { completeWorkerTerminalRelease } =
+    await import('../rpc/methods/orchestration-worker-release-completion')
   const db = runtime.getOrchestrationDb()
-  const backlog = db.listWorkerTerminalReleaseBacklog()
+  const backlog = listReleaseReconciliationBacklog(db)
   const result = { ...emptyResult(), attempted: backlog.length }
   for (const resource of backlog) {
     try {
@@ -184,6 +184,35 @@ async function reconcileRequestedWorkerTerminalReleasesOnce(
     }
   }
   return result
+}
+
+function listReleaseReconciliationBacklog(db: OrchestrationDb): WorkerTerminalResourceRow[] {
+  const resourcesById = new Map(
+    db.listWorkerTerminalReleaseBacklog().map((resource) => [resource.id, resource])
+  )
+  for (const worker of db.listWorkerTerminalResources()) {
+    const resource = worker.resource
+    if (
+      !resource ||
+      resource.release_state !== 'unknown' ||
+      resource.ownership_state !== 'owned' ||
+      resource.release_requested_at === null ||
+      resource.owner_dispatch_id !== worker.dispatchId ||
+      resource.terminal_handle !== worker.agentTerminalHandle ||
+      !resource.worktree_id ||
+      !resource.pane_key ||
+      !resource.process_incarnation ||
+      !resource.host_scope
+    ) {
+      continue
+    }
+    resourcesById.set(resource.id, resource)
+  }
+  return [...resourcesById.values()].sort((left, right) =>
+    (left.release_requested_at ?? left.created_at).localeCompare(
+      right.release_requested_at ?? right.created_at
+    )
+  )
 }
 
 function emptyResult(): WorkerTerminalReleaseReconciliationResult {

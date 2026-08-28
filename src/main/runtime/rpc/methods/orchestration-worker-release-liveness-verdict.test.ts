@@ -25,6 +25,7 @@ describe('orchestration worker release liveness verdict', () => {
   ])('does not release a worker after $name', async ({ close, detail }) => {
     const resource = {
       id: 'resource-1',
+      owner_dispatch_id: 'ctx-worker',
       terminal_handle: 'term_worker',
       worktree_id: 'repo::worktree',
       pane_key: 'tab-worker:leaf-worker',
@@ -36,10 +37,15 @@ describe('orchestration worker release liveness verdict', () => {
       release_state: 'requested'
     } as WorkerTerminalResourceRow
     const runtime = {
-      showTerminal: vi.fn(async () => ({ handle: 'term_worker', connected: false })),
+      showTerminal: vi.fn(async () => ({
+        handle: 'term_worker',
+        worktreeId: 'repo::worktree',
+        connected: true
+      })),
       getTerminalPaneKey: vi.fn(() => 'tab-worker:leaf-worker'),
       getTerminalProcessIncarnation: vi.fn(() => 'pty-worker:incarnation-1'),
       getTerminalLivenessVerdict: vi.fn(() => null),
+      getExactWorkerProviderSession: vi.fn(() => null),
       getOrchestrationDispatchAuthority: vi.fn(() => ({
         terminalHandle: 'term_worker',
         worktreeId: 'repo::worktree',
@@ -119,10 +125,10 @@ describe('orchestration worker release liveness verdict', () => {
       closeTerminal: vi.fn(),
       notifyMessageArrived: vi.fn()
     } as unknown as OrcaRuntimeService
-    const markWorkerTerminalReleaseUnknown = vi.fn(() => ({
+    const markWorkerTerminalReleaseUnknown = vi.fn((_resourceId: string, releaseError: string) => ({
       ...resource,
       release_state: 'unknown',
-      release_error: 'the SSH relay disconnected'
+      release_error: releaseError
     }))
     const db = {
       getWorkerDispatch: vi.fn(() => ({
@@ -140,7 +146,7 @@ describe('orchestration worker release liveness verdict', () => {
     expect(runtime.closeTerminal).not.toHaveBeenCalled()
     expect(markWorkerTerminalReleaseUnknown).toHaveBeenCalledWith(
       'resource-1',
-      'the SSH relay disconnected'
+      'The exact worker process is unverifiable: the SSH relay disconnected.'
     )
   })
 })
