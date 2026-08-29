@@ -90,4 +90,15 @@ describe('agent-context over the live registry', () => {
     expect(claudeTeams?.argumentMode).toBe('passthrough')
     expect(claudeTeams?.flags).toEqual([])
   })
+
+  it('publishes canonical Maestro payload contracts and copy-safe stdin examples', () => {
+    const schema = buildAgentContext(COMMAND_SPECS)
+    const bootstrap = schema.payloadContracts['maestro bootstrap']
+
+    expect(bootstrap.requiredCapabilities).toContain('maestro.bootstrap.v1')
+    expect(bootstrap.schema).toMatchObject({ type: 'object' })
+    expect(bootstrap.preconditions).not.toHaveLength(0)
+    expect(bootstrap.stdinExample).toContain('--payload-file -')
+    expect(bootstrap.stdinExample).toContain("<<'JSON'")
+  })
 })

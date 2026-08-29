@@ -335,7 +335,12 @@ export const SKILL_HANDLERS: Record<string, CommandHandler> = {
     const guides = canonicalGuides(BUNDLED_SKILL_GUIDES)
     const guide = requireTopic(flags, guides)
     const full = flags.has('full')
-    const markdown = full ? guide.fullMarkdown : guide.markdown
+    const { applyVersionMatchedGuideContract } =
+      await import('../version-matched-guide-contract.js')
+    const markdown = applyVersionMatchedGuideContract(
+      guide.name,
+      full ? guide.fullMarkdown : guide.markdown
+    )
     writeStdout(json ? JSON.stringify({ name: guide.name, full, markdown }, null, 2) : markdown)
   },
   'skills install': createSkillMutationHandler('install'),

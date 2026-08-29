@@ -128,10 +128,11 @@ export const ORCHESTRATION_COMMAND_SPECS: CommandSpec[] = [
     path: ['orchestration', 'task-create'],
     summary: 'Create an orchestration task',
     usage:
-      'orca orchestration task-create --spec <text> [--task-title <text>] [--display-name <text>] [--deps <json_array>] [--parent <task_id>] [--run <run_id>] [--from <handle>] [--retry-request <id>] [--json]',
+      'orca orchestration task-create (--spec <text> | --spec-file <path|->) [--task-title <text>] [--display-name <text>] [--deps <json_array>] [--parent <task_id>] [--run <run_id>] [--from <handle>] [--retry-request <id>] [--json]',
     allowedFlags: [
       ...GLOBAL_FLAGS,
       'spec',
+      'spec-file',
       'task-title',
       'display-name',
       'deps',
@@ -139,6 +140,10 @@ export const ORCHESTRATION_COMMAND_SPECS: CommandSpec[] = [
       'run',
       'from',
       'retry-request'
+    ],
+    examples: [
+      'orca orchestration task-create --spec "Review the bounded change" --json',
+      "orca orchestration task-create --spec-file - --json <<'TASK'\nReview the bounded change without shell interpolation.\nTASK"
     ]
   },
   {

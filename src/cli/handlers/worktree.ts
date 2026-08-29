@@ -33,6 +33,7 @@ import {
   resolveCreateParentSelector
 } from './worktree-create-parent-selector'
 import { getOptionalLinearIssueLinkFlag } from './worktree-linear-issue-link'
+import { withPublicWorkspaceKey, withPublicWorkspaceKeys } from '../worktree-public-identity'
 
 type HookWarningResult = {
   warning?: string
@@ -181,19 +182,28 @@ export const WORKTREE_HANDLERS: Record<string, CommandHandler> = {
       repo: getOptionalStringFlag(flags, 'repo'),
       limit: getOptionalPositiveIntegerFlag(flags, 'limit')
     })
-    printResult(result, json, formatWorktreeList)
+    const publicResult = { ...result, result: withPublicWorkspaceKeys(result.result) }
+    printResult(publicResult, json, formatWorktreeList)
   },
   'worktree show': async ({ flags, client, cwd, json }) => {
     const result = await client.call<{ worktree: RuntimeWorktreeRecord }>('worktree.show', {
       worktree: await getRequiredWorktreeSelector(flags, 'worktree', cwd, client)
     })
-    printResult(result, json, formatWorktreeShow)
+    const publicResult = {
+      ...result,
+      result: { worktree: withPublicWorkspaceKey(result.result.worktree) }
+    }
+    printResult(publicResult, json, formatWorktreeShow)
   },
   'worktree current': async ({ client, cwd, json }) => {
     const result = await client.call<{ worktree: RuntimeWorktreeRecord }>('worktree.show', {
       worktree: await resolveCurrentWorktreeSelector(cwd, client)
     })
-    printResult(result, json, formatWorktreeShow)
+    const publicResult = {
+      ...result,
+      result: { worktree: withPublicWorkspaceKey(result.result.worktree) }
+    }
+    printResult(publicResult, json, formatWorktreeShow)
   },
   'worktree create': async ({ flags, client, cwd, json }) => {
     assertCreateParentFlagsCompatible(flags)

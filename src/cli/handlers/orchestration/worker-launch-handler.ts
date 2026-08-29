@@ -38,6 +38,7 @@ export const ORCHESTRATION_WORKER_LAUNCH_HANDLER: Record<string, CommandHandler>
       residualResources: unknown[]
     }>(client, flags, 'orchestration.workerStart', {
       task: getRequiredStringFlag(flags, 'task'),
+      attemptId: getRequiredStringFlag(flags, 'attempt-id'),
       on: getOptionalStringFlag(flags, 'on'),
       worktree: getOptionalStringFlag(flags, 'worktree'),
       name: getOptionalStringFlag(flags, 'name'),

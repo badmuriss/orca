@@ -234,7 +234,7 @@ export function isCommandGroup(commandPath: string[]): boolean {
     (commandPath.length === 2 && commandPath[0] === 'agent' && commandPath[1] === 'hooks') ||
     (commandPath.length === 2 &&
       commandPath[0] === 'maestro' &&
-      commandPath[1] === 'browser-surface') ||
+      ['browser-surface', 'projection'].includes(commandPath[1])) ||
     (commandPath.length === 2 &&
       commandPath[0] === 'storage' &&
       ['local', 'session'].includes(commandPath[1]))

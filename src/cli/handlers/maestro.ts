@@ -2,20 +2,20 @@ import type { CommandHandler } from '../dispatch'
 import { printResult } from '../format'
 import { getRequiredStringFlag } from '../flags'
 import { RuntimeClientError } from '../runtime-client'
+import { readJsonObjectInput } from '../structured-input'
 
 const MAX_WATCH_EVENTS = 128
 
-function parsePayload(flags: Map<string, string | boolean>): Record<string, unknown> {
-  const raw = getRequiredStringFlag(flags, 'payload')
-  try {
-    const value: unknown = JSON.parse(raw)
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-      throw new Error('not_an_object')
-    }
-    return value as Record<string, unknown>
-  } catch {
-    throw new RuntimeClientError('invalid_argument', 'Expected --payload to be a JSON object.')
-  }
+async function parsePayload(
+  handler: Parameters<CommandHandler>[0]
+): Promise<Record<string, unknown>> {
+  return readJsonObjectInput({
+    flags: handler.flags,
+    cwd: handler.cwd,
+    inlineFlag: 'payload',
+    fileFlag: 'payload-file',
+    label: 'Maestro payload'
+  })
 }
 
 async function printCall(
@@ -62,6 +62,8 @@ async function emitNdjson(
 const payloadMethodHandlers: Record<string, string> = {
   'maestro apply': 'maestro.mutation.apply',
   'maestro author': 'maestro.document.authoring.apply',
+  'maestro projection apply': 'maestro.projection.apply',
+  'maestro bootstrap': 'maestro.bootstrap',
   'maestro coordinator-handoff': 'orchestration.coordinatorHandoff',
   'maestro browser-surface open': 'orchestration.browserSurface.ensure',
   'maestro browser-surface focus': 'orchestration.browserSurface.focus',
@@ -86,8 +88,16 @@ export const MAESTRO_HANDLERS: Record<string, CommandHandler> = {
   'maestro index': async (handler) => {
     await printCall(handler, 'maestro.list', {})
   },
+  'maestro projection show': async (handler) => {
+    await printCall(handler, 'maestro.projection.get', {
+      scope: {
+        execution_host_id: getRequiredStringFlag(handler.flags, 'host'),
+        workspace_key: getRequiredStringFlag(handler.flags, 'workspace')
+      }
+    })
+  },
   'maestro watch': async (handler) => {
-    const request = parsePayload(handler.flags)
+    const request = await parsePayload(handler)
     const once = handler.flags.get('once') === true
     const requestedRevision = request.sinceRevision
     if (
@@ -151,6 +161,6 @@ export const MAESTRO_HANDLERS: Record<string, CommandHandler> = {
 
 for (const [command, method] of Object.entries(payloadMethodHandlers)) {
   MAESTRO_HANDLERS[command] = async (handler) => {
-    await printCall(handler, method, parsePayload(handler.flags))
+    await printCall(handler, method, await parsePayload(handler))
   }
 }
