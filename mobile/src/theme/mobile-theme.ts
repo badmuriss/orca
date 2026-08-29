@@ -1,3 +1,5 @@
+import type { ColorSchemeName } from 'react-native'
+
 // Orca mobile dark tokens, with a bounded light palette for theme-aware surfaces.
 // All screen files should import from here instead of using inline hex values.
 
@@ -68,7 +70,7 @@ export const lightColors: MobileThemeColors = {
   statusRed: '#e40014'
 }
 
-export function mobileThemeColors(colorScheme: 'light' | 'dark' | null | undefined) {
+export function mobileThemeColors(colorScheme: ColorSchemeName) {
   return colorScheme === 'light' ? lightColors : colors
 }
 
