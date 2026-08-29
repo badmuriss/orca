@@ -293,63 +293,73 @@ export function MobileMaestroScreen() {
           </Pressable>
         </View>
       ) : null}
-      {surfaces.length === 0 ? (
-        <View style={styles.center}>
-          <Text style={styles.emptyTitle}>No open surfaces</Text>
-          <Text style={styles.centerText}>
-            Open a terminal, Browser, file, or note. It will appear here without starting Harness.
-          </Text>
+      <View style={styles.workspaceBody}>
+        <View style={styles.canvasArea}>
+          {surfaces.length === 0 ? (
+            <View style={styles.center}>
+              <Text style={styles.emptyTitle}>No open surfaces</Text>
+              <Text style={styles.centerText}>
+                Open a terminal, Browser, file, or note. It will appear here without starting
+                Harness.
+              </Text>
+            </View>
+          ) : (
+            <MobileMaestroBoard
+              surfaces={surfaces}
+              frames={frames}
+              viewport={viewport}
+              viewportWidth={canvasSize.width}
+              viewportHeight={canvasSize.height}
+              links={links}
+              selectedKey={selectedKey}
+              previews={previews}
+              onSelect={selectSurface}
+              onViewportLayout={(size) =>
+                setCanvasSize((current) =>
+                  current.width === size.width && current.height === size.height ? current : size
+                )
+              }
+            />
+          )}
+          {selected ? (
+            <MobileMaestroInspector
+              surface={selected}
+              wide={isWideLayout}
+              linking={linkSourceKey === selectedKey}
+              onClose={() => setSelectedKey(null)}
+              onOpen={() => openExactTab(selected)}
+              onLink={() => setLinkSourceKey(selectedKey)}
+              suggestion={selectedSuggestion}
+              onAcceptSuggestion={() =>
+                selectedSuggestion &&
+                void applyMutation({
+                  action: 'decide-suggestion',
+                  fingerprint: selectedSuggestion.fingerprint,
+                  decision: 'accepted',
+                  link_type: selectedSuggestion.link_type,
+                  label: null,
+                  expected_canvas_revision: available.canvas.revision
+                })
+              }
+              onHideSuggestion={() =>
+                selectedSuggestion &&
+                void applyMutation({
+                  action: 'decide-suggestion',
+                  fingerprint: selectedSuggestion.fingerprint,
+                  decision: 'hidden',
+                  expected_canvas_revision: available.canvas.revision
+                })
+              }
+            />
+          ) : null}
+          {available.runProgress && !isWideLayout ? (
+            <MobileMaestroProgress progress={available.runProgress} wide={false} />
+          ) : null}
         </View>
-      ) : (
-        <MobileMaestroBoard
-          surfaces={surfaces}
-          frames={frames}
-          viewport={viewport}
-          viewportWidth={canvasSize.width}
-          viewportHeight={canvasSize.height}
-          links={links}
-          selectedKey={selectedKey}
-          previews={previews}
-          onSelect={selectSurface}
-          onViewportLayout={(size) =>
-            setCanvasSize((current) =>
-              current.width === size.width && current.height === size.height ? current : size
-            )
-          }
-        />
-      )}
-      {selected ? (
-        <MobileMaestroInspector
-          surface={selected}
-          wide={isWideLayout}
-          linking={linkSourceKey === selectedKey}
-          onClose={() => setSelectedKey(null)}
-          onOpen={() => openExactTab(selected)}
-          onLink={() => setLinkSourceKey(selectedKey)}
-          suggestion={selectedSuggestion}
-          onAcceptSuggestion={() =>
-            selectedSuggestion &&
-            void applyMutation({
-              action: 'decide-suggestion',
-              fingerprint: selectedSuggestion.fingerprint,
-              decision: 'accepted',
-              link_type: selectedSuggestion.link_type,
-              label: null,
-              expected_canvas_revision: available.canvas.revision
-            })
-          }
-          onHideSuggestion={() =>
-            selectedSuggestion &&
-            void applyMutation({
-              action: 'decide-suggestion',
-              fingerprint: selectedSuggestion.fingerprint,
-              decision: 'hidden',
-              expected_canvas_revision: available.canvas.revision
-            })
-          }
-        />
-      ) : null}
-      {available.runProgress ? <MobileMaestroProgress progress={available.runProgress} /> : null}
+        {available.runProgress && isWideLayout ? (
+          <MobileMaestroProgress progress={available.runProgress} wide />
+        ) : null}
+      </View>
       <MobileMaestroAnnotationComposer
         visible={composerOpen}
         text={annotationText}

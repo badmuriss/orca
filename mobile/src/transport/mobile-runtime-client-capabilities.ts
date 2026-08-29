@@ -1,0 +1,5 @@
+import { MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY } from '../../../src/shared/protocol-version'
+
+export const MOBILE_RUNTIME_CLIENT_CAPABILITIES = [
+  MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY
+] as const

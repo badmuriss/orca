@@ -7,13 +7,17 @@ import type {
   RuntimeMaestroWorkspaceCanvasQueryResult,
   RuntimeMaestroWorkspaceContentReadResult
 } from '../../../src/shared/runtime-types'
-import type { MaestroRunProgress } from '../../../src/shared/maestro-run-progress'
 import {
   WorkspaceSurfaceSnapshotSchema,
   type WorkspaceSurfaceSnapshot
 } from '../../../src/shared/maestro-workspace-canvas'
 import type { RpcClient } from '../transport/rpc-client'
 import type { RpcSuccess } from '../transport/types'
+import {
+  parseLegacyMobileMaestroRunProgress,
+  parseMobileMaestroRunProgressRpcResult,
+  type MobileMaestroRunProgress
+} from './mobile-maestro-run-progress'
 
 export const MAESTRO_WORKSPACE_CANVAS_CAPABILITY = 'maestro.workspace-canvas.v1'
 
@@ -26,7 +30,7 @@ export type MobileMaestroAvailable = {
   actorId: string
   snapshot: WorkspaceSurfaceSnapshot
   canvas: { revision: number; document: WorkspaceCanvasDocument; updatedAt: string | null }
-  runProgress: MaestroRunProgress | null
+  runProgress: MobileMaestroRunProgress | null
 }
 
 export type MobileMaestroLoadState =
@@ -75,7 +79,7 @@ type MaestroListResult = {
   entries: Array<{
     executionHostId: string
     workspaceKey: string
-    runProgress?: MaestroRunProgress
+    runProgress?: unknown
   }>
 }
 
@@ -99,8 +103,9 @@ export async function loadMobileMaestroWorkspace(
   client: RpcClient,
   scope: MobileMaestroScope
 ): Promise<MobileMaestroLoadState> {
-  const [canvasResponse, listResponse] = await Promise.all([
+  const [canvasResponse, progressResponse, listResponse] = await Promise.all([
     client.sendRequest('maestro.workspaceCanvas.get', scope),
+    client.sendRequest('maestro.runProgress.get', { scope }).catch(() => null),
     client.sendRequest('maestro.list').catch(() => null)
   ])
   const result = successResult<RuntimeMaestroWorkspaceCanvasQueryResult>(canvasResponse)
@@ -113,15 +118,18 @@ export async function loadMobileMaestroWorkspace(
   }
   const snapshot = WorkspaceSurfaceSnapshotSchema.parse(result.snapshot)
   const document = WorkspaceCanvasDocumentSchema.parse(result.canvas.document)
-  let runProgress: MaestroRunProgress | null = null
-  if (listResponse?.ok) {
+  let runProgress = progressResponse?.ok
+    ? parseMobileMaestroRunProgressRpcResult(successResult<unknown>(progressResponse))
+    : null
+  if (!runProgress && listResponse?.ok) {
     const entries = successResult<MaestroListResult>(listResponse).entries
-    runProgress =
+    const legacyProgress =
       entries.find(
         (entry) =>
           entry.executionHostId === scope.execution_host_id &&
           entry.workspaceKey === scope.workspace_key
       )?.runProgress ?? null
+    runProgress = parseLegacyMobileMaestroRunProgress(legacyProgress)
   }
   return {
     status: 'available',

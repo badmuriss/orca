@@ -68,6 +68,8 @@ export const mobileMaestroScreenStyles = StyleSheet.create({
     fontSize: typography.metaSize,
     fontWeight: '600'
   },
+  workspaceBody: { flex: 1, flexDirection: 'row' },
+  canvasArea: { flex: 1, minWidth: 0, overflow: 'hidden' },
   horizontalCanvas: { minWidth: 1800 },
   verticalCanvas: { minHeight: 1400 },
   board: { width: 1800, height: 1400, backgroundColor: colors.bgBase }
