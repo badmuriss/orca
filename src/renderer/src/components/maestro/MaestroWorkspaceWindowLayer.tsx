@@ -98,6 +98,7 @@ function sameWindowRender(
     previous.presencePhase === next.presencePhase &&
     previous.previewMode === next.previewMode &&
     previous.agentFunctionLabel === next.agentFunctionLabel &&
+    previous.agentTaskId === next.agentTaskId &&
     previous.agentRole === next.agentRole
   )
 }
@@ -296,6 +297,7 @@ export function MaestroWorkspaceWindowLayer(props: WindowLayerProps): React.JSX.
               presencePhase={phase}
               previewMode={previewMode}
               agentFunctionLabel={agentNode?.functionLabel}
+              agentTaskId={agentNode?.taskId}
               agentRole={
                 props.topology.coordinatorSurfaceId === surfaceKey
                   ? 'coordinator'

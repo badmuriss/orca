@@ -27,6 +27,7 @@ import type { MaestroWorkspacePresencePhase } from './maestro-workspace-presence
 import type { MaestroWorkspacePreviewMode } from './maestro-workspace-visibility'
 import { MaestroWorkspaceSurfacePreview } from './MaestroWorkspaceSurfacePreview'
 import { maestroTerminalSurfacePaneKey } from './maestro-agent-terminal-bindings'
+import { resolveMaestroWorkspaceSurfaceTitle } from './maestro-workspace-surface-title'
 import { MaestroWorkspaceInlineTitle } from './MaestroWorkspaceInlineTitle'
 import { startMaestroWorkspaceWindowGesture } from './maestro-workspace-window-gesture'
 
@@ -43,6 +44,7 @@ export type MaestroWorkspaceWindowProps = {
   presencePhase?: MaestroWorkspacePresencePhase
   previewMode?: MaestroWorkspacePreviewMode
   agentFunctionLabel?: string
+  agentTaskId?: string
   agentRole?: 'coordinator' | 'worker'
   onSelect: () => void
   onRename: (title: string) => void
@@ -76,6 +78,7 @@ export function MaestroWorkspaceWindow({
   presencePhase = 'present',
   previewMode = 'full',
   agentFunctionLabel,
+  agentTaskId,
   agentRole,
   onSelect,
   onRename,
@@ -96,6 +99,11 @@ export function MaestroWorkspaceWindow({
   }, [selected])
   const Icon = SURFACE_ICON[surface.content_type]
   const normalizedFunction = agentFunctionLabel?.trim()
+  const visibleTitle = resolveMaestroWorkspaceSurfaceTitle(
+    surface.title,
+    normalizedFunction,
+    agentTaskId
+  )
   const roleLabel =
     agentRole === 'coordinator'
       ? translate('auto.components.maestro.MaestroWorkspaceWindow.coordinator', 'Orchestrator')
@@ -103,7 +111,7 @@ export function MaestroWorkspaceWindow({
         ? translate('auto.components.maestro.MaestroWorkspaceWindow.worker', 'Worker')
         : null
   const functionLabel =
-    normalizedFunction && normalizedFunction !== surface.title ? normalizedFunction : null
+    normalizedFunction && normalizedFunction !== visibleTitle ? normalizedFunction : null
   const visiblePresencePhase = closeRequested ? 'exiting' : presencePhase
   const requestClose = (): void => {
     if (closeRequested) {
@@ -182,7 +190,7 @@ export function MaestroWorkspaceWindow({
               <span className="flex min-w-0 flex-1 flex-col justify-center">
                 {renaming ? (
                   <MaestroWorkspaceInlineTitle
-                    title={surface.title}
+                    title={visibleTitle}
                     onCommit={(title) => {
                       setRenaming(false)
                       onRename(title)
@@ -191,7 +199,7 @@ export function MaestroWorkspaceWindow({
                   />
                 ) : (
                   <span className="truncate text-[15px] font-semibold leading-5">
-                    {surface.title}
+                    {visibleTitle}
                   </span>
                 )}
                 {roleLabel || functionLabel ? (
@@ -324,7 +332,7 @@ export function MaestroWorkspaceWindow({
                 aria-label={translate(
                   'auto.components.maestro.MaestroWorkspaceWindow.39b239dd72',
                   'Drag a link from {{value0}}',
-                  { value0: surface.title }
+                  { value0: visibleTitle }
                 )}
                 onPointerDown={onLinkPointerDown}
                 onClick={(event) => event.preventDefault()}
@@ -345,7 +353,7 @@ export function MaestroWorkspaceWindow({
             aria-label={translate(
               'auto.components.maestro.MaestroWorkspaceWindow.14b6f795aa',
               'Resize {{value0}}',
-              { value0: surface.title }
+              { value0: visibleTitle }
             )}
             onPointerDown={(event) => {
               onSelect()

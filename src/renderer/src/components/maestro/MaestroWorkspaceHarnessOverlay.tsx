@@ -1,111 +1,319 @@
-import type { MaestroRunProgress } from '../../../../shared/maestro-run-progress'
+import { Gauge } from 'lucide-react'
 import { useState } from 'react'
-import type { MaestroRunProgressReference } from '../../../../shared/maestro-run-progress'
 import { Badge } from '@/components/ui/badge'
-import { CountLegend, ProgressMeter, ReferenceList, TaskList } from './MaestroRunProgressSections'
 import { translate } from '@/i18n/i18n'
+import {
+  HealthWarning,
+  ProgressMeter,
+  RunProgressSection,
+  TechnicalDisclosure
+} from './MaestroRunProgressSections'
+import { MaestroStatePip } from './MaestroWindowFrame'
+import type { MaestroRunPanelVisibility } from './maestro-run-panel-visibility'
+import {
+  availableLegacyRunProgress,
+  humanProgressRows,
+  isMaestroRunProgressV2,
+  legacyStateLabel,
+  LegacyRunProgressSections,
+  RUN_PANEL_ICONS,
+  RunPanelControl,
+  V2_STATE_LABELS,
+  type MaestroRunProgressPresentation
+} from './maestro-run-progress-presentation'
+import { maestroStateTone } from './maestro-window-model'
 
-export function MaestroWorkspaceHarnessOverlay({
-  progress,
-  authorityUnavailable
-}: {
-  progress: MaestroRunProgress
+type OverlayProps = {
+  progress: MaestroRunProgressPresentation
   authorityUnavailable: boolean
-}): React.JSX.Element {
-  const [inspected, setInspected] = useState<MaestroRunProgressReference | null>(null)
-  if (!progress.available) {
+  visibility: MaestroRunPanelVisibility
+  onVisibilityChange: (visibility: MaestroRunPanelVisibility) => void
+  onActivateReference: (reference: string) => boolean
+}
+
+export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.Element {
+  const [inspectedReference, setInspectedReference] = useState<string | null>(null)
+  const humanProgress = isMaestroRunProgressV2(props.progress) ? props.progress : null
+  const legacyProgress = availableLegacyRunProgress(props.progress)
+  const title = humanProgress
+    ? humanProgress.run.title
+    : translate(
+        'auto.components.maestro.MaestroWorkspaceHarnessOverlay.legacyRunTitle',
+        'Run progress'
+      )
+  const state = humanProgress
+    ? humanProgress.execution.state
+    : legacyProgress
+      ? legacyProgress.summary.state
+      : 'outcome_unknown'
+  const stateLabel = humanProgress
+    ? V2_STATE_LABELS[humanProgress.execution.state]()
+    : legacyProgress
+      ? legacyStateLabel(legacyProgress)
+      : V2_STATE_LABELS.outcome_unknown()
+  const urgent = state === 'blocked' || state === 'input_required' || state === 'outcome_unknown'
+
+  if (props.visibility === 'hidden') {
+    return (
+      <button
+        type="button"
+        className="absolute left-3 top-3 z-40 flex max-w-[min(24rem,calc(100%-7rem))] items-center gap-2 rounded-md border border-border bg-card/90 px-2.5 py-1.5 text-left shadow-xs backdrop-blur-md outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+        data-maestro-run-restore-control=""
+        aria-label={translate(
+          'auto.components.maestro.MaestroWorkspaceHarnessOverlay.restoreRunPanel',
+          'Restore Run progress panel'
+        )}
+        onClick={() => props.onVisibilityChange('compact')}
+      >
+        <MaestroStatePip tone={maestroStateTone(state)} />
+        <span className="truncate text-xs font-medium text-foreground">{title}</span>
+        <span className="shrink-0 text-[10px] text-muted-foreground">{stateLabel}</span>
+        {urgent ? <span className="sr-only">{stateLabel}</span> : null}
+      </button>
+    )
+  }
+
+  if (!humanProgress && !legacyProgress) {
     return (
       <aside
-        className={`absolute left-3 z-40 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground shadow-xs ${authorityUnavailable ? 'top-24' : 'top-14'}`}
+        className={`absolute left-3 z-40 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground shadow-xs ${props.authorityUnavailable ? 'top-24' : 'top-14'}`}
         data-maestro-workspace-harness-overlay=""
+        aria-label={translate(
+          'auto.components.maestro.MaestroWorkspaceHarnessOverlay.runProgress',
+          'Run progress'
+        )}
       >
         {translate(
           'auto.components.maestro.MaestroWorkspaceHarnessOverlay.3c305a1143',
-          'Harness progress is unverifiable.'
+          'Run progress is unavailable for this peer.'
         )}
       </aside>
     )
   }
-  const summary = progress.summary
+
+  const completed = humanProgress
+    ? humanProgress.execution.completed
+    : (legacyProgress?.summary.task_counts.approved ?? 0)
+  const total = humanProgress
+    ? humanProgress.execution.total
+    : Object.values(legacyProgress?.summary.task_counts ?? {}).reduce(
+        (sum, count) => sum + count,
+        0
+      )
+  const percent = humanProgress
+    ? humanProgress.execution.progress_percent
+    : legacyProgress?.summary.progress_percent
+  const rows = humanProgress ? humanProgressRows(humanProgress) : null
+  const compactDetail =
+    rows?.blocked[0]?.detail ??
+    rows?.current[0]?.detail ??
+    rows?.recent[0]?.detail ??
+    rows?.next[0]?.detail
+  const activate = (reference: string): void => {
+    if (!props.onActivateReference(reference)) {
+      setInspectedReference(reference)
+    }
+  }
+
+  if (props.visibility === 'compact') {
+    return (
+      <aside
+        className={`absolute left-3 z-40 flex w-[min(30rem,calc(100%-6rem))] items-center gap-2 rounded-lg border border-border bg-card/95 px-2.5 py-2 shadow-xs backdrop-blur-md ${props.authorityUnavailable ? 'top-24' : 'top-14'}`}
+        data-maestro-workspace-harness-overlay=""
+        data-maestro-run-panel-visibility="compact"
+        aria-label={translate(
+          'auto.components.maestro.MaestroWorkspaceHarnessOverlay.runProgress',
+          'Run progress'
+        )}
+      >
+        <MaestroStatePip tone={maestroStateTone(state)} />
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-baseline gap-2">
+            <span className="truncate text-xs font-medium text-foreground">{title}</span>
+            <span className="shrink-0 text-[10px] text-muted-foreground">
+              {completed}/{total}
+            </span>
+          </span>
+          {compactDetail ? (
+            <span className="block truncate text-[10px] text-muted-foreground">
+              {compactDetail}
+            </span>
+          ) : null}
+        </span>
+        <Badge variant="outline" className="shrink-0">
+          {stateLabel}
+        </Badge>
+        <RunPanelControl
+          label={translate(
+            'auto.components.maestro.MaestroWorkspaceHarnessOverlay.expandRunPanel',
+            'Expand Run panel'
+          )}
+          icon={RUN_PANEL_ICONS.expand}
+          onClick={() => props.onVisibilityChange('expanded')}
+        />
+        <RunPanelControl
+          label={translate(
+            'auto.components.maestro.MaestroWorkspaceHarnessOverlay.hideRunPanel',
+            'Hide Run panel'
+          )}
+          icon={RUN_PANEL_ICONS.hide}
+          onClick={() => props.onVisibilityChange('hidden')}
+        />
+      </aside>
+    )
+  }
+
+  const technicalEntries = humanProgress
+    ? [
+        { label: 'Run', value: humanProgress.technical.run_id },
+        { label: 'Host', value: humanProgress.technical.execution_host_id },
+        { label: 'Workspace', value: humanProgress.technical.workspace_key },
+        { label: 'Revision', value: String(humanProgress.technical.revision) },
+        ...(inspectedReference ? [{ label: 'Task', value: inspectedReference }] : [])
+      ]
+    : legacyProgress
+      ? [
+          { label: 'Run', value: legacyProgress.authority.runId },
+          { label: 'Host', value: legacyProgress.authority.workspace.executionHostId },
+          { label: 'Workspace', value: legacyProgress.authority.workspace.workspaceKey },
+          { label: 'Revision', value: String(legacyProgress.authority.revision) },
+          ...(inspectedReference ? [{ label: 'Reference', value: inspectedReference }] : [])
+        ]
+      : []
+
   return (
     <aside
-      className={`scrollbar-sleek absolute left-3 z-40 max-h-[45%] w-80 overflow-auto rounded-lg border border-border bg-card p-3 shadow-xs ${authorityUnavailable ? 'top-24' : 'top-14'}`}
+      className={`scrollbar-sleek absolute left-3 z-40 max-h-[min(72%,42rem)] w-[min(27rem,calc(100%-6rem))] overflow-auto rounded-lg border border-border bg-card/95 p-3 shadow-xs backdrop-blur-md ${props.authorityUnavailable ? 'top-24' : 'top-14'}`}
       data-maestro-workspace-harness-overlay=""
+      data-maestro-run-panel-visibility="expanded"
       aria-label={translate(
-        'auto.components.maestro.MaestroWorkspaceHarnessOverlay.10512fc509',
-        'Harness run {{value0}}',
-        { value0: progress.authority.runId }
+        'auto.components.maestro.MaestroWorkspaceHarnessOverlay.runProgress',
+        'Run progress'
       )}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-xs font-medium">
-          {translate('auto.components.maestro.MaestroWorkspaceHarnessOverlay.3246b484f4', 'Run')}{' '}
-          {progress.authority.runId}
+      <header className="flex items-start gap-2">
+        <span className="pt-1.5">
+          <MaestroStatePip tone={maestroStateTone(state)} />
         </span>
-        <Badge variant="outline">{summary.state}</Badge>
-      </div>
-      <p className="mt-2 text-xl font-semibold tabular-nums text-foreground">
-        {summary.progress_percent}%
-      </p>
-      <ProgressMeter counts={summary.task_counts} percent={summary.progress_percent} />
-      <CountLegend counts={summary.task_counts} />
-      <TaskList
-        label={translate(
-          'auto.components.maestro.MaestroWorkspaceHarnessOverlay.281b32e47d',
-          'Active'
-        )}
-        tasks={summary.current_tasks}
-        onInspectReference={setInspected}
-      />
-      <TaskList
-        label={translate(
-          'auto.components.maestro.MaestroWorkspaceHarnessOverlay.37f99eccba',
-          'Next'
-        )}
-        tasks={summary.next_tasks}
-        onInspectReference={setInspected}
-      />
-      <ReferenceList
-        label={translate(
-          'auto.components.maestro.MaestroWorkspaceHarnessOverlay.e10ca067b6',
-          'Blocked'
-        )}
-        tone="blocked"
-        references={summary.blockers}
-        onInspectReference={setInspected}
-      />
-      <ReferenceList
-        label={translate(
-          'auto.components.maestro.MaestroWorkspaceHarnessOverlay.87f572fa85',
-          'Material findings'
-        )}
-        tone="input"
-        references={summary.material_findings}
-        onInspectReference={setInspected}
-      />
-      {inspected ? (
-        <div className="mt-3 rounded-md border border-border bg-muted/40 p-2 text-[10px]">
-          <p className="font-medium text-foreground">
+        <span className="min-w-0 flex-1">
+          <h2 className="text-pretty text-sm font-semibold leading-5 text-foreground">{title}</h2>
+          <span className="text-[11px] text-muted-foreground">{stateLabel}</span>
+        </span>
+        <RunPanelControl
+          label={translate(
+            'auto.components.maestro.MaestroWorkspaceHarnessOverlay.compactRunPanel',
+            'Compact Run panel'
+          )}
+          icon={RUN_PANEL_ICONS.compact}
+          onClick={() => props.onVisibilityChange('compact')}
+        />
+        <RunPanelControl
+          label={translate(
+            'auto.components.maestro.MaestroWorkspaceHarnessOverlay.hideRunPanel',
+            'Hide Run panel'
+          )}
+          icon={RUN_PANEL_ICONS.hide}
+          onClick={() => props.onVisibilityChange('hidden')}
+        />
+      </header>
+      <div className="mt-3 space-y-1.5">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+            <Gauge className="size-3.5 text-muted-foreground" />
             {translate(
-              'auto.components.maestro.MaestroWorkspaceHarnessOverlay.e829b7596d',
-              'Exact Harness reference'
+              'auto.components.maestro.MaestroWorkspaceHarnessOverlay.completedTasks',
+              '{{value0}} of {{value1}} tasks',
+              { value0: completed, value1: total }
             )}
-          </p>
-          <p className="mt-1 break-all font-mono text-muted-foreground">
-            {progress.authority.runId}{' '}
-            {translate(
-              'auto.components.maestro.MaestroWorkspaceHarnessOverlay.cf7d032f54',
-              '· revision'
-            )}{' '}
-            {progress.authority.revision}
-          </p>
-          <p className="mt-1 break-all font-mono text-foreground">
-            {[inspected.task_id, inspected.attempt_id, inspected.finding_ref, inspected.cleanup_id]
-              .filter(Boolean)
-              .join(' · ')}
-          </p>
+          </span>
+          {percent === undefined ? null : (
+            <span className="text-xs font-semibold tabular-nums text-foreground">{percent}%</span>
+          )}
         </div>
-      ) : null}
+        <ProgressMeter completed={completed} total={total} percent={percent} />
+      </div>
+      <div className="mt-3 space-y-3">
+        {humanProgress && rows ? (
+          <>
+            <RunProgressSection
+              label={translate(
+                'auto.components.maestro.MaestroWorkspaceHarnessOverlay.currentWork',
+                'Current work'
+              )}
+              rows={rows.current}
+              onActivate={activate}
+            />
+            <RunProgressSection
+              label={translate(
+                'auto.components.maestro.MaestroWorkspaceHarnessOverlay.recentOutcomes',
+                'Recent outcomes'
+              )}
+              rows={rows.recent}
+              onActivate={activate}
+            />
+            <RunProgressSection
+              label={translate(
+                'auto.components.maestro.MaestroWorkspaceHarnessOverlay.blockers',
+                'Blocked'
+              )}
+              rows={rows.blocked}
+              onActivate={activate}
+            />
+            <RunProgressSection
+              label={translate(
+                'auto.components.maestro.MaestroWorkspaceHarnessOverlay.nextSteps',
+                'Next steps'
+              )}
+              rows={rows.next}
+              onActivate={activate}
+            />
+            <RunProgressSection
+              label={translate(
+                'auto.components.maestro.MaestroWorkspaceHarnessOverlay.nestedActivity',
+                'Native child activity'
+              )}
+              rows={rows.nested}
+              onActivate={activate}
+            />
+            {humanProgress.projection_health.state === 'healthy' ? null : (
+              <HealthWarning
+                label={translate(
+                  'auto.components.maestro.MaestroWorkspaceHarnessOverlay.projectionWarning',
+                  'Projection'
+                )}
+                detail={
+                  humanProgress.projection_health.warning ??
+                  translate(
+                    'auto.components.maestro.MaestroWorkspaceHarnessOverlay.projectionNeedsAttention',
+                    'Run projection needs attention.'
+                  )
+                }
+                tone="input"
+              />
+            )}
+            {humanProgress.cleanup_health.state === 'clean' ? null : (
+              <HealthWarning
+                label={translate(
+                  'auto.components.maestro.MaestroWorkspaceHarnessOverlay.cleanupWarning',
+                  'Cleanup'
+                )}
+                detail={
+                  humanProgress.cleanup_health.warning ??
+                  translate(
+                    'auto.components.maestro.MaestroWorkspaceHarnessOverlay.cleanupNeedsAttention',
+                    '{{value0}} worker resources need attention.',
+                    { value0: humanProgress.cleanup_health.count }
+                  )
+                }
+                tone={humanProgress.cleanup_health.state === 'failed' ? 'blocked' : 'input'}
+              />
+            )}
+          </>
+        ) : legacyProgress ? (
+          <LegacyRunProgressSections progress={legacyProgress} onActivate={activate} />
+        ) : null}
+        <TechnicalDisclosure entries={technicalEntries} open={inspectedReference !== null} />
+      </div>
     </aside>
   )
 }

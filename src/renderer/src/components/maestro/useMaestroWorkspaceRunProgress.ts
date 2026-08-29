@@ -1,15 +1,75 @@
 import { useEffect, useState } from 'react'
 import type { MaestroProjection } from '../../../../shared/maestro-projection'
-import type { MaestroRunProgress } from '../../../../shared/maestro-run-progress'
+import type {
+  MaestroRunProgress,
+  MaestroRunProgressV2
+} from '../../../../shared/maestro-run-progress'
 import type { RuntimeMaestroWorkspaceCanvasScope } from '../../../../shared/runtime-types'
 import type { RuntimeClientTarget } from '@/runtime/runtime-client-target'
 import { getMaestroProjection } from '@/runtime/runtime-maestro-client'
+import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
+
+type MaestroRunProgressResponse =
+  | { schemaVersion: 2; progress: MaestroRunProgressV2 }
+  | { schemaVersion: 1; progress: MaestroRunProgress }
+  | { schemaVersion: null; progress: null }
+
+const RUN_PROGRESS_POLL_INTERVAL_MS = 1_500
 
 export function useMaestroWorkspaceRunProgress(
   target: RuntimeClientTarget,
   scope: RuntimeMaestroWorkspaceCanvasScope
 ): MaestroRunProgress | null {
   return useMaestroWorkspaceProjection(target, scope)?.runProgress ?? null
+}
+
+export function useMaestroWorkspaceHumanRunProgress(
+  target: RuntimeClientTarget,
+  scope: RuntimeMaestroWorkspaceCanvasScope
+): MaestroRunProgressV2 | null {
+  const executionHostId = scope.execution_host_id
+  const workspaceKey = scope.workspace_key
+  const identity = `${executionHostId}\0${workspaceKey}`
+  const [state, setState] = useState<{
+    identity: string
+    progress: MaestroRunProgressV2 | null
+  }>({ identity, progress: null })
+
+  useEffect(() => {
+    let active = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    setState({ identity, progress: null })
+    const poll = async (): Promise<void> => {
+      try {
+        const response = await callRuntimeRpc<MaestroRunProgressResponse>(
+          target,
+          'maestro.runProgress.get',
+          { scope: { execution_host_id: executionHostId, workspace_key: workspaceKey } }
+        )
+        if (active) {
+          setState({
+            identity,
+            progress: response.schemaVersion === 2 ? response.progress : null
+          })
+        }
+      } catch {
+        // The projection-backed v1 view remains available for older or disconnected peers.
+      } finally {
+        if (active) {
+          timer = setTimeout(() => void poll(), RUN_PROGRESS_POLL_INTERVAL_MS)
+        }
+      }
+    }
+    void poll()
+    return () => {
+      active = false
+      if (timer) {
+        clearTimeout(timer)
+      }
+    }
+  }, [executionHostId, identity, target, workspaceKey])
+
+  return state.identity === identity ? state.progress : null
 }
 
 export function useMaestroWorkspaceProjection(
@@ -50,7 +110,7 @@ export function useMaestroWorkspaceProjection(
         // Keep the last confirmed projection for this scope through transient poll failures.
       } finally {
         if (active) {
-          timer = setTimeout(() => void poll(), 1_500)
+          timer = setTimeout(() => void poll(), RUN_PROGRESS_POLL_INTERVAL_MS)
         }
       }
     }

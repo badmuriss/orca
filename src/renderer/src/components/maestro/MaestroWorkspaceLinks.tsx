@@ -22,6 +22,17 @@ export type MaestroWorkspaceLinkLine = {
 export type OptimisticMaestroManualLink = Pick<MaestroWorkspaceLinkLine, 'id' | 'source' | 'target'>
 const NO_OPTIMISTIC_MANUAL_LINKS: readonly OptimisticMaestroManualLink[] = []
 
+export function replaceOptimisticMaestroManualLink(
+  current: readonly OptimisticMaestroManualLink[],
+  source: string,
+  target: string
+): readonly OptimisticMaestroManualLink[] {
+  return [
+    ...current.filter((link) => link.source !== source || link.target !== target),
+    { id: crypto.randomUUID(), source, target }
+  ]
+}
+
 function relationEndpoint(
   relation: Pick<CanvasAgentRelation, 'sourceSurfaceId' | 'targetSurfaceId'>
 ) {

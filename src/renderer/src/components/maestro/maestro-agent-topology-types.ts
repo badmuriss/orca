@@ -5,6 +5,7 @@ export type CanvasAgentTopologyProvenance = 'orca-orchestration' | 'runtime-line
 export type CanvasAgentNode = {
   surfaceId: string
   paneKey: string
+  taskId?: string
   parentSurfaceId?: string
   coordinatorSurfaceId?: string
   functionLabel: string

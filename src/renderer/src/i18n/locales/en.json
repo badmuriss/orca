@@ -13603,7 +13603,11 @@
           "c9930a1fc2": "Failed",
           "ad65ccc061": "Blocked",
           "48c2389c39": "Input",
-          "23dda8f5bd": "Running"
+          "23dda8f5bd": "Running",
+          "noTasks": "No tasks in this Run",
+          "taskProgress": "{{value0}} of {{value1}} tasks complete, {{value2}} percent",
+          "technicalDetails": "Technical details",
+          "copyTechnicalValue": "Copy {{value0}}"
         },
         "MaestroTerminalInspector": {
           "7319972f55": "Output is unavailable; Orca has not observed a live terminal.",
@@ -13664,7 +13668,8 @@
         "MaestroWorkspaceBrowserPreview": {
           "791294b80c": "Exact page capture unavailable",
           "3e7cc4bc3a": "Capturing the exact existing page…",
-          "0b65d32766": "Exact Browser page {{value0}}"
+          "0b65d32766": "Exact Browser page {{value0}}",
+          "reconnecting": "Reconnecting the exact page preview…"
         },
         "MaestroWorkspaceCanvas": {
           "1605610d90": "Right-click the board to add a Terminal, Browser, or annotation. A Harness Run is optional.",
@@ -13707,7 +13712,38 @@
           "281b32e47d": "Active",
           "3246b484f4": "Run",
           "10512fc509": "Harness run {{value0}}",
-          "3c305a1143": "Harness progress is unverifiable."
+          "3c305a1143": "Harness progress is unverifiable.",
+          "stateActive": "Running",
+          "stateInputRequired": "Input required",
+          "stateBlocked": "Blocked",
+          "stateCompleted": "Completed",
+          "stateCompletedWithFailures": "Completed with failures",
+          "stateCancelled": "Cancelled",
+          "stateOutcomeUnknown": "Outcome unknown",
+          "stateInProgress": "In progress",
+          "stateFailed": "Failed",
+          "nativeChildActivity": "Native child activity",
+          "legacyRunTitle": "Run progress",
+          "restoreRunPanel": "Restore Run progress panel",
+          "runProgress": "Run progress",
+          "expandRunPanel": "Expand Run panel",
+          "hideRunPanel": "Hide Run panel",
+          "compactRunPanel": "Compact Run panel",
+          "completedTasks": "{{value0}} of {{value1}} tasks",
+          "currentWork": "Current work",
+          "recentOutcomes": "Recent outcomes",
+          "blockers": "Blocked",
+          "nextSteps": "Next steps",
+          "nestedActivity": "Native child activity",
+          "projectionWarning": "Projection",
+          "projectionNeedsAttention": "Run projection needs attention.",
+          "cleanupWarning": "Cleanup",
+          "cleanupNeedsAttention": "{{value0}} worker resources need attention.",
+          "legacyTask": "Task {{value0}}",
+          "legacyTaskDetail": "Detailed activity is unavailable from this peer.",
+          "legacyBlockedItem": "Blocked item {{value0}}",
+          "legacyBlockedDetail": "The older peer did not provide a human blocker summary.",
+          "legacyProgress": "Legacy progress"
         },
         "MaestroWorkspaceInspector": {
           "f1039bab27": "No links touch this surface.",
@@ -13734,10 +13770,35 @@
           "37f9e2104d": "Terminal output is {{value0}}.",
           "1ac69faf69": "Select this window to attach its single interactive preview.",
           "c6b6befac1": "The exact terminal remains available in its own tab.",
-          "52cce7f247": "Terminal output could not attach."
+          "52cce7f247": "Terminal output could not attach.",
+          "inlineTitle": "Tab title",
+          "previewIdentity": "Live preview hidden at this zoom",
+          "previewSuspended": "Preview paused outside the viewport",
+          "coordinator": "Orchestrator",
+          "worker": "Worker",
+          "97d6f5fe39": "Rename tab",
+          "39b239dd72": "Drag a link from {{value0}}",
+          "c8d0b36e56": "Drag to another window to link",
+          "rename": "Rename tab"
         },
         "MaestroSurface": {
           "ee4d1c1e27": "Workspace Canvas scope is unavailable."
+        },
+        "MaestroWorkspaceContextMenu": {
+          "35cc43ca9a": "Add to canvas",
+          "7c32f9bd91": "Normal shell",
+          "82a26e299b": "No enabled CLIs detected",
+          "5efde7c17e": "Detecting installed CLIs…",
+          "c27dd0d722b": "New annotation"
+        },
+        "links": {
+          "remove": "Remove link",
+          "delegates": "Delegates",
+          "dependsOn": "Depends on",
+          "reportsTo": "Reports to",
+          "contextFor": "Context",
+          "group": "Workspace links",
+          "manualAccessibleLabel": "Manual link from {{value0}} to {{value1}}"
         }
       },
       "mobile": {

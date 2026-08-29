@@ -63,6 +63,27 @@ function compareRelations(left: CanvasAgentRelation, right: CanvasAgentRelation)
   )
 }
 
+function formalTaskIdBySurface(
+  projection: MaestroAgentFormalProjection | null | undefined,
+  surfaceByHandle: ReadonlyMap<string, string>
+): ReadonlyMap<string, string> {
+  const candidates = new Map<string, Set<string>>()
+  for (const node of projection?.nodes ?? []) {
+    const surfaceId = node.terminalId ? surfaceByHandle.get(node.terminalId) : undefined
+    if (!surfaceId || !node.taskId) {
+      continue
+    }
+    const taskIds = candidates.get(surfaceId) ?? new Set<string>()
+    taskIds.add(node.taskId)
+    candidates.set(surfaceId, taskIds)
+  }
+  return new Map(
+    [...candidates].flatMap(([surfaceId, taskIds]) =>
+      taskIds.size === 1 ? [[surfaceId, [...taskIds][0]!] as const] : []
+    )
+  )
+}
+
 export function projectMaestroAgentTopology(params: {
   surfaces: Readonly<Record<string, WorkspaceSurface>>
   orchestrationByPaneKey: Readonly<Record<string, AgentStatusOrchestrationContext>>
@@ -74,6 +95,7 @@ export function projectMaestroAgentTopology(params: {
   const surfaceIds = new Set(terminals.map((terminal) => terminal.surfaceId))
   const surfaceByPaneKey = uniqueSurfaceByPaneKey(terminals)
   const surfaceByHandle = uniqueSurfaceByTerminalHandle(terminals, params.terminalHandleByPaneKey)
+  const formalTaskIds = formalTaskIdBySurface(params.formalProjection, surfaceByHandle)
   const projectedFormalRelations = formalRelationsFromProjection(
     params.formalProjection,
     surfaceByHandle
@@ -222,6 +244,9 @@ export function projectMaestroAgentTopology(params: {
       {
         surfaceId: terminal.surfaceId,
         paneKey: terminal.paneKey,
+        ...((orchestration?.taskId ?? formalTaskIds.get(terminal.surfaceId))
+          ? { taskId: orchestration?.taskId ?? formalTaskIds.get(terminal.surfaceId) }
+          : {}),
         parentSurfaceId,
         coordinatorSurfaceId: inCoordinatorLineage ? coordinatorSurfaceId : undefined,
         functionLabel,

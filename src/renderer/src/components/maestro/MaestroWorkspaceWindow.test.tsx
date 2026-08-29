@@ -21,6 +21,7 @@ vi.mock('./MaestroWorkspaceBrowserPreview', () => ({
 }))
 
 import { MaestroWorkspaceWindow } from './MaestroWorkspaceWindow'
+import { resolveMaestroWorkspaceSurfaceTitle } from './maestro-workspace-surface-title'
 
 const scope = { execution_host_id: 'local', workspace_key: 'folder:workspace-1' }
 const placement = {
@@ -63,6 +64,26 @@ function terminal(): WorkspaceSurface {
 describe('MaestroWorkspaceWindow', () => {
   beforeEach(() => Object.values(callbacks).forEach((callback) => callback.mockClear()))
   afterEach(cleanup)
+
+  it('replaces an exact generated worker title with the authoritative function', () => {
+    expect(
+      resolveMaestroWorkspaceSurfaceTitle(
+        'worker-task_desktop',
+        'Desktop progress specialist',
+        'task_desktop'
+      )
+    ).toBe('Desktop progress specialist')
+  })
+
+  it('preserves an explicit user title that does not match the generated default', () => {
+    expect(
+      resolveMaestroWorkspaceSurfaceTitle(
+        'Accessibility review',
+        'Desktop progress specialist',
+        'task_desktop'
+      )
+    ).toBe('Accessibility review')
+  })
 
   it('keeps real terminal output visible without selecting the window', () => {
     render(

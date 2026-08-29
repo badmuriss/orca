@@ -1,16 +1,15 @@
 import { Loader2, RefreshCw, TriangleAlert } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { workspaceSurfaceKey } from '../../../../shared/maestro-workspace-canvas'
-import type { RuntimeMaestroWorkspaceCanvasScope } from '../../../../shared/runtime-types'
 import { Button } from '@/components/ui/button'
 import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu'
-import type { RuntimeClientTarget } from '@/runtime/runtime-client-target'
 import { useMaestroWorkspaceCanvas } from '@/hooks/useMaestroWorkspaceCanvas'
 import {
   MaestroWorkspaceLinks,
-  unconfirmedOptimisticMaestroManualLinks
+  replaceOptimisticMaestroManualLink,
+  unconfirmedOptimisticMaestroManualLinks,
+  type OptimisticMaestroManualLink
 } from './MaestroWorkspaceLinks'
-import type { OptimisticMaestroManualLink } from './MaestroWorkspaceLinks'
 import { MaestroWorkspaceHarnessOverlay } from './MaestroWorkspaceHarnessOverlay'
 import {
   placeWorkspaceWindowAtCanvasPoint,
@@ -22,7 +21,10 @@ import { translate } from '@/i18n/i18n'
 import { MaestroWorkspaceToolbar } from './MaestroWorkspaceToolbar'
 import { MaestroWorkspaceContextMenu } from './MaestroWorkspaceContextMenu'
 import { MaestroWorkspaceWindowLayer } from './MaestroWorkspaceWindowLayer'
-import { useMaestroWorkspaceProjection } from './useMaestroWorkspaceRunProgress'
+import {
+  useMaestroWorkspaceHumanRunProgress,
+  useMaestroWorkspaceProjection
+} from './useMaestroWorkspaceRunProgress'
 import { useMaestroWorkspaceAgentTopology } from './useMaestroWorkspaceAgentTopology'
 import { buildMaestroWorkspaceTopologyLayoutNodes } from './maestro-workspace-topology-layout-input'
 import {
@@ -37,13 +39,15 @@ import {
   initialMaestroWorkspacePlacements,
   sameMaestroWorkspacePlacementGeometry
 } from './maestro-workspace-placement-state'
+import { useMaestroRunPanelVisibility } from './maestro-run-panel-visibility'
+import { useMaestroRunReferenceActivation } from './maestro-run-reference-activation'
 
 export function MaestroWorkspaceCanvas({
   target,
   scope
 }: {
-  target: RuntimeClientTarget
-  scope: RuntimeMaestroWorkspaceCanvasScope
+  target: NonNullable<Parameters<typeof useMaestroWorkspaceCanvas>[0]>
+  scope: NonNullable<Parameters<typeof useMaestroWorkspaceCanvas>[1]>
 }): React.JSX.Element {
   const resource = useMaestroWorkspaceCanvas(target, scope)
   const result = resource.result
@@ -61,8 +65,10 @@ export function MaestroWorkspaceCanvas({
   const optimisticPlacements = useRef<Record<string, MaestroWorkspaceWindowPlacement>>({})
   const automaticallyPlacedSurfaceKeys = useRef(new Set<string>())
   const projection = useMaestroWorkspaceProjection(target, scope)
+  const humanRunProgress = useMaestroWorkspaceHumanRunProgress(target, scope)
   const agentTopology = useMaestroWorkspaceAgentTopology(result?.snapshot ?? null, projection)
-  const runProgress = projection?.runProgress ?? null
+  const runProgress = humanRunProgress ?? projection?.runProgress ?? null
+  const [runPanelVisibility, setRunPanelVisibility] = useMaestroRunPanelVisibility(scope)
   const topologyLayoutNodes = useMemo(
     () =>
       result
@@ -162,6 +168,14 @@ export function MaestroWorkspaceCanvas({
     optimisticPlacements,
     automaticallyPlacedSurfaceKeys,
     board
+  })
+  const activateRunReference = useMaestroRunReferenceActivation({
+    topology: agentTopology,
+    placements,
+    snapshot: result?.snapshot,
+    reveal: board.reveal,
+    selectSurface: selection.selectSurface,
+    mutate: resource.mutate
   })
 
   if (!result && resource.status === 'loading') {
@@ -376,10 +390,9 @@ export function MaestroWorkspaceCanvas({
         viewport={board.viewport}
         canvasSize={board.size}
         onManualLinkCreated={(source, targetKey) =>
-          setOptimisticManualLinks((current) => [
-            ...current.filter((link) => link.source !== source || link.target !== targetKey),
-            { id: crypto.randomUUID(), source, target: targetKey }
-          ])
+          setOptimisticManualLinks((current) =>
+            replaceOptimisticMaestroManualLink(current, source, targetKey)
+          )
         }
         onRevealPlacement={(placement) =>
           board.reveal(workspaceWindowBounds(placement), MAESTRO_REVEAL_INSETS)
@@ -389,6 +402,9 @@ export function MaestroWorkspaceCanvas({
         <MaestroWorkspaceHarnessOverlay
           progress={runProgress}
           authorityUnavailable={resource.status === 'unavailable'}
+          visibility={runPanelVisibility}
+          onVisibilityChange={setRunPanelVisibility}
+          onActivateReference={activateRunReference}
         />
       ) : null}
     </main>
