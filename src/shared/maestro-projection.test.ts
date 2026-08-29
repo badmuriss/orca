@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   applyAgentGraphDelta,
   parseAgentGraphProjection,
-  projectAgentGraphView
+  projectAgentGraphView,
+  withRuntimeMaestroRunProgress
 } from './maestro-projection'
 
 const scope = {
@@ -315,5 +316,56 @@ describe('Maestro projection contract', () => {
   })
   it('rejects malformed graph identifiers', () => {
     expect(() => parseAgentGraphProjection({ ...view(), change: 'bad id' })).toThrow()
+  })
+
+  it('attaches runtime-owned v2 progress only to its exact projected authority', () => {
+    const projection = projectAgentGraphView(parseAgentGraphProjection(view()))
+    const progress = {
+      schema_version: 2 as const,
+      run: { id: projection.runId, title: 'Implement contract' },
+      execution: {
+        state: 'active' as const,
+        progress_percent: 0,
+        completed: 0,
+        total: 1,
+        counts: {
+          pending: 0,
+          running: 1,
+          input_required: 0,
+          blocked: 0,
+          succeeded: 0,
+          failed: 0,
+          cancelled: 0
+        }
+      },
+      projection_health: { state: 'healthy' as const, revision: projection.revision },
+      cleanup_health: { state: 'clean' as const, count: 0 },
+      current: [
+        {
+          reference: 'task-1',
+          title: 'Implement contract',
+          state: 'running' as const,
+          activity_summary: 'Running focused validation'
+        }
+      ],
+      recently_completed: [],
+      next: [],
+      blocked: [],
+      nested_activity: [],
+      technical: {
+        execution_host_id: projection.workspace.executionHostId,
+        workspace_key: projection.workspace.workspaceKey,
+        run_id: projection.runId,
+        revision: projection.revision
+      }
+    }
+
+    expect(withRuntimeMaestroRunProgress(projection, progress).runProgress).toEqual(progress)
+    expect(() =>
+      withRuntimeMaestroRunProgress(projection, {
+        ...progress,
+        technical: { ...progress.technical, workspace_key: 'folder:another' }
+      })
+    ).toThrow('does not match the projected Run authority')
   })
 })

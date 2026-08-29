@@ -1,8 +1,5 @@
 import type { TuiAgent } from '../../../../shared/tui-agent'
-import {
-  buildMaestroTerminalLeaseTitle,
-  type MaestroTerminalLease
-} from '../../../../shared/maestro-terminal-lease'
+import type { MaestroTerminalLease } from '../../../../shared/maestro-terminal-lease'
 import { defineMethod, type RpcMethod } from '../core'
 import { startFederatedWorker } from './orchestration-federated-worker-start'
 import { WorkerStartParams } from './orchestration-worker-start-schema'
@@ -11,6 +8,7 @@ import {
   createWorkerWorktree,
   monitorWorkerSetup,
   requireWorkerAuthority,
+  resolveWorkerTerminalTitle,
   type WorkerEffect,
   type WorkerSetupReceipt
 } from './orchestration-worker-topology'
@@ -43,12 +41,7 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
     params: WorkerStartParams,
     handler: async (
       params,
-      {
-        runtime,
-        orchestrationMutation,
-        orchestrationCompatibilityEvidence,
-        recordMutationReceipt
-      }
+      { runtime, orchestrationMutation, orchestrationCompatibilityEvidence, recordMutationReceipt }
     ) => {
       if (!isWorkerStartTimeoutWithinTimerLimit(params.timeoutMs)) {
         throw new OrchestrationError(
@@ -91,7 +84,6 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
         retryPreflight
       } = prepared
       let { resolvedWorktree } = prepared
-      const { preflightExecutable } = prepared
 
       const startOptions = {
         worktree: requestedWorktree,
@@ -119,13 +111,7 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
         runtimeEpoch: runtime.getRuntimeId(),
         mutationReceipt: orchestrationMutation
       })
-      const attemptId = params.attemptId ?? started.dispatch.id
-      const leaseTitle = buildMaestroTerminalLeaseTitle({
-        role: 'worker',
-        runId: run.id,
-        taskId: task.id,
-        agent: agent as TuiAgent
-      })
+      const leaseTitle = resolveWorkerTerminalTitle(task)
       let workerLease: MaestroTerminalLease | undefined
       let leaseTransferReceipt: ReturnType<typeof db.transferMaestroWorkerTerminalLease> | undefined
       const effects: WorkerEffect[] = []
@@ -191,13 +177,6 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
         if (!resolvedWorktree || !terminalHandle) {
           throw new Error('Worker topology did not resolve an agent terminal and worktree.')
         }
-        try {
-          await runtime.renameTerminal(terminalHandle, leaseTitle)
-        } catch (error) {
-          if (!(error instanceof Error) || error.message !== 'runtime_unavailable') {
-            throw error
-          }
-        }
         const setupStage = {
           db,
           dispatchId: started.dispatch.id,
@@ -254,13 +233,13 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
           taskSpec: task.spec,
           coordinatorGeneration: run.consumer_generation,
           dispatchId: started.dispatch.id,
-          attemptId,
+          attemptId: params.attemptId ?? started.dispatch.id,
           retryOf: params.retryOf,
           mutation: orchestrationMutation,
           terminalHandle,
           terminal,
           terminalAuthority,
-          preflightExecutable,
+          preflightExecutable: prepared.preflightExecutable,
           retryResourceId: retryPreflight?.resourceId,
           retryPredecessorLeaseId: authority.predecessorLeaseId,
           reusableResourceId: authority.reusableResourceId,

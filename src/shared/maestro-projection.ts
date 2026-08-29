@@ -10,6 +10,7 @@ import {
   type ProjectedWorkspace
 } from './maestro-projection-boundary'
 import { parseNegotiatedMaestroRunProgress, type MaestroRunProgress } from './maestro-run-progress'
+import { MaestroRunProgressV2Schema, type MaestroRunProgressV2 } from './maestro-run-progress-v2'
 import {
   MaestroBrowserSurfaceReceiptSchema,
   type MaestroBrowserSurfaceReceipt
@@ -62,6 +63,9 @@ export type MaestroProjection = {
   workspace: ProjectedWorkspace
   runProgress: MaestroRunProgress
 }
+export type RuntimeMaestroProjection = Omit<MaestroProjection, 'runProgress'> & {
+  runProgress: MaestroRunProgressV2
+}
 
 type TerminalBinding = {
   terminalId: string | null
@@ -81,6 +85,22 @@ function projectedEdgeType(type: AgentGraphView['edges'][number]['type']): Maest
 
 export function parseAgentGraphProjection(value: unknown): AgentGraphView {
   return AgentGraphViewSchema.parse(value)
+}
+
+export function withRuntimeMaestroRunProgress(
+  projection: MaestroProjection,
+  value: unknown
+): RuntimeMaestroProjection {
+  const runProgress = MaestroRunProgressV2Schema.parse(value)
+  if (
+    runProgress.run.id !== projection.runId ||
+    runProgress.technical.execution_host_id !== projection.workspace.executionHostId ||
+    runProgress.technical.workspace_key !== projection.workspace.workspaceKey ||
+    runProgress.technical.revision !== projection.revision
+  ) {
+    throw new Error('Runtime Run progress does not match the projected Run authority.')
+  }
+  return { ...projection, runProgress }
 }
 
 function assignNodeWorkspaces(

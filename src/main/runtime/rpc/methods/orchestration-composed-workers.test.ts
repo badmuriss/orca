@@ -80,6 +80,7 @@ describe('orchestration RPC methods', () => {
         accepted: true,
         bytesWritten: 1
       })
+      vi.spyOn(runtime, 'renameTerminal').mockResolvedValue(undefined)
     }
 
     it('rejects a declared caller that disagrees with complete attested evidence', async () => {
@@ -144,7 +145,11 @@ describe('orchestration RPC methods', () => {
     it('starts a fresh agent in the coordinator current worktree', async () => {
       setup()
       mockCurrentWorkerStart()
-      const task = db.createTask({ spec: 'implement worker start' })
+      const task = db.createTask({
+        taskTitle: 'Implement worker start',
+        displayName: 'Worker start engineer',
+        spec: 'implement worker start'
+      })
 
       const result = (await call('orchestration.workerStart', {
         task: task.id,
@@ -171,7 +176,7 @@ describe('orchestration RPC methods', () => {
       // Why: dispatching a worker adopts the tab without changing the visible workspace surface.
       expect(runtime.createTerminal).toHaveBeenCalledWith('id:repo::worktree', {
         startupAgent: 'codex',
-        title: `worker-${task.id}`,
+        title: 'Worker start engineer',
         surfaceOwner: false,
         orchestrationManagedLaunch: true
       })
@@ -179,6 +184,7 @@ describe('orchestration RPC methods', () => {
         'term_worker',
         expect.stringContaining('--dispatch-capability dcap_')
       )
+      expect(runtime.renameTerminal).not.toHaveBeenCalled()
     })
 
     it('applies and reports opaque per-invocation model preferences', async () => {

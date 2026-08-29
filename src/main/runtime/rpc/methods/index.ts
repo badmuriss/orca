@@ -48,6 +48,7 @@ import { AGENT_HOOK_METHODS } from './agent-hooks'
 import { MAESTRO_METHODS } from './maestro'
 import { MAESTRO_LIST_METHODS } from './maestro-list'
 import { MAESTRO_PROJECTION_METHODS } from './maestro-projection'
+import { MAESTRO_RUN_PROGRESS_METHODS } from './maestro-run-progress'
 import { MAESTRO_INTENT_METHODS } from './maestro-intents'
 import { ORCHESTRATION_BROWSER_SURFACE_METHODS } from './orchestration-browser-surface'
 import { MAESTRO_WORKSPACE_CANVAS_METHODS } from './maestro-workspace-canvas'
@@ -76,6 +77,7 @@ export const ALL_RPC_METHODS: readonly RpcAnyMethod[] = [
   ...MAESTRO_METHODS,
   ...MAESTRO_LIST_METHODS,
   ...MAESTRO_PROJECTION_METHODS,
+  ...MAESTRO_RUN_PROGRESS_METHODS,
   ...MAESTRO_INTENT_METHODS,
   ...ORCHESTRATION_BROWSER_SURFACE_METHODS,
   ...MAESTRO_WORKSPACE_CANVAS_METHODS,

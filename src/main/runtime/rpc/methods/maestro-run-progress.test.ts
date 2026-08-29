@@ -1,0 +1,188 @@
+import { describe, expect, it, vi } from 'vitest'
+import type { FolderWorkspace } from '../../../../shared/folder-workspace-types'
+import type { AgentGraphView, MaestroWorkspaceAnchor } from '../../../../shared/maestro-contract'
+import { MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
+import { OrchestrationDb } from '../../orchestration/db/orchestration-db'
+import { applyMaestroProjection } from '../../orchestration/db/maestro/maestro-projection-store'
+import type { RpcContext } from '../core'
+import { ALL_RPC_METHODS } from './index'
+import { MAESTRO_RUN_PROGRESS_METHODS, readMaestroRunProgress } from './maestro-run-progress'
+
+const folder: FolderWorkspace = {
+  id: 'home-1',
+  projectGroupId: 'group-1',
+  name: 'Home',
+  folderPath: '/workspace/home',
+  linkedTask: null,
+  comment: '',
+  isArchived: false,
+  isUnread: false,
+  isPinned: false,
+  sortOrder: 0,
+  lastActivityAt: 0,
+  createdAt: 0,
+  updatedAt: 0
+}
+
+function seed() {
+  const database = new OrchestrationDb(':memory:')
+  const run = database.createRun({
+    objective: 'Project human Run progress',
+    coordinatorHandle: 'coordinator-1',
+    coordinatorPaneKey: 'tab-1:leaf-1'
+  })
+  database.createTask({
+    runId: run.id,
+    taskTitle: 'Implement projector',
+    displayName: 'Progress worker',
+    spec: 'Implement the runtime-owned projector.'
+  })
+  const workspace: MaestroWorkspaceAnchor = {
+    repository_id: 'folder-workspace-group-1',
+    execution_host_id: 'local',
+    workspace_key: 'folder:home-1',
+    run_id: run.id
+  }
+  const view: AgentGraphView = {
+    schema_version: 1,
+    protocol: 'agent-graph-view/v1',
+    kind: 'snapshot',
+    workspace_scope: {
+      schema_version: 1,
+      repository_id: workspace.repository_id,
+      canonical_root: '/workspace/home',
+      execution_host: { id: 'local', boundary: 'local' },
+      orchestration_home: {
+        execution_host_id: 'local',
+        workspace_key: 'folder:home-1',
+        kind: 'folder',
+        path: '/workspace/home'
+      },
+      execution_workspace: {
+        execution_host_id: 'local',
+        workspace_key: 'folder:home-1',
+        kind: 'folder',
+        path: '/workspace/home'
+      },
+      base_revision: 'folder-observation:one',
+      dirty_paths: [],
+      run_id: run.id,
+      coordinator_generation: 1,
+      binding_receipt_ref: 'artifact:bootstrap.json',
+      binding_receipt_hash: `sha256:${'a'.repeat(64)}`
+    },
+    change: 'orchestration-run',
+    run_id: run.id,
+    coordinator: { id: 'coordinator-1', generation: 1 },
+    capabilities: {
+      agents: ['codex'],
+      efforts: ['high'],
+      placement_kinds: ['current-workspace'],
+      watch_deltas: true
+    },
+    nodes: [],
+    edges: [],
+    removed_node_ids: [],
+    removed_edge_ids: [],
+    revision: 4,
+    cursor: null,
+    from_cursor: null,
+    reset_required: false,
+    progress: undefined
+  }
+  applyMaestroProjection.call(database, workspace, view)
+  return { database, run }
+}
+
+function context(
+  database: OrchestrationDb,
+  capabilities?: RpcContext['clientCapabilities']
+): RpcContext {
+  return {
+    runtime: {
+      getOrchestrationDb: () => database,
+      listFolderWorkspaces: () => [folder],
+      listRepos: () => [],
+      getExactWorkerProviderSession: vi.fn(() => null)
+    } as unknown as RpcContext['runtime'],
+    clientCapabilities: capabilities
+  }
+}
+
+describe('Maestro Run progress RPC', () => {
+  it('registers a bounded read method', () => {
+    expect(MAESTRO_RUN_PROGRESS_METHODS.map(({ name }) => name)).toEqual([
+      'maestro.runProgress.get'
+    ])
+    expect(ALL_RPC_METHODS.some(({ name }) => name === 'maestro.runProgress.get')).toBe(true)
+  })
+
+  it('returns runtime-owned v2 progress to a capable client', async () => {
+    const { database, run } = seed()
+    const response = await readMaestroRunProgress(
+      context(database, [MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY]),
+      { execution_host_id: 'local', workspace_key: 'folder:home-1' }
+    )
+
+    expect(response).toMatchObject({
+      schemaVersion: 2,
+      progress: {
+        schema_version: 2,
+        run: { id: run.id, title: 'Project human Run progress' },
+        execution: { total: 1, completed: 0, progress_percent: 0 },
+        projection_health: { state: 'healthy', revision: 4 }
+      }
+    })
+    database.close()
+  })
+
+  it('keeps the v1 projection readable for an older client', async () => {
+    const { database } = seed()
+    const response = await readMaestroRunProgress(context(database, []), {
+      execution_host_id: 'local',
+      workspace_key: 'folder:home-1'
+    })
+
+    expect(response).toEqual({
+      schemaVersion: 1,
+      progress: { available: false, state: 'outcome_unknown' }
+    })
+    database.close()
+  })
+
+  it('reports cleanup uncertainty from a worker execution workspace', async () => {
+    const { database, run } = seed()
+    const lease = database.reserveMaestroTerminalLease({
+      requestId: 'request-remote',
+      executionHostId: 'ssh:worker-host',
+      workspaceKey: 'worktree:remote-worker',
+      runId: run.id,
+      attemptId: 'attempt-remote',
+      role: 'worker',
+      title: 'Remote worker',
+      launchProfile: {
+        agent: 'codex',
+        model: 'gpt-5.6-sol',
+        effort: 'high',
+        permissionMode: 'default',
+        routeRef: null
+      },
+      spawnedBy: 'coordinator-1',
+      ownerPrincipal: 'dispatch:remote',
+      retentionPolicy: 'auto_release'
+    })
+    database.db
+      .prepare(
+        "UPDATE maestro_terminal_leases SET lifecycle_state = 'outcome_unknown' WHERE id = ?"
+      )
+      .run(lease.id)
+
+    const response = await readMaestroRunProgress(
+      context(database, [MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY]),
+      { execution_host_id: 'local', workspace_key: 'folder:home-1' }
+    )
+
+    expect(response.progress?.cleanup_health).toMatchObject({ state: 'unverifiable', count: 1 })
+    database.close()
+  })
+})

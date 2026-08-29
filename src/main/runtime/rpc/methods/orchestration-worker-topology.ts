@@ -1,7 +1,9 @@
 import type { AgentLaunchPreferences } from '../../../../shared/agent-session-host-authority'
+import { buildOrchestrationTaskDisplayMetadata } from '../../../../shared/orchestration-task-display'
 import type { TuiAgent } from '../../../../shared/tui-agent'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import type { OrchestrationDb } from '../../orchestration/db'
+import type { TaskRow } from '../../orchestration/types'
 
 export type WorkerEffect = {
   kind: 'worktree' | 'terminal' | 'setup' | 'dispatch_input'
@@ -37,6 +39,21 @@ export type WorkerSetupReceipt = {
     | 'not_applicable'
 }
 
+export function resolveWorkerTerminalTitle(
+  task: Pick<TaskRow, 'spec' | 'task_title' | 'display_name'>,
+  customTitle?: string | null
+): string {
+  if (customTitle?.trim()) {
+    return customTitle.trim()
+  }
+  const display = buildOrchestrationTaskDisplayMetadata({
+    spec: task.spec,
+    taskTitle: task.task_title,
+    displayName: task.display_name
+  })
+  return display.displayName || display.taskTitle || 'Untitled task'
+}
+
 export function requireWorkerAuthority(runtime: OrcaRuntimeService, terminalHandle: string) {
   const authority = runtime.getOrchestrationDispatchAuthority(terminalHandle)
   const paneKey = authority?.paneKey ?? runtime.getTerminalPaneKey(terminalHandle)
@@ -61,13 +78,14 @@ export async function createExistingWorktreeWorkerTerminal(args: {
   taskId: string
   effects: WorkerEffect[]
 }): Promise<{ handle: string; warning?: string }> {
+  const task = args.runtime.getOrchestrationDb().getTask(args.taskId)
   const terminal = await args.runtime.createTerminal(`id:${args.worktreeId}`, {
     // Why: the agent id is not a shell command — `cursor` resolves to the Cursor
     // desktop app while its CLI is `cursor-agent`. Let the runtime build the
     // configured launcher instead of executing the raw id.
     startupAgent: args.agent,
     ...(args.launchPreferences ? { launchPreferences: args.launchPreferences } : {}),
-    title: `worker-${args.taskId}`,
+    title: task ? resolveWorkerTerminalTitle(task) : 'Untitled task',
     // Why: dispatching a worker is background work; it must not pull the sidebar
     // to the worker's workspace while the user is reading somewhere else.
     surfaceOwner: false,
@@ -133,6 +151,8 @@ export async function createWorkerWorktree(args: {
 }> {
   const { runtime, db, dispatchId, requestedWorktree, coordinatorWorktree, params, effects } = args
   const setupDecision = params.setup ?? 'run'
+  const dispatch = db.getDispatchContextById(dispatchId)
+  const task = dispatch ? db.getTask(dispatch.task_id) : undefined
   db.recordWorkerStage({ dispatchId, stage: 'worktree_creating', effects })
   const created = await runtime.createManagedWorktree({
     repoSelector: params.repo ?? coordinatorWorktree.repoId,
@@ -147,6 +167,7 @@ export async function createWorkerWorktree(args: {
     observeSetupCompletion: true,
     createdWithAgent: args.agent,
     startupAgent: args.agent,
+    ...(task ? { startupTerminalTitle: resolveWorkerTerminalTitle(task) } : {}),
     ...(args.launchPreferences ? { startupLaunchPreferences: args.launchPreferences } : {}),
     activate: false,
     // Why: the worktree's startup terminal IS the orchestration-managed
