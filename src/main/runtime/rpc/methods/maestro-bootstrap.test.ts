@@ -182,8 +182,7 @@ describe('Maestro composed bootstrap', () => {
       dirty_paths: ['src/index.ts']
     })
     expect(runtime.getRuntimeGitStatus).toHaveBeenCalledExactlyOnceWith(
-      'id:worktree:repo-1::/srv/repo',
-      { limit: 0 }
+      'id:worktree:repo-1::/srv/repo'
     )
     database.close()
   })

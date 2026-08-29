@@ -121,7 +121,7 @@ describe('issueWorkspaceBootstrapReceipt', () => {
     })
     expect(receipt.dirty_paths).toHaveLength(WORKSPACE_BOOTSTRAP_DIRTY_PATH_SAMPLE_LIMIT)
     expect(receipt.dirty_paths).toEqual([...receipt.dirty_paths].sort())
-    expect(runtime.getRuntimeGitStatus).toHaveBeenCalledExactlyOnceWith('id:work', { limit: 0 })
+    expect(runtime.getRuntimeGitStatus).toHaveBeenCalledExactlyOnceWith('id:work')
   })
 
   it('uses the remote execution host for Git evidence and preserves the local home', async () => {
@@ -149,7 +149,7 @@ describe('issueWorkspaceBootstrapReceipt', () => {
     expect(receipt.execution_host).toEqual({ id: 'ssh:target-1', boundary: 'remote' })
     expect(receipt.orchestration_home.workspace_key).toBe('folder:home-1')
     expect(receipt.execution_workspace.workspace_key).toBe('worktree:repo-2::/srv/repo')
-    expect(runtime.getRuntimeGitStatus).toHaveBeenCalledExactlyOnceWith('id:remote', { limit: 0 })
+    expect(runtime.getRuntimeGitStatus).toHaveBeenCalledExactlyOnceWith('id:remote')
   })
 
   it('rejects a mismatched execution host before observing Git', async () => {

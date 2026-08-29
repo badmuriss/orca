@@ -236,7 +236,8 @@ export function buildInitialMaestroProjection(
     revision: 0,
     cursor: null,
     from_cursor: null,
-    reset_required: false
+    reset_required: false,
+    progress: undefined
   }
 }
 

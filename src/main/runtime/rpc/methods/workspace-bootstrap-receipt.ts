@@ -239,7 +239,7 @@ async function observeGitRevision(
 > {
   let status: Awaited<ReturnType<OrcaRuntimeService['getRuntimeGitStatus']>>
   try {
-    status = await runtime.getRuntimeGitStatus(selector, { limit: 0 })
+    status = await runtime.getRuntimeGitStatus(selector)
   } catch (error) {
     throw new OrchestrationError(
       'invalid_argument',

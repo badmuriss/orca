@@ -66,6 +66,7 @@ function view(overrides: Partial<AgentGraphView> = {}): AgentGraphView {
     cursor: null,
     from_cursor: null,
     reset_required: false,
+    progress: undefined,
     ...overrides
   }
 }
