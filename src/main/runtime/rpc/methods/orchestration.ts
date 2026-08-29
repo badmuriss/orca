@@ -39,6 +39,7 @@ import type { OrcaRuntimeService } from '../../orca-runtime'
 import type { RunRow } from '../../orchestration/types'
 import { encodeFederatedControlMessage } from '../../orchestration/federation-control-message'
 import { bindCoordinatorMutationPayload } from '../../orchestration/dispatch-message-binding'
+import { readExactWorkerProviderObservation } from '../../orchestration/worker-provider-session'
 import {
   ORCHESTRATION_FEDERATION_CONTROL_MAIL_PROTOCOL_VERSION,
   ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION
@@ -121,6 +122,62 @@ function parseMessageTaskId(payload: string | undefined): string | undefined {
 
 function isWorkerReportOutcome(value: unknown): value is 'succeeded' | 'failed' {
   return value === 'succeeded' || value === 'failed'
+}
+
+type WorkerSettlementActorAuthority =
+  | { valid: true }
+  | {
+      valid: false
+      code: 'sender_not_assignee_session' | 'sender_actor_unverifiable' | 'nested_agents_active'
+      reason: string
+    }
+
+function verifyWorkerSettlementActor(args: {
+  runtime: OrcaRuntimeService
+  terminalHandle: string
+  dispatch: {
+    id: string
+    created_at: string
+    dispatched_at: string | null
+  }
+}): WorkerSettlementActorAuthority {
+  const observedAfter = Date.parse(args.dispatch.dispatched_at ?? args.dispatch.created_at)
+  const session = args.runtime.getExactWorkerProviderSession(
+    args.terminalHandle,
+    Number.isFinite(observedAfter) ? observedAfter : 0
+  )
+  const observation = readExactWorkerProviderObservation(session)
+  const attestation = observation?.actorAttestation
+  if (
+    !session ||
+    !observation ||
+    !attestation ||
+    attestation.eventName !== 'PreToolUse' ||
+    attestation.provider !== session.agent ||
+    attestation.providerSessionId !== session.providerSession.id
+  ) {
+    return {
+      valid: false,
+      code: 'sender_actor_unverifiable',
+      reason: `Dispatch ${args.dispatch.id} completion requires a live lead-provider tool attestation; coordinator review is required.`
+    }
+  }
+  if (attestation.role === 'child') {
+    return {
+      valid: false,
+      code: 'sender_not_assignee_session',
+      reason: `Provider child ${attestation.providerActorId ?? 'unknown'} cannot settle parent Dispatch ${args.dispatch.id}.`
+    }
+  }
+  const activeChildren = observation.subagents.filter((child) => child.state !== 'idle')
+  if (activeChildren.length > 0) {
+    return {
+      valid: false,
+      code: 'nested_agents_active',
+      reason: `Dispatch ${args.dispatch.id} still owns ${activeChildren.length} active native child agent${activeChildren.length === 1 ? '' : 's'}.`
+    }
+  }
+  return { valid: true }
 }
 
 const SendParams = z
@@ -507,6 +564,54 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
             'Remote worker_done requires outcome=succeeded|failed.'
           )
         }
+        if (type === 'worker_done') {
+          const actorAuthority = verifyWorkerSettlementActor({
+            runtime,
+            terminalHandle: from,
+            dispatch: {
+              id: remoteAttachment.dispatch_id,
+              created_at: remoteAttachment.created_at,
+              dispatched_at: null
+            }
+          })
+          if (!actorAuthority.valid) {
+            const relay = db.enqueueFederationRelay({
+              dispatchId: remoteAttachment.dispatch_id,
+              direction: 'to_home',
+              kind: 'status',
+              payload: JSON.stringify({
+                from,
+                subject: `Rejected worker_done: ${params.subject}`,
+                body: actorAuthority.reason,
+                type: 'status',
+                priority: 'high',
+                threadId: params.threadId ?? null,
+                payload: JSON.stringify({
+                  taskId: remoteAttachment.task_id,
+                  dispatchId: remoteAttachment.dispatch_id,
+                  actorSettlementReview: {
+                    code: actorAuthority.code,
+                    reason: actorAuthority.reason
+                  }
+                })
+              })
+            })
+            return {
+              relay: {
+                messageId: relay.message_id,
+                sequence: relay.sequence,
+                dispatchId: relay.dispatch_id,
+                destination: 'run_home',
+                accepted: false
+              },
+              lifecycle: {
+                action: 'rejected',
+                code: actorAuthority.code,
+                reason: actorAuthority.reason
+              }
+            }
+          }
+        }
         const supportsLifecycleSettlement =
           remoteAttachment.protocol_version >=
           ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION
@@ -782,6 +887,32 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
                 reason: authority.reason
               }
             })
+          }
+          if (msg.type === 'worker_done' && capabilityBacked) {
+            const actorAuthority = verifyWorkerSettlementActor({
+              runtime,
+              terminalHandle: from,
+              dispatch
+            })
+            if (!actorAuthority.valid) {
+              db.convertLifecycleMessageToRejection(
+                msg.id,
+                actorAuthority.code,
+                actorAuthority.reason
+              )
+              // Why: actor-rejected completions must not remain actionable worker_done rows.
+              db.db.prepare("UPDATE messages SET type = 'status' WHERE id = ?").run(msg.id)
+              const rejection = db.getMessageById(msg.id) ?? msg
+              runtime.notifyMessageArrived(rejection.to_handle, rejection.type)
+              return withSendWarnings({
+                message: rejection,
+                lifecycle: {
+                  action: 'rejected',
+                  code: actorAuthority.code,
+                  reason: actorAuthority.reason
+                }
+              })
+            }
           }
         }
         // Why: reconcile releases the dispatch lock before waking recipients, else a woken coordinator re-dispatches while the lock is still held.

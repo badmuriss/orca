@@ -49,6 +49,8 @@ describe('buildDispatchPreamble', () => {
     expect(result).toContain('replace it with --outcome failed')
     expect(result).toContain('--files-modified "path/a,path/b"')
     expect(result).toContain('--report-path "<optional: path to the full artifact>"')
+    expect(result).toContain('Native provider subagents cannot send worker_done')
+    expect(result).toContain('every native child is settled or absent')
     expect(result).toMatch(/orchestration send --from term_worker/)
     expect(result).not.toContain('orchestration send --to term_coord')
   })

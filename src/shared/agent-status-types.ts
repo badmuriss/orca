@@ -97,6 +97,21 @@ export type AgentSubagentSnapshot = {
   startedAt: number
 }
 
+/** Runtime-issued lineage for the provider event that produced this status row.
+ *  Live hook observations only: persisted/replayed rows intentionally carry none. */
+export type AgentActorAttestation = {
+  authorityId: string
+  incarnation: number
+  revision: number
+  observedAt: number
+  provider: 'claude' | 'codex'
+  role: 'lead' | 'child'
+  eventName: string
+  providerSessionId?: string
+  providerActorId?: string
+  toolUseId?: string
+}
+
 export type AgentStatusEntry = {
   state: AgentStatusState
   /** Ongoing work that does not require foreground agent execution. Only valid while working. */
@@ -151,6 +166,8 @@ export type AgentStatusEntry = {
   /** Live in-process subagents/teammates of this pane's session. Absent when
    *  none are tracked; the sidebar derives indented child rows from it. */
   subagents?: AgentSubagentSnapshot[]
+  /** Main-runtime proof of which provider actor emitted the latest live hook event. */
+  actorAttestation?: AgentActorAttestation
   /** Provider-owned conversation/session id captured from hook payloads.
    *  Used only for exact CLI resume; Orca terminal ids are not agent-session ids. */
   providerSession?: AgentProviderSessionMetadata
@@ -190,6 +207,8 @@ export type AgentStatusPayload = {
   turnCompletedAt?: number
   /** Live in-process children of the reporting session. See AgentStatusEntry. */
   subagents?: AgentSubagentSnapshot[]
+  /** Main-runtime proof; hook and OSC payload bodies cannot supply this field. */
+  actorAttestation?: AgentActorAttestation
 }
 
 /**
@@ -223,7 +242,8 @@ export function pickParsedAgentStatusPayload(
     ...(row.interrupted !== undefined ? { interrupted: row.interrupted } : {}),
     ...(row.sessionBoundary !== undefined ? { sessionBoundary: row.sessionBoundary } : {}),
     ...(row.turnCompletedAt !== undefined ? { turnCompletedAt: row.turnCompletedAt } : {}),
-    ...(row.subagents !== undefined ? { subagents: row.subagents } : {})
+    ...(row.subagents !== undefined ? { subagents: row.subagents } : {}),
+    ...(row.actorAttestation !== undefined ? { actorAttestation: row.actorAttestation } : {})
   }
 }
 

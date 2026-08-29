@@ -90,6 +90,7 @@ import {
   type AgentStatusIpcPayload,
   type AgentType,
   type AgentStatusState,
+  type AgentActorAttestation,
   type ParsedAgentStatusPayload,
   normalizeAgentStatusPayload
 } from '../../shared/agent-status-types'
@@ -159,6 +160,34 @@ type PersistedAgentHookEventPayload = Omit<
   | 'observation'
 > & {
   launchTokenHash?: string
+}
+
+function issueActorAttestation(
+  payload: AgentHookEventPayload,
+  observation: AgentStatusObservation,
+  origin: AgentStatusObservationOrigin
+): AgentActorAttestation | undefined {
+  if (
+    origin !== 'hook' ||
+    payload.isReplay === true ||
+    payload.providerSessionOnly === true ||
+    (payload.source !== 'claude' && payload.source !== 'codex') ||
+    !payload.hookEventName
+  ) {
+    return undefined
+  }
+  return {
+    authorityId: observation.authorityId,
+    incarnation: observation.incarnation,
+    revision: observation.revision,
+    observedAt: observation.observedAt,
+    provider: payload.source,
+    role: payload.toolAgentId ? 'child' : 'lead',
+    eventName: payload.hookEventName,
+    ...(payload.providerSession ? { providerSessionId: payload.providerSession.id } : {}),
+    ...(payload.toolAgentId ? { providerActorId: payload.toolAgentId } : {}),
+    ...(payload.toolUseId ? { toolUseId: payload.toolUseId } : {})
+  }
 }
 
 type PersistedAgentHookAuthorityCommitment = {
@@ -1584,9 +1613,19 @@ export class AgentHookServer {
     if (!identity.inheritedFromActivePane) {
       this.maybeTrackAgentPromptSent(effectivePayload, previous)
     }
+    const observation = this.stampObservation(boundaryAwarePayload, origin, now)
+    const actorAttestation = issueActorAttestation(boundaryAwarePayload, observation, origin)
     const enriched = {
-      ...this.attachStatusTiming(boundaryAwarePayload, now),
-      observation: this.stampObservation(boundaryAwarePayload, origin, now)
+      ...this.attachStatusTiming(
+        actorAttestation
+          ? {
+              ...boundaryAwarePayload,
+              payload: { ...boundaryAwarePayload.payload, actorAttestation }
+            }
+          : boundaryAwarePayload,
+        now
+      ),
+      observation
     }
     if (
       typeof enriched.payload.turnCompletedAt === 'number' &&
@@ -3382,11 +3421,14 @@ export class AgentHookServer {
         launchToken,
         ...persistedPayload
       } = enrichedPayload
+      const { actorAttestation: _actorAttestation, ...persistedStatusPayload } =
+        persistedPayload.payload
       const launchTokenHash = launchToken?.trim()
         ? createHash('sha256').update(launchToken.trim()).digest('hex')
         : this.hydratedLaunchTokenHashByPaneKey.get(paneKey)
       entries[paneKey] = {
         ...persistedPayload,
+        payload: persistedStatusPayload,
         ...(childOnlyBoundary ? { claudeLeadBoundaryChildOnly: true } : {}),
         ...(launchTokenHash ? { launchTokenHash } : {})
       }

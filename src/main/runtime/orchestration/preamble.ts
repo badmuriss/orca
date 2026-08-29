@@ -128,6 +128,8 @@ the entire suite.
   # Never encode failure only in prose and never silently exit.
   # Include BOTH taskId and dispatchId in the payload so a late completion
   # from a failed retry cannot complete the current dispatch.
+  # Native provider subagents cannot send worker_done for this parent Dispatch.
+  # Wait until every native child is settled or absent before reporting completion.
   ${cli} orchestration send --from ${params.workerHandle}${capabilityFlag} \\
     --type worker_done --subject "<short status>" \\
     --body "<3-sentence summary: what you did, what you found, what's left>" \\
