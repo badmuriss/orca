@@ -1,11 +1,14 @@
+import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import {
-  createWorkspaceBootstrapReceipt,
+  WORKSPACE_BOOTSTRAP_DIRTY_PATH_SAMPLE_LIMIT,
+  WorkspaceBootstrapReceiptV2Schema,
   workspaceIdentity,
-  type WorkspaceBootstrapReceipt,
+  type WorkspaceBootstrapReceiptV2,
   type WorkspaceBootstrapWorkspaceIdentity
 } from '../../../../shared/workspace-bootstrap-receipt'
 import { LOCAL_EXECUTION_HOST_ID, parseExecutionHostId } from '../../../../shared/execution-host'
+import { WORKSPACE_BOOTSTRAP_RECEIPT_V2_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
 import { parseWorkspaceKey, worktreeWorkspaceKey } from '../../../../shared/workspace-scope'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
@@ -37,12 +40,15 @@ const workspaceBootstrapReceiptParams = z
   })
   .strict()
 
-type CoordinatorCaller = {
+export type WorkspaceBootstrapCoordinator = {
   terminalHandle: string
   paneKey: string
 }
 
-function requireCurrentCoordinator(context: RpcContext, runId: string): CoordinatorCaller {
+export function requireWorkspaceBootstrapCoordinator(
+  context: RpcContext,
+  runId: string
+): WorkspaceBootstrapCoordinator {
   const caller =
     context.legacyCoordinatorAuthority ??
     context.orchestrationCompatibilityCallerAuthority ??
@@ -73,9 +79,9 @@ function requireCurrentCoordinator(context: RpcContext, runId: string): Coordina
   return caller
 }
 
-function requireCoordinatorWorkspace(
+export function requireCoordinatorWorkspace(
   runtime: OrcaRuntimeService,
-  caller: CoordinatorCaller,
+  caller: WorkspaceBootstrapCoordinator,
   workspaceKey: string
 ): void {
   const terminal = runtime.getOrchestrationDispatchAuthority(caller.terminalHandle)
@@ -160,7 +166,7 @@ function isRemoteExecutionHost(executionHostId: string): boolean {
 export async function issueWorkspaceBootstrapReceipt(
   runtime: OrcaRuntimeService,
   request: WorkspaceBootstrapReceiptRequest
-): Promise<WorkspaceBootstrapReceipt> {
+): Promise<WorkspaceBootstrapReceiptV2> {
   if (!request.runId || request.runId.trim().length === 0) {
     throw new OrchestrationError('invalid_argument', 'A validated run ID is required.')
   }
@@ -190,9 +196,50 @@ export async function issueWorkspaceBootstrapReceipt(
     )
   }
 
+  const revision =
+    executionTarget.kind === 'folder'
+      ? {
+          base_revision_kind: 'folder_observation' as const,
+          base_revision: `folder-observation:${randomUUID()}`,
+          dirty_state: 'not_applicable' as const,
+          dirty_path_count: 0,
+          dirty_paths: [],
+          dirty_paths_truncated: false
+        }
+      : await observeGitRevision(runtime, request.executionWorkspaceSelector)
+
+  return WorkspaceBootstrapReceiptV2Schema.parse({
+    schema_version: 2,
+    repository_id: home.repositoryId,
+    canonical_root: home.path,
+    execution_host: {
+      id: executionTarget.executionHostId,
+      boundary: isRemoteExecutionHost(executionTarget.executionHostId) ? 'remote' : 'local'
+    },
+    orchestration_home: workspaceIdentityFor(home),
+    execution_workspace: workspaceIdentityFor(executionTarget),
+    ...revision,
+    authority: { kind: 'orca', scope: 'run', issued_for_run_id: request.runId }
+  })
+}
+
+async function observeGitRevision(
+  runtime: OrcaRuntimeService,
+  selector: string
+): Promise<
+  Pick<
+    WorkspaceBootstrapReceiptV2,
+    | 'base_revision_kind'
+    | 'base_revision'
+    | 'dirty_state'
+    | 'dirty_path_count'
+    | 'dirty_paths'
+    | 'dirty_paths_truncated'
+  >
+> {
   let status: Awaited<ReturnType<OrcaRuntimeService['getRuntimeGitStatus']>>
   try {
-    status = await runtime.getRuntimeGitStatus(request.executionWorkspaceSelector)
+    status = await runtime.getRuntimeGitStatus(selector, { limit: 0 })
   } catch (error) {
     throw new OrchestrationError(
       'invalid_argument',
@@ -207,23 +254,19 @@ export async function issueWorkspaceBootstrapReceipt(
       'The execution workspace has no committed HEAD to issue a base_revision from.'
     )
   }
-  // Why: deterministic receipt output — a stable field order the caller can
-  // diff/hash without normalizing Set/Map iteration order itself.
-  const dirtyPaths = [...new Set(status.entries.map((entry) => entry.path))].sort()
-
-  return createWorkspaceBootstrapReceipt({
-    repository_id: home.repositoryId,
-    canonical_root: home.path,
-    execution_host: {
-      id: executionTarget.executionHostId,
-      boundary: isRemoteExecutionHost(executionTarget.executionHostId) ? 'remote' : 'local'
-    },
-    orchestration_home: workspaceIdentityFor(home),
-    execution_workspace: workspaceIdentityFor(executionTarget),
+  const dirtyPathSet = new Set(status.entries.map((entry) => entry.path))
+  const dirtyPathCount = dirtyPathSet.size
+  const dirtyPaths = [...dirtyPathSet]
+    .sort((left, right) => left.localeCompare(right))
+    .slice(0, WORKSPACE_BOOTSTRAP_DIRTY_PATH_SAMPLE_LIMIT)
+  return {
+    base_revision_kind: 'git_head',
     base_revision: status.head,
+    dirty_state: dirtyPathCount === 0 ? 'clean' : 'dirty',
+    dirty_path_count: dirtyPathCount,
     dirty_paths: dirtyPaths,
-    issued_for_run_id: request.runId
-  })
+    dirty_paths_truncated: dirtyPathCount > dirtyPaths.length
+  }
 }
 
 export const ORCHESTRATION_WORKSPACE_BOOTSTRAP_RECEIPT_METHODS: RpcMethod[] = [
@@ -231,7 +274,16 @@ export const ORCHESTRATION_WORKSPACE_BOOTSTRAP_RECEIPT_METHODS: RpcMethod[] = [
     name: 'orchestration.workspaceBootstrapReceipt',
     params: workspaceBootstrapReceiptParams,
     handler: async (request, context) => {
-      const caller = requireCurrentCoordinator(context, request.runId)
+      if (
+        context.clientCapabilities !== undefined &&
+        !context.clientCapabilities.includes(WORKSPACE_BOOTSTRAP_RECEIPT_V2_RUNTIME_CAPABILITY)
+      ) {
+        throw new OrchestrationError(
+          'update_required',
+          'Workspace bootstrap receipt v2 is required; update the calling Orca client.'
+        )
+      }
+      const caller = requireWorkspaceBootstrapCoordinator(context, request.runId)
       const receipt = await issueWorkspaceBootstrapReceipt(context.runtime, request)
       requireCoordinatorWorkspace(context.runtime, caller, receipt.orchestration_home.workspace_key)
       return receipt

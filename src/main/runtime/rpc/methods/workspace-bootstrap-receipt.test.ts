@@ -1,18 +1,23 @@
 import { describe, expect, it, vi } from 'vitest'
-import { issueWorkspaceBootstrapReceipt } from './workspace-bootstrap-receipt'
+import { WORKSPACE_BOOTSTRAP_DIRTY_PATH_SAMPLE_LIMIT } from '../../../../shared/workspace-bootstrap-receipt'
 import { OrcaRuntimeService } from '../../orca-runtime'
+import { issueWorkspaceBootstrapReceipt } from './workspace-bootstrap-receipt'
+
+const HEAD = 'a'.repeat(40)
+
+type ResolvedWorkspace = { id: string; repoId: string; path: string; hostId: string }
 
 function runtimeWith(
-  worktreesBySelector: Record<string, { id: string; repoId: string; path: string; hostId: string }>,
+  workspaces: Record<string, ResolvedWorkspace>,
   status: { head: string | null; entries: { path: string }[] } | (() => never)
 ): OrcaRuntimeService {
   const runtime = new OrcaRuntimeService()
   vi.spyOn(runtime, 'showManagedTerminalWorkspace').mockImplementation(async (selector) => {
-    const worktree = worktreesBySelector[selector]
-    if (!worktree) {
+    const workspace = workspaces[selector]
+    if (!workspace) {
       throw new Error(`selector_not_found: ${selector}`)
     }
-    return worktree as never
+    return workspace as never
   })
   vi.spyOn(runtime, 'getRuntimeGitStatus').mockImplementation(async () => {
     if (typeof status === 'function') {
@@ -23,298 +28,176 @@ function runtimeWith(
   return runtime
 }
 
+const home: ResolvedWorkspace = {
+  id: 'folder:home-1',
+  repoId: 'folder-workspace:group-1',
+  path: '/workspace/home',
+  hostId: 'local'
+}
+
+function request(overrides: Partial<Parameters<typeof issueWorkspaceBootstrapReceipt>[1]> = {}) {
+  return {
+    runId: 'run-1',
+    orchestrationHomeSelector: 'id:home',
+    executionWorkspaceSelector: 'id:home',
+    executionHostId: 'local',
+    ...overrides
+  }
+}
+
 describe('issueWorkspaceBootstrapReceipt', () => {
-  it('rejects a request with no validated run ID', async () => {
-    const runtime = runtimeWith({}, { head: 'abc123', entries: [] })
-    await expect(
-      issueWorkspaceBootstrapReceipt(runtime, {
-        runId: '',
-        orchestrationHomeSelector: 'id:home',
-        executionWorkspaceSelector: 'id:home',
-        executionHostId: 'local'
-      })
-    ).rejects.toThrow('validated run ID')
+  it('rejects a request with no validated Run ID', async () => {
+    const runtime = runtimeWith({}, { head: HEAD, entries: [] })
+    await expect(issueWorkspaceBootstrapReceipt(runtime, request({ runId: '' }))).rejects.toThrow(
+      'validated run ID'
+    )
   })
 
-  it('preserves the exact folder:<id> workspace_key and derives repository_id from it, not by id-equality guessing', async () => {
+  it('issues a folder observation without probing Git or inventing dirty state', async () => {
+    const runtime = runtimeWith({ 'id:home': home }, { head: HEAD, entries: [] })
+
+    const receipt = await issueWorkspaceBootstrapReceipt(runtime, request())
+
+    expect(receipt).toMatchObject({
+      schema_version: 2,
+      repository_id: 'home-1',
+      canonical_root: '/workspace/home',
+      execution_host: { id: 'local', boundary: 'local' },
+      orchestration_home: {
+        kind: 'folder',
+        workspace_key: 'folder:home-1',
+        path: '/workspace/home'
+      },
+      execution_workspace: {
+        kind: 'folder',
+        workspace_key: 'folder:home-1',
+        path: '/workspace/home'
+      },
+      base_revision_kind: 'folder_observation',
+      dirty_state: 'not_applicable',
+      dirty_path_count: 0,
+      dirty_paths: [],
+      dirty_paths_truncated: false,
+      authority: { kind: 'orca', scope: 'run', issued_for_run_id: 'run-1' }
+    })
+    expect(receipt.base_revision).toMatch(/^folder-observation:/)
+    expect(runtime.getRuntimeGitStatus).not.toHaveBeenCalled()
+  })
+
+  it('observes exact local Git HEAD and deterministic bounded dirty evidence', async () => {
+    const dirtyPaths = Array.from(
+      { length: WORKSPACE_BOOTSTRAP_DIRTY_PATH_SAMPLE_LIMIT + 2 },
+      (_, index) => `src/${String(index).padStart(3, '0')}.ts`
+    ).toReversed()
     const runtime = runtimeWith(
       {
-        'id:home': {
-          id: 'folder:folder-1',
-          repoId: 'folder-workspace:pg-1',
-          path: '/home/user/projects/folder-1',
+        'id:home': home,
+        'id:work': {
+          id: 'repo-1::/workspace/repo',
+          repoId: 'repo-1',
+          path: '/workspace/repo',
           hostId: 'local'
         }
       },
-      { head: 'abc123def', entries: [] }
+      { head: HEAD, entries: [...dirtyPaths.map((path) => ({ path })), { path: dirtyPaths[0] }] }
     )
 
-    const receipt = await issueWorkspaceBootstrapReceipt(runtime, {
-      runId: 'run-1',
-      orchestrationHomeSelector: 'id:home',
-      executionWorkspaceSelector: 'id:home',
-      executionHostId: 'local'
-    })
-
-    expect(receipt.repository_id).toBe('folder-1')
-    expect(receipt.orchestration_home).toMatchObject({
-      kind: 'folder',
-      workspace_key: 'folder:folder-1',
-      path: '/home/user/projects/folder-1'
-    })
-    expect(receipt.orchestration_home.worktree_path).toBeUndefined()
-    expect(receipt.canonical_root).toBe('/home/user/projects/folder-1')
-    expect(receipt.execution_host).toEqual({ id: 'local', boundary: 'local' })
-    expect(receipt.authority).toEqual({ kind: 'orca', scope: 'run', issued_for_run_id: 'run-1' })
-  })
-
-  it('preserves the exact worktree:<repoId>::<path> workspace_key for a git worktree', async () => {
-    const runtime = runtimeWith(
-      {
-        'id:home': {
-          id: 'repo-1::worktree-1',
-          repoId: 'repo-1',
-          path: '/home/user/repos/repo-1/worktree-1',
-          hostId: 'local'
-        }
-      },
-      { head: 'deadbeef', entries: [] }
+    const receipt = await issueWorkspaceBootstrapReceipt(
+      runtime,
+      request({ executionWorkspaceSelector: 'id:work' })
     )
 
-    const receipt = await issueWorkspaceBootstrapReceipt(runtime, {
-      runId: 'run-1',
-      orchestrationHomeSelector: 'id:home',
-      executionWorkspaceSelector: 'id:home',
-      executionHostId: 'local'
+    expect(receipt).toMatchObject({
+      base_revision_kind: 'git_head',
+      base_revision: HEAD,
+      dirty_state: 'dirty',
+      dirty_path_count: WORKSPACE_BOOTSTRAP_DIRTY_PATH_SAMPLE_LIMIT + 2,
+      dirty_paths_truncated: true,
+      execution_workspace: {
+        kind: 'git-worktree',
+        workspace_key: 'worktree:repo-1::/workspace/repo',
+        worktree_path: '/workspace/repo'
+      }
     })
-
-    expect(receipt.repository_id).toBe('repo-1')
-    expect(receipt.orchestration_home).toMatchObject({
-      kind: 'git-worktree',
-      workspace_key: 'worktree:repo-1::worktree-1',
-      path: '/home/user/repos/repo-1/worktree-1',
-      worktree_path: '/home/user/repos/repo-1/worktree-1'
-    })
+    expect(receipt.dirty_paths).toHaveLength(WORKSPACE_BOOTSTRAP_DIRTY_PATH_SAMPLE_LIMIT)
+    expect(receipt.dirty_paths).toEqual([...receipt.dirty_paths].sort())
+    expect(runtime.getRuntimeGitStatus).toHaveBeenCalledExactlyOnceWith('id:work', { limit: 0 })
   })
 
-  it('keeps a Windows canonical_root path intact', async () => {
+  it('uses the remote execution host for Git evidence and preserves the local home', async () => {
     const runtime = runtimeWith(
       {
-        'id:home': {
-          id: 'repo-1::worktree-1',
-          repoId: 'repo-1',
-          path: 'C:\\Users\\dev\\repo-1\\worktree-1',
-          hostId: 'local'
-        }
-      },
-      { head: 'deadbeef', entries: [] }
-    )
-
-    const receipt = await issueWorkspaceBootstrapReceipt(runtime, {
-      runId: 'run-1',
-      orchestrationHomeSelector: 'id:home',
-      executionWorkspaceSelector: 'id:home',
-      executionHostId: 'local'
-    })
-
-    expect(receipt.canonical_root).toBe('C:\\Users\\dev\\repo-1\\worktree-1')
-  })
-
-  it('keeps a local orchestration home distinct from a remote SSH execution workspace, reading status from the remote selector', async () => {
-    const runtime = runtimeWith(
-      {
-        'id:home': {
-          id: 'repo-1::worktree-1',
-          repoId: 'repo-1',
-          path: '/home/user/repos/repo-1/worktree-1',
-          hostId: 'local'
-        },
+        'id:home': home,
         'id:remote': {
-          id: 'repo-2::remote-worktree',
+          id: 'repo-2::/srv/repo',
           repoId: 'repo-2',
-          path: '/home/remote/repo-2/remote-worktree',
+          path: '/srv/repo',
           hostId: 'ssh:target-1'
         }
       },
-      { head: 'cafef00d', entries: [] }
-    )
-    const statusSpy = vi.mocked(runtime.getRuntimeGitStatus)
-
-    const receipt = await issueWorkspaceBootstrapReceipt(runtime, {
-      runId: 'run-1',
-      orchestrationHomeSelector: 'id:home',
-      executionWorkspaceSelector: 'id:remote',
-      executionHostId: 'ssh:target-1'
-    })
-
-    expect(receipt.orchestration_home.workspace_key).toBe('worktree:repo-1::worktree-1')
-    expect(receipt.execution_workspace.workspace_key).toBe('worktree:repo-2::remote-worktree')
-    expect(receipt.execution_host).toEqual({ id: 'ssh:target-1', boundary: 'remote' })
-    expect(receipt.orchestration_home).not.toEqual(receipt.execution_workspace)
-    // Why: the git-status probe must run against the remote execution
-    // workspace's own selector, never against the (distinct) local home.
-    expect(statusSpy).toHaveBeenCalledExactlyOnceWith('id:remote')
-  })
-
-  it('treats a runtime-owned peer host as remote, not just ssh hosts', async () => {
-    const runtime = runtimeWith(
-      {
-        'id:home': {
-          id: 'repo-1::worktree-1',
-          repoId: 'repo-1',
-          path: '/home/user/repos/repo-1/worktree-1',
-          hostId: 'local'
-        },
-        'id:peer': {
-          id: 'repo-3::peer-worktree',
-          repoId: 'repo-3',
-          path: '/home/peer/repo-3/peer-worktree',
-          hostId: 'runtime:11111111-1111-4111-8111-111111111111'
-        }
-      },
-      { head: 'cafef00d', entries: [] }
+      { head: 'b'.repeat(40), entries: [{ path: 'src/index.ts' }] }
     )
 
-    const receipt = await issueWorkspaceBootstrapReceipt(runtime, {
-      runId: 'run-1',
-      orchestrationHomeSelector: 'id:home',
-      executionWorkspaceSelector: 'id:peer',
-      executionHostId: 'runtime:11111111-1111-4111-8111-111111111111'
-    })
-
-    expect(receipt.execution_host).toEqual({
-      id: 'runtime:11111111-1111-4111-8111-111111111111',
-      boundary: 'remote'
-    })
-  })
-
-  it('rejects an orchestration home that resolves to a remote host', async () => {
-    const runtime = runtimeWith(
-      {
-        'id:remote-home': {
-          id: 'repo-1::worktree-1',
-          repoId: 'repo-1',
-          path: '/home/remote/repo-1/worktree-1',
-          hostId: 'ssh:target-1'
-        }
-      },
-      { head: 'cafef00d', entries: [] }
-    )
-
-    await expect(
-      issueWorkspaceBootstrapReceipt(runtime, {
-        runId: 'run-1',
-        orchestrationHomeSelector: 'id:remote-home',
-        executionWorkspaceSelector: 'id:remote-home',
+    const receipt = await issueWorkspaceBootstrapReceipt(
+      runtime,
+      request({
+        executionWorkspaceSelector: 'id:remote',
         executionHostId: 'ssh:target-1'
       })
-    ).rejects.toThrow('orchestration-home workspace must be local')
+    )
+
+    expect(receipt.execution_host).toEqual({ id: 'ssh:target-1', boundary: 'remote' })
+    expect(receipt.orchestration_home.workspace_key).toBe('folder:home-1')
+    expect(receipt.execution_workspace.workspace_key).toBe('worktree:repo-2::/srv/repo')
+    expect(runtime.getRuntimeGitStatus).toHaveBeenCalledExactlyOnceWith('id:remote', { limit: 0 })
   })
 
-  it('rejects a caller-supplied executionHostId that mismatches the resolved host, without probing status', async () => {
+  it('rejects a mismatched execution host before observing Git', async () => {
     const runtime = runtimeWith(
       {
-        'id:home': {
-          id: 'repo-1::worktree-1',
-          repoId: 'repo-1',
-          path: '/home/user/repos/repo-1/worktree-1',
-          hostId: 'local'
-        },
+        'id:home': home,
         'id:remote': {
-          id: 'repo-2::remote-worktree',
+          id: 'repo-2::/srv/repo',
           repoId: 'repo-2',
-          path: '/home/remote/repo-2/remote-worktree',
+          path: '/srv/repo',
           hostId: 'ssh:target-1'
         }
       },
-      { head: 'cafef00d', entries: [] }
+      { head: HEAD, entries: [] }
     )
-    const statusSpy = vi.mocked(runtime.getRuntimeGitStatus)
 
     await expect(
-      issueWorkspaceBootstrapReceipt(runtime, {
-        runId: 'run-1',
-        orchestrationHomeSelector: 'id:home',
-        executionWorkspaceSelector: 'id:remote',
-        // Why: caller expects a different host (stale cache, wrong target)
-        // than what the host itself actually resolves for this selector.
-        executionHostId: 'ssh:wrong-target'
-      })
+      issueWorkspaceBootstrapReceipt(
+        runtime,
+        request({ executionWorkspaceSelector: 'id:remote', executionHostId: 'ssh:other' })
+      )
     ).rejects.toThrow('Execution host mismatch')
-    expect(statusSpy).not.toHaveBeenCalled()
+    expect(runtime.getRuntimeGitStatus).not.toHaveBeenCalled()
   })
 
-  it('sorts and dedupes dirty_paths for a deterministic receipt', async () => {
-    const runtime = runtimeWith(
-      {
-        'id:home': {
-          id: 'repo-1::worktree-1',
-          repoId: 'repo-1',
-          path: '/home/user/repos/repo-1/worktree-1',
-          hostId: 'local'
-        }
-      },
-      {
-        head: 'cafef00d',
-        entries: [{ path: 'src/z.ts' }, { path: 'src/a.ts' }, { path: 'src/a.ts' }]
-      }
-    )
-
-    const receipt = await issueWorkspaceBootstrapReceipt(runtime, {
-      runId: 'run-1',
-      orchestrationHomeSelector: 'id:home',
-      executionWorkspaceSelector: 'id:home',
-      executionHostId: 'local'
+  it('fails typed when Git evidence is unavailable or has no committed HEAD', async () => {
+    const gitWorkspace = {
+      id: 'repo-1::/workspace/repo',
+      repoId: 'repo-1',
+      path: '/workspace/repo',
+      hostId: 'local'
+    }
+    const unavailable = runtimeWith({ 'id:home': home, 'id:work': gitWorkspace }, () => {
+      throw new Error('SSH Git provider is unavailable')
     })
-
-    expect(receipt.dirty_paths).toEqual(['src/a.ts', 'src/z.ts'])
-  })
-
-  it('fails typed instead of fabricating a snapshot when the execution host is unobservable', async () => {
-    const runtime = runtimeWith(
-      {
-        'id:home': {
-          id: 'repo-1::worktree-1',
-          repoId: 'repo-1',
-          path: '/home/user/repos/repo-1/worktree-1',
-          hostId: 'local'
-        }
-      },
-      () => {
-        throw new Error('SSH Git provider is not registered for this connection')
-      }
-    )
-
     await expect(
-      issueWorkspaceBootstrapReceipt(runtime, {
-        runId: 'run-1',
-        orchestrationHomeSelector: 'id:home',
-        executionWorkspaceSelector: 'id:home',
-        executionHostId: 'local'
-      })
+      issueWorkspaceBootstrapReceipt(
+        unavailable,
+        request({ executionWorkspaceSelector: 'id:work' })
+      )
     ).rejects.toThrow('Could not observe Git status')
-  })
 
-  it('fails typed when the execution workspace has no committed HEAD', async () => {
-    const runtime = runtimeWith(
-      {
-        'id:home': {
-          id: 'repo-1::worktree-1',
-          repoId: 'repo-1',
-          path: '/home/user/repos/repo-1/worktree-1',
-          hostId: 'local'
-        }
-      },
+    const unborn = runtimeWith(
+      { 'id:home': home, 'id:work': gitWorkspace },
       { head: null, entries: [] }
     )
-
     await expect(
-      issueWorkspaceBootstrapReceipt(runtime, {
-        runId: 'run-1',
-        orchestrationHomeSelector: 'id:home',
-        executionWorkspaceSelector: 'id:home',
-        executionHostId: 'local'
-      })
+      issueWorkspaceBootstrapReceipt(unborn, request({ executionWorkspaceSelector: 'id:work' }))
     ).rejects.toThrow('no committed HEAD')
   })
 })

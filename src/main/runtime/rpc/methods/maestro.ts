@@ -16,6 +16,7 @@ import {
   resolveMaestroLayoutPrincipal,
   resolveMaestroPrincipal
 } from '../maestro-principal'
+import { MAESTRO_BOOTSTRAP_METHODS } from './maestro-bootstrap'
 
 const documentParams = z.object({ scope: MaestroDocumentReadScopeSchema }).strict()
 const deltaParams = z
@@ -49,12 +50,29 @@ function requireRequestAuthority(
 }
 
 export const MAESTRO_METHODS: RpcMethod[] = [
+  ...MAESTRO_BOOTSTRAP_METHODS,
   defineMethod({
     name: 'maestro.document.get',
     params: documentParams,
     handler: async ({ scope }, context) => {
       const resolvedScope = await resolveMaestroDocumentReadScope(context, scope)
-      return context.runtime.getOrchestrationDb().getMaestroDocument(resolvedScope)
+      const database = context.runtime.getOrchestrationDb()
+      const document = database.getMaestroDocument(resolvedScope)
+      const projection = getMaestroProjection.call(database, resolvedScope)
+      if (!projection && document.state === 'empty') {
+        return document
+      }
+      return {
+        ...document,
+        documentState: document.state,
+        documentRevision: document.revision,
+        projectionState: projection ? 'ready' : 'empty',
+        projectionRevision: projection?.revision ?? null,
+        recoveryHint:
+          document.state === 'empty' && projection
+            ? 'A projected Run exists without an authorable document. Use maestro projection show to inspect it.'
+            : null
+      }
     }
   }),
   defineMethod({
