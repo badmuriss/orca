@@ -80,7 +80,11 @@ describe('orchestration RPC methods', () => {
         accepted: true,
         bytesWritten: 1
       })
-      vi.spyOn(runtime, 'renameTerminal').mockResolvedValue(undefined)
+      vi.spyOn(runtime, 'renameTerminal').mockResolvedValue({
+        handle: 'term_worker',
+        tabId: 'tab_worker',
+        title: 'Worker start engineer'
+      })
     }
 
     it('rejects a declared caller that disagrees with complete attested evidence', async () => {

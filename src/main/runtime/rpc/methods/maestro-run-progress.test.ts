@@ -182,7 +182,10 @@ describe('Maestro Run progress RPC', () => {
       { execution_host_id: 'local', workspace_key: 'folder:home-1' }
     )
 
-    expect(response.progress?.cleanup_health).toMatchObject({ state: 'unverifiable', count: 1 })
+    if (response.schemaVersion !== 2) {
+      throw new Error(`Expected v2 progress, received ${response.schemaVersion ?? 'none'}.`)
+    }
+    expect(response.progress.cleanup_health).toMatchObject({ state: 'unverifiable', count: 1 })
     database.close()
   })
 })
