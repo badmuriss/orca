@@ -16,63 +16,63 @@
     {
       "visual": "Visual: och-active-expanded-desktop | Maestro Canvas Run progress | desktop | 1920x1080 | active two-worker Run expanded dark",
       "file": "desktop/och-active-expanded-desktop.png",
-      "sha256": "12f1ce369b88a32bf898b739c985f4004fdecfbffd39565ca0a307a652b1e7a8",
+      "sha256": "8a11871bfac2941abc25f22a81ac70bac398ccb50115dc454fcb4148da4e8a80",
       "grade": "observed",
       "observation": "The objective leads the expanded panel, worker functions and activities scan in order, and the next step remains distinct. Text is legible with balanced spacing; panel and controls stay inside the canvas without clipping, overlap, or horizontal overflow. Running state, progress, dismiss control, and technical-details disclosure are visually correct and have recognizable control affordances."
     },
     {
       "visual": "Visual: och-active-expanded-notebook | Maestro Canvas Run progress | notebook | 1366x768 | active two-worker Run expanded dark",
       "file": "desktop/och-active-expanded-notebook.png",
-      "sha256": "3afe8b488841c3fcd867ca0b06635267d933a3a16cf7c29e9e1376a38cb8f096",
+      "sha256": "07c7fc1c66564d06c055ba3c15e341574a81f054fd0437c061c742fa722cf4ab",
       "grade": "observed",
       "observation": "The same objective, two current workers, and next step retain their hierarchy at notebook width. Typography and row spacing remain readable, the panel fits vertically, and no panel content clips or overflows; the terminal truncation behind the overlay is confined to the underlying resizable surface. State labels and icon controls remain perceivable."
     },
     {
       "visual": "Visual: och-blocked-nested-desktop | Maestro Canvas Run progress | desktop | 1920x1080 | blocked Run with nested child activity light",
       "file": "desktop/och-blocked-nested-desktop.png",
-      "sha256": "64cc85a26b7e3b794a9a0348855bde124003b41762da34748cdf031554838bfc",
+      "sha256": "b1badbd8d790efc520c1b981ceaa9454e2fe00717f70c6dc5a5b0564cb2d29dd",
       "grade": "observed",
       "observation": "Blocked status, current work, blocker, and native child activity form a clear descending hierarchy. Light-theme contrast, typography, and section spacing are consistent; the child path and disclosure fit with no clipping or horizontal overflow. The nested activity is visibly parent-owned and the restore/dismiss affordances remain identifiable."
     },
     {
       "visual": "Visual: och-blocked-nested-notebook | Maestro Canvas Run progress | notebook | 1366x768 | blocked Run with nested child activity light",
       "file": "desktop/och-blocked-nested-notebook.png",
-      "sha256": "60c39d83a57e181945544de93624276d7ff192e0b42b104ae9519bf640001665",
+      "sha256": "b494f72e915c8c4df9009657879a600573353223a7028c27954c080b795864d2",
       "grade": "observed",
       "observation": "The blocker and child-activity sections remain fully visible and ordered at notebook size. Labels, paths, and descriptions keep readable weight and spacing, while the panel edges and disclosure avoid clipping and horizontal overflow. The blocked state is explicit without relying on color alone."
     },
     {
       "visual": "Visual: och-compact-desktop | Maestro Canvas Run progress | desktop | 1920x1080 | compact active Run dark",
       "file": "desktop/och-compact-desktop.png",
-      "sha256": "b9d55a8129463026d1ed2c837c87cc83ec1d0faeda45d738de40ac89dc39d007",
+      "sha256": "8938483e753d114099a30ce7d42b7b57999257b69fdb81da412a4d5a7e3b2817",
       "grade": "observed",
       "observation": "The compact strip prioritizes the objective, bounded activity, count, and Running label without card clutter. Text and icons align on one readable row with restrained spacing, no clipping, and no overflow. Status is conveyed by label as well as indicator, and expand/hide controls remain discoverable."
     },
     {
       "visual": "Visual: och-complete-warning-desktop | Maestro Canvas Run progress | desktop | 1920x1080 | completed Run with recent outcomes and cleanup warning dark",
       "file": "desktop/och-complete-warning-desktop.png",
-      "sha256": "9c13adcf1d6c006f220b141244550ac492be4f3aeb4808e4beba52ee5c227f6c",
+      "sha256": "c4a40b148d3f06bb2f5df3f7b4da95137eba24b384656013624d71307511a548",
       "grade": "observed",
       "observation": "Completed and 100 percent remain dominant while recent outcomes and the separate cleanup warning are independently grouped. Technical identifiers use a subordinate monospace treatment with copy affordances; all rows fit without clipping or horizontal overflow. Spacing and contrast distinguish final outcome from health state, and controls are visibly actionable."
     },
     {
       "visual": "Visual: och-complete-warning-notebook | Maestro Canvas Run progress | notebook | 1366x768 | completed Run with recent outcomes and cleanup warning dark",
       "file": "desktop/och-complete-warning-notebook.png",
-      "sha256": "958b7c01da41a449fb6a00a5450c73c81cce53e352a948cfcb065b94b074d3b2",
+      "sha256": "0a07c6292f2f369b29b8897bdceecc1ad152d8b183861fd75eb9243bad2397cc",
       "grade": "observed",
       "observation": "At notebook width, 100 percent completion, three recent outcomes, cleanup warning, and technical details preserve their hierarchy. Typography remains readable and the panel stays within the viewport with no internal clipping or horizontal overflow. Outcome and warning remain text-labeled, while disclosure and copy actions retain recognizable targets."
     },
     {
       "visual": "Visual: och-hidden-restore-desktop | Maestro Canvas Run progress | desktop | 1920x1080 | hidden panel with restore control dark",
       "file": "desktop/och-hidden-restore-desktop.png",
-      "sha256": "48aed74734809f5987c08e2e4ffda866c8f725972639be75122f4847424d75dc",
+      "sha256": "ab35acc3005fd87b0d88a4c42810f8ddd5ab12c8f441ccd698b7604c095caafb",
       "grade": "observed",
       "observation": "The panel is absent and a quiet canvas control preserves the objective plus Running state. The control has clean alignment, readable type, sufficient separation from canvas tools, and no clipping or overflow. Its labeled status and bounded shape make the restore target discoverable without forcing the panel open."
     },
     {
       "visual": "Visual: och-hidden-restore-notebook | Maestro Canvas Run progress | notebook | 1366x768 | hidden panel with restore control dark",
       "file": "desktop/och-hidden-restore-notebook.png",
-      "sha256": "e3e94dfa4893bc7973730cb4f91f00f1bae6796ab9c883ed8fe6ff9c27eb72de",
+      "sha256": "634b00d00f6ebf2fb809c4393f04b0ad03a30fa446d5e3f717dabb5280a2576b",
       "grade": "observed",
       "observation": "The hidden state leaves a compact restore control at notebook size without obscuring the working canvas. Objective and Running label remain legible, spacing is restrained, and no edge clipping or horizontal overflow appears. The persistent text label gives the control an accessible visual purpose."
     },
