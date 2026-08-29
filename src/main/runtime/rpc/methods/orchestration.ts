@@ -888,7 +888,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
               }
             })
           }
-          if (msg.type === 'worker_done' && capabilityBacked) {
+          if (msg.type === 'worker_done' && capabilityBacked && dispatch) {
             const actorAuthority = verifyWorkerSettlementActor({
               runtime,
               terminalHandle: from,
