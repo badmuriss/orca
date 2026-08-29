@@ -1,7 +1,7 @@
 import type { OrcaRuntimeService } from '../orca-runtime'
 import type { inspectWorkerTerminal } from '../rpc/methods/orchestration-worker-observation'
 import type { OrchestrationDb } from './db'
-import { workerTerminalLeaseIsCurrent } from './db/worker-terminal/worker-terminal-release-identity'
+import { exitedWorkerTerminalLeaseIsCurrent } from './db/worker-terminal/worker-terminal-release-identity'
 import type { WorkerTerminalResourceRow } from './worker-terminal-ownership'
 
 type WorkerTerminalObservation = Awaited<ReturnType<typeof inspectWorkerTerminal>>
@@ -32,7 +32,13 @@ export async function reconcileExitedWorkerTerminalRelease(args: {
   const evidenceMatches =
     workerTerminalWorkspaceIsCurrent(args.resource, args.observation) &&
     archive?.resource_id === args.resource.id &&
-    workerTerminalLeaseIsCurrent(args.runtime, args.db, args.dispatchId, args.resource) &&
+    exitedWorkerTerminalLeaseIsCurrent(
+      args.db,
+      args.dispatchId,
+      args.resource,
+      args.observation.terminal,
+      args.observation.exact
+    ) &&
     workerProviderSessionIsCurrent(
       args.resource,
       args.providerSessionBeforeArchive,
@@ -60,7 +66,15 @@ export async function reconcileExitedWorkerTerminalRelease(args: {
           : 'The exact worker process is unverifiable on its owning host; worker release remains unknown.'
     }
   }
-  if (!workerTerminalLeaseIsCurrent(args.runtime, args.db, args.dispatchId, args.resource)) {
+  if (
+    !exitedWorkerTerminalLeaseIsCurrent(
+      args.db,
+      args.dispatchId,
+      args.resource,
+      args.observation.terminal,
+      args.observation.exact
+    )
+  ) {
     return {
       state: 'release_unknown',
       reason:

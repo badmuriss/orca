@@ -14,6 +14,7 @@ import {
 } from '../../orchestration/db/maestro-terminal-lease/maestro-terminal-lease-row'
 import type { DispatchContextRow } from '../../orchestration/types'
 import { projectNestedAgentActivities } from '../../orchestration/worker-provider-session'
+import { exposeUtcTimestamp } from '../../orchestration/db/utc-timestamp'
 import { defineMethod, type RpcContext, type RpcMethod } from '../core'
 import { resolveMaestroDocumentReadScope } from '../maestro-principal'
 
@@ -63,7 +64,9 @@ export async function readMaestroRunProgress(
     if (!dispatch.assignee_handle) {
       return []
     }
-    const observedAfter = Date.parse(dispatch.dispatched_at ?? dispatch.created_at)
+    const observedAfter = Date.parse(
+      exposeUtcTimestamp(dispatch.dispatched_at ?? dispatch.created_at) ?? ''
+    )
     const session = context.runtime.getExactWorkerProviderSession(
       dispatch.assignee_handle,
       Number.isFinite(observedAfter) ? observedAfter : 0

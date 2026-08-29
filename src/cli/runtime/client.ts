@@ -39,6 +39,17 @@ import {
 // keepalive window. See design doc §3.1.
 const LONG_POLL_CLIENT_GRACE_MS = 10_000
 
+const COORDINATOR_AUTHORIZED_MAESTRO_METHODS = new Set([
+  'maestro.bootstrap',
+  'maestro.projection.apply',
+  'maestro.delegation.take',
+  'maestro.delegation.settle'
+])
+
+function carriesOrchestrationCompatibilityAuthority(method: string): boolean {
+  return method.startsWith('orchestration.') || COORDINATOR_AUTHORIZED_MAESTRO_METHODS.has(method)
+}
+
 // Why: ws + tweetnacl + the remote-runtime frame stack only matter once a
 // request actually goes over a pairing offer, which local CLI calls never do.
 // Both call sites already await this, so deferring the load changes no ordering.
@@ -99,7 +110,7 @@ export class RuntimeClient {
     const originalCommand = orchestrationMutation
       ? buildOrchestrationRecoveryCommand(method, params, this.cliExecutable, this.originalArgs)
       : undefined
-    const compatibilityEnvelope = method.startsWith('orchestration.')
+    const compatibilityEnvelope = carriesOrchestrationCompatibilityAuthority(method)
       ? {
           ...this.orchestrationCompatibility,
           compatibilityInvocationId:

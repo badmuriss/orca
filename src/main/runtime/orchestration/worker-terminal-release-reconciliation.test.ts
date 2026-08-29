@@ -44,6 +44,8 @@ function releaseFixture(
     terminalWorktreeId?: string
     providerSessions?: unknown[]
     archiveResourceId?: string
+    liveDispatchAuthority?: boolean
+    terminalExecutionHostId?: string
   } = {}
 ) {
   const resource = options.resource ?? workerResource()
@@ -58,20 +60,27 @@ function releaseFixture(
   const runtime = {
     showTerminal: vi.fn(async () => ({
       handle: TERMINAL_HANDLE,
+      ptyId: 'pty-worker',
+      incarnationId: 'incarnation-1',
       worktreeId: options.terminalWorktreeId ?? WORKTREE_ID,
       connected: false,
-      status: 'exited'
+      status: 'exited',
+      executionHostId: options.terminalExecutionHostId ?? 'ssh:target-1'
     })),
     getTerminalPaneKey: vi.fn(() => PANE_KEY),
     getTerminalProcessIncarnation: vi.fn(() => PROCESS_INCARNATION),
     getTerminalLivenessVerdict: vi.fn(() => null),
-    getOrchestrationDispatchAuthority: vi.fn(() => ({
-      terminalHandle: TERMINAL_HANDLE,
-      worktreeId: WORKTREE_ID,
-      paneKey: PANE_KEY,
-      processIncarnation: PROCESS_INCARNATION,
-      hostScope: { kind: 'ssh', targetId: 'target-1' }
-    })),
+    getOrchestrationDispatchAuthority: vi.fn(() =>
+      options.liveDispatchAuthority === false
+        ? null
+        : {
+            terminalHandle: TERMINAL_HANDLE,
+            worktreeId: WORKTREE_ID,
+            paneKey: PANE_KEY,
+            processIncarnation: PROCESS_INCARNATION,
+            hostScope: { kind: 'ssh', targetId: 'target-1' }
+          }
+    ),
     getExactWorkerProviderSession,
     readTerminal: vi.fn(async () => ({
       handle: TERMINAL_HANDLE,
@@ -121,6 +130,12 @@ function releaseFixture(
       }
     }),
     markWorkerTerminalReleaseUnknown,
+    revertWorkerTerminalReleaseToRetained: vi.fn(() => ({
+      ...resource,
+      ownership_state: 'owned' as const,
+      release_state: 'retained' as const,
+      retained_reason: 'identity_unproven' as const
+    })),
     settleWorkerTerminalRelease
   } as unknown as OrchestrationDb
   return { runtime, db, resource, markWorkerTerminalReleaseUnknown, settleWorkerTerminalRelease }
@@ -144,6 +159,46 @@ describe('worker terminal release reconciliation', () => {
     })
     expect(fixture.runtime.closeTerminal).not.toHaveBeenCalled()
     expect(fixture.settleWorkerTerminalRelease).toHaveBeenCalledOnce()
+  })
+
+  it('releases exact exited identity after live dispatch authority disappears', async () => {
+    const fixture = releaseFixture({ liveDispatchAuthority: false })
+
+    await expect(
+      completeWorkerTerminalRelease({
+        runtime: fixture.runtime,
+        db: fixture.db,
+        dispatchId: DISPATCH_ID,
+        resource: fixture.resource
+      })
+    ).resolves.toMatchObject({
+      state: 'released',
+      processAction: 'closed_exited_terminal'
+    })
+    expect(fixture.runtime.getOrchestrationDispatchAuthority).not.toHaveBeenCalled()
+    expect(fixture.runtime.closeTerminal).not.toHaveBeenCalled()
+    expect(fixture.settleWorkerTerminalRelease).toHaveBeenCalledOnce()
+  })
+
+  it('keeps a WSL lease unknown when exited terminal evidence cannot identify its distro', async () => {
+    const fixture = releaseFixture({
+      liveDispatchAuthority: false,
+      resource: workerResource({
+        host_scope: JSON.stringify({ kind: 'wsl', hostId: 'local', distro: 'Ubuntu-24.04' })
+      }),
+      terminalExecutionHostId: 'local'
+    })
+
+    await expect(
+      completeWorkerTerminalRelease({
+        runtime: fixture.runtime,
+        db: fixture.db,
+        dispatchId: DISPATCH_ID,
+        resource: fixture.resource
+      })
+    ).resolves.toMatchObject({ state: 'retained', reason: 'identity_unproven' })
+    expect(fixture.runtime.closeTerminal).not.toHaveBeenCalled()
+    expect(fixture.settleWorkerTerminalRelease).not.toHaveBeenCalled()
   })
 
   it.each(['live', 'unverifiable'] as const)(

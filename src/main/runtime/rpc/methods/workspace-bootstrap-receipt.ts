@@ -98,15 +98,26 @@ export function requireCoordinatorWorkspace(
   }
 }
 
-type ResolvedWorkspaceTarget = {
+type ResolvedWorkspaceTargetBase = {
   /** Pure repository id (git-worktree) or folder-workspace id — never the combined `repoId::path` worktree id. */
   repositoryId: string
   /** The exact public workspace_key the resolver already produces — never re-derived, reformatted, or matched by equality-guessing. */
   workspaceKey: string
-  kind: WorkspaceBootstrapWorkspaceIdentity['kind']
   path: string
   executionHostId: string
 }
+
+type ResolvedWorkspaceTarget = ResolvedWorkspaceTargetBase &
+  (
+    | {
+        kind: Extract<WorkspaceBootstrapWorkspaceIdentity['kind'], 'folder'>
+        gitStatusSelector: null
+      }
+    | {
+        kind: Extract<WorkspaceBootstrapWorkspaceIdentity['kind'], 'git-worktree'>
+        gitStatusSelector: string
+      }
+  )
 
 async function resolveWorkspaceTarget(
   runtime: OrcaRuntimeService,
@@ -125,7 +136,8 @@ async function resolveWorkspaceTarget(
       workspaceKey: worktree.id,
       kind: 'folder',
       path: worktree.path,
-      executionHostId
+      executionHostId,
+      gitStatusSelector: null
     }
   }
   return {
@@ -133,7 +145,8 @@ async function resolveWorkspaceTarget(
     workspaceKey: worktreeWorkspaceKey(worktree.id),
     kind: 'git-worktree',
     path: worktree.path,
-    executionHostId
+    executionHostId,
+    gitStatusSelector: `id:${worktree.id}`
   }
 }
 
@@ -206,7 +219,7 @@ export async function issueWorkspaceBootstrapReceipt(
           dirty_paths: [],
           dirty_paths_truncated: false
         }
-      : await observeGitRevision(runtime, request.executionWorkspaceSelector)
+      : await observeGitRevision(runtime, executionTarget.gitStatusSelector)
 
   return WorkspaceBootstrapReceiptV2Schema.parse({
     schema_version: 2,

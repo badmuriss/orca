@@ -11,6 +11,7 @@ import {
   WORKSPACE_BOOTSTRAP_RECEIPT_V2_RUNTIME_CAPABILITY
 } from '../../../../shared/protocol-version'
 import { receiptToAgentGraphWorkspaceScope } from '../../../../shared/workspace-bootstrap-agent-graph-scope'
+import { parseWorkspaceKey, worktreeWorkspaceKey } from '../../../../shared/workspace-scope'
 import {
   applyMaestroBootstrapProjection,
   recordMaestroBootstrap,
@@ -84,10 +85,13 @@ export async function bootstrapMaestroProjection(
   if (!terminal || terminal.paneKey !== caller.paneKey) {
     throw new OrchestrationError('unauthorized', 'Coordinator workspace authority is unavailable.')
   }
+  const orchestrationHomeKey = parseWorkspaceKey(terminal.worktreeId)
+    ? terminal.worktreeId
+    : worktreeWorkspaceKey(terminal.worktreeId)
   const receipt = await issueWorkspaceBootstrapReceipt(context.runtime, {
     runId: request.mutation.run_id,
-    orchestrationHomeSelector: `id:${terminal.worktreeId}`,
-    executionWorkspaceSelector: `id:${request.mutation.workspace_key}`,
+    orchestrationHomeSelector: orchestrationHomeKey,
+    executionWorkspaceSelector: request.mutation.workspace_key,
     executionHostId: request.mutation.execution_host_id
   })
   requireCoordinatorWorkspace(context.runtime, caller, receipt.orchestration_home.workspace_key)

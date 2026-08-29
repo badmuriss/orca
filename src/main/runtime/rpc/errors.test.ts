@@ -70,7 +70,12 @@ describe('mapRuntimeError', () => {
     })
   })
 
-  it.each(['remote_runtime_unavailable', 'runtime_timeout', 'invalid_runtime_response'])(
+  it.each([
+    'remote_runtime_unavailable',
+    'runtime_timeout',
+    'invalid_runtime_response',
+    'update_required'
+  ])(
     'preserves structured remote transport failure %s',
     (code) => {
       const error = Object.assign(new Error(`Remote transport failed: ${code}`), { code })

@@ -9,11 +9,16 @@ import type {
 import { MobileMaestroProgress } from './MobileMaestroProgress'
 import type { MobileMaestroRunProgress } from './mobile-maestro-run-progress'
 
+const { useColorSchemeMock } = vi.hoisted(() => ({
+  useColorSchemeMock: vi.fn<() => 'light' | 'dark' | null>(() => 'dark')
+}))
+
 vi.mock('react-native', () => ({
   Pressable: 'Pressable',
   ScrollView: 'ScrollView',
   StyleSheet: { create: <T,>(styles: T) => styles },
   Text: 'Text',
+  useColorScheme: useColorSchemeMock,
   View: 'View'
 }))
 vi.mock('lucide-react-native', () => ({
@@ -135,6 +140,7 @@ describe('MobileMaestroProgress', () => {
   afterEach(() => {
     act(() => renderer?.unmount())
     renderer = null
+    useColorSchemeMock.mockReturnValue('dark')
     vi.clearAllMocks()
   })
 
@@ -263,6 +269,16 @@ describe('MobileMaestroProgress', () => {
     act(() => summary.props.onPress())
 
     expect(renderer!.root.findByType('BottomDrawer').props.visible).toBe(true)
+  })
+
+  it('applies the system light palette to the progress pane and its phone drawer', () => {
+    useColorSchemeMock.mockReturnValue('light')
+    renderProgress(progressV2(), false)
+    const summary = renderer!.root.findByProps({ testID: 'mobile-maestro-progress' })
+    const drawer = renderer!.root.findByType('BottomDrawer')
+
+    expect(summary.props.style).toMatchObject({ backgroundColor: '#ffffff' })
+    expect(drawer.props.surfaceColor).toBe('#ffffff')
   })
 
   it('copies technical identifiers from explicit controls', async () => {

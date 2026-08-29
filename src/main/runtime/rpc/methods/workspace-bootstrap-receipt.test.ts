@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import { WORKSPACE_BOOTSTRAP_DIRTY_PATH_SAMPLE_LIMIT } from '../../../../shared/workspace-bootstrap-receipt'
 import { OrcaRuntimeService } from '../../orca-runtime'
-import { issueWorkspaceBootstrapReceipt } from './workspace-bootstrap-receipt'
+import {
+  issueWorkspaceBootstrapReceipt,
+  requireCoordinatorWorkspace
+} from './workspace-bootstrap-receipt'
 
 const HEAD = 'a'.repeat(40)
 
@@ -46,6 +49,26 @@ function request(overrides: Partial<Parameters<typeof issueWorkspaceBootstrapRec
 }
 
 describe('issueWorkspaceBootstrapReceipt', () => {
+  it('canonicalizes a raw Git terminal ID when checking coordinator workspace authority', () => {
+    const runtime = new OrcaRuntimeService()
+    vi.spyOn(runtime, 'getOrchestrationDispatchAuthority').mockReturnValue({
+      terminalHandle: 'coordinator-1',
+      paneKey: 'tab-1:leaf-1',
+      worktreeId: 'repo-1::/workspace/repo'
+    } as never)
+
+    expect(() =>
+      requireCoordinatorWorkspace(
+        runtime,
+        {
+          terminalHandle: 'coordinator-1',
+          paneKey: 'tab-1:leaf-1'
+        },
+        'worktree:repo-1::/workspace/repo'
+      )
+    ).not.toThrow()
+  })
+
   it('rejects a request with no validated Run ID', async () => {
     const runtime = runtimeWith({}, { head: HEAD, entries: [] })
     await expect(issueWorkspaceBootstrapReceipt(runtime, request({ runId: '' }))).rejects.toThrow(
@@ -121,7 +144,9 @@ describe('issueWorkspaceBootstrapReceipt', () => {
     })
     expect(receipt.dirty_paths).toHaveLength(WORKSPACE_BOOTSTRAP_DIRTY_PATH_SAMPLE_LIMIT)
     expect(receipt.dirty_paths).toEqual([...receipt.dirty_paths].sort())
-    expect(runtime.getRuntimeGitStatus).toHaveBeenCalledExactlyOnceWith('id:work')
+    expect(runtime.getRuntimeGitStatus).toHaveBeenCalledExactlyOnceWith(
+      'id:repo-1::/workspace/repo'
+    )
   })
 
   it('uses the remote execution host for Git evidence and preserves the local home', async () => {
@@ -149,7 +174,7 @@ describe('issueWorkspaceBootstrapReceipt', () => {
     expect(receipt.execution_host).toEqual({ id: 'ssh:target-1', boundary: 'remote' })
     expect(receipt.orchestration_home.workspace_key).toBe('folder:home-1')
     expect(receipt.execution_workspace.workspace_key).toBe('worktree:repo-2::/srv/repo')
-    expect(runtime.getRuntimeGitStatus).toHaveBeenCalledExactlyOnceWith('id:remote')
+    expect(runtime.getRuntimeGitStatus).toHaveBeenCalledExactlyOnceWith('id:repo-2::/srv/repo')
   })
 
   it('rejects a mismatched execution host before observing Git', async () => {

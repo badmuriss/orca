@@ -1,16 +1,16 @@
 import { useMemo, useState } from 'react'
 import * as Clipboard from 'expo-clipboard'
 import { ChevronRight, Copy, X } from 'lucide-react-native'
-import { Pressable, ScrollView, Text, View } from 'react-native'
+import { Pressable, ScrollView, Text, useColorScheme, View } from 'react-native'
 import { BottomDrawer } from '../components/BottomDrawer'
-import { colors } from '../theme/mobile-theme'
+import { mobileThemeColors } from '../theme/mobile-theme'
 import {
   buildMobileMaestroProgressModel,
   type MobileMaestroProgressEntry,
   type MobileMaestroProgressModel,
   type MobileMaestroProgressTone
 } from './mobile-maestro-progress-model'
-import { mobileMaestroProgressStyles as styles } from './mobile-maestro-progress-styles'
+import { createMobileMaestroProgressStyles } from './mobile-maestro-progress-styles'
 import type { MobileMaestroRunProgress } from './mobile-maestro-run-progress'
 
 type MobileMaestroProgressProps = {
@@ -18,9 +18,18 @@ type MobileMaestroProgressProps = {
   wide: boolean
 }
 
+type ProgressStyles = ReturnType<typeof createMobileMaestroProgressStyles>
+
+function useMobileMaestroProgressTheme() {
+  const themeColors = mobileThemeColors(useColorScheme())
+  const styles = useMemo(() => createMobileMaestroProgressStyles(themeColors), [themeColors])
+  return { styles, themeColors }
+}
+
 export function MobileMaestroProgress({ progress, wide }: MobileMaestroProgressProps) {
   const [detailsOpen, setDetailsOpen] = useState(false)
   const model = useMemo(() => buildMobileMaestroProgressModel(progress), [progress])
+  const { styles, themeColors } = useMobileMaestroProgressTheme()
   const warningLabel = model.warnings.length ? ' Health warning.' : ''
 
   if (wide) {
@@ -46,18 +55,23 @@ export function MobileMaestroProgress({ progress, wide }: MobileMaestroProgressP
         testID="mobile-maestro-progress"
       >
         <View style={styles.summaryTop}>
-          <StatusDot tone={model.tone} />
+          <StatusDot tone={model.tone} styles={styles} />
           <Text style={styles.summaryTitle} numberOfLines={1}>
             {model.title}
           </Text>
-          <ChevronRight size={17} color={colors.textSecondary} />
+          <ChevronRight size={17} color={themeColors.textSecondary} />
         </View>
         <Text style={styles.summaryMeta} numberOfLines={1}>
           {model.outcome} · {model.progressLabel}
           {model.warnings.length ? ' · Health warning' : ''}
         </Text>
       </Pressable>
-      <BottomDrawer visible={detailsOpen} onClose={() => setDetailsOpen(false)} fillAvailable>
+      <BottomDrawer
+        visible={detailsOpen}
+        onClose={() => setDetailsOpen(false)}
+        fillAvailable
+        surfaceColor={themeColors.bgBase}
+      >
         <View style={styles.drawerHeader}>
           <Text style={styles.drawerTitle}>Run details</Text>
           <Pressable
@@ -66,7 +80,7 @@ export function MobileMaestroProgress({ progress, wide }: MobileMaestroProgressP
             onPress={() => setDetailsOpen(false)}
             style={styles.iconButton}
           >
-            <X size={18} color={colors.textSecondary} />
+            <X size={18} color={themeColors.textSecondary} />
           </Pressable>
         </View>
         <MobileMaestroProgressDetails model={model} />
@@ -76,13 +90,14 @@ export function MobileMaestroProgress({ progress, wide }: MobileMaestroProgressP
 }
 
 export function MobileMaestroProgressDetails({ model }: { model: MobileMaestroProgressModel }) {
+  const { styles, themeColors } = useMobileMaestroProgressTheme()
   return (
     <View style={styles.detailContent} testID="mobile-maestro-progress-details">
       <View style={styles.runHeader}>
         <Text style={styles.runTitle}>{model.title}</Text>
         <View style={styles.runMetaRow}>
           <View style={styles.statusRow}>
-            <StatusDot tone={model.tone} />
+            <StatusDot tone={model.tone} styles={styles} />
             <Text style={styles.statusText}>{model.outcome}</Text>
           </View>
           <Text style={styles.progressLabel}>{model.progressLabel}</Text>
@@ -99,11 +114,11 @@ export function MobileMaestroProgressDetails({ model }: { model: MobileMaestroPr
         )}
         <Text style={styles.countsLabel}>{model.countsLabel}</Text>
       </View>
-      <ProgressSection title="Current work" entries={model.current} />
-      <ProgressSection title="Recently completed" entries={model.completed} />
-      <ProgressSection title="Blocked" entries={model.blocked} />
-      <ProgressSection title="Next steps" entries={model.next} />
-      <ProgressSection title="Native child activity" entries={model.nested} />
+      <ProgressSection title="Current work" entries={model.current} styles={styles} />
+      <ProgressSection title="Recently completed" entries={model.completed} styles={styles} />
+      <ProgressSection title="Blocked" entries={model.blocked} styles={styles} />
+      <ProgressSection title="Next steps" entries={model.next} styles={styles} />
+      <ProgressSection title="Native child activity" entries={model.nested} styles={styles} />
       {model.warnings.length ? (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Health</Text>
@@ -132,7 +147,7 @@ export function MobileMaestroProgressDetails({ model }: { model: MobileMaestroPr
                   {entry.value}
                 </Text>
               </View>
-              <Copy size={15} color={colors.textMuted} />
+              <Copy size={15} color={themeColors.textMuted} />
             </Pressable>
           ))}
         </View>
@@ -143,10 +158,12 @@ export function MobileMaestroProgressDetails({ model }: { model: MobileMaestroPr
 
 function ProgressSection({
   title,
-  entries
+  entries,
+  styles
 }: {
   title: string
   entries: MobileMaestroProgressEntry[]
+  styles: ProgressStyles
 }) {
   if (!entries.length) {
     return null
@@ -168,7 +185,7 @@ function ProgressSection({
   )
 }
 
-function StatusDot({ tone }: { tone: MobileMaestroProgressTone }) {
+function StatusDot({ tone, styles }: { tone: MobileMaestroProgressTone; styles: ProgressStyles }) {
   const toneStyle = {
     neutral: styles.statusNeutral,
     success: styles.statusSuccess,

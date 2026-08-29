@@ -3,6 +3,7 @@ import type { FolderWorkspace } from '../../../../shared/folder-workspace-types'
 import type { AgentGraphView, MaestroWorkspaceAnchor } from '../../../../shared/maestro-contract'
 import { MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
 import { OrchestrationDb } from '../../orchestration/db/orchestration-db'
+import { createRootDispatch } from '../../orchestration/db/root-dispatch-test-fixture'
 import { applyMaestroProjection } from '../../orchestration/db/maestro/maestro-projection-store'
 import type { RpcContext } from '../core'
 import { ALL_RPC_METHODS } from './index'
@@ -31,7 +32,7 @@ function seed() {
     coordinatorHandle: 'coordinator-1',
     coordinatorPaneKey: 'tab-1:leaf-1'
   })
-  database.createTask({
+  const task = database.createTask({
     runId: run.id,
     taskTitle: 'Implement projector',
     displayName: 'Progress worker',
@@ -91,7 +92,7 @@ function seed() {
     progress: undefined
   }
   applyMaestroProjection.call(database, workspace, view)
-  return { database, run }
+  return { database, run, task }
 }
 
 function context(
@@ -147,6 +148,26 @@ describe('Maestro Run progress RPC', () => {
       schemaVersion: 1,
       progress: { available: false, state: 'outcome_unknown' }
     })
+    database.close()
+  })
+
+  it('treats SQLite dispatch timestamps as UTC when selecting native child activity', async () => {
+    const { database, task } = seed()
+    const dispatch = createRootDispatch(database, task.id, 'worker-1', 'tab-2:leaf-1')
+    database.db
+      .prepare('UPDATE dispatch_contexts SET dispatched_at = ? WHERE id = ?')
+      .run('2026-08-29 01:02:03', dispatch.id)
+    const rpcContext = context(database, [MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY])
+
+    await readMaestroRunProgress(rpcContext, {
+      execution_host_id: 'local',
+      workspace_key: 'folder:home-1'
+    })
+
+    expect(rpcContext.runtime.getExactWorkerProviderSession).toHaveBeenCalledWith(
+      'worker-1',
+      Date.parse('2026-08-29T01:02:03Z')
+    )
     database.close()
   })
 

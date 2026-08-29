@@ -109,7 +109,7 @@ async function completeWorkerTerminalReleaseOnce(
       `The exact worker process is unverifiable: ${observation.reason ?? 'the owning host did not return a liveness verdict'}.`
     )
   }
-  if (!workerTerminalLeaseIsCurrent(runtime, db, dispatchId, resource)) {
+  if (!workerTerminalLeaseIsCurrent(runtime, db, dispatchId, resource, observation)) {
     return identityMismatchReceipt(
       db,
       dispatchId,
@@ -196,7 +196,8 @@ async function completeWorkerTerminalReleaseOnce(
       'The archived release receipt does not match this worker resource; worker release remains unknown.'
     )
   }
-  if (!workerTerminalLeaseIsCurrent(runtime, db, dispatchId, releasing)) {
+  const observationAfterArchive = await inspectWorkerTerminal(runtime, db, dispatchId)
+  if (!workerTerminalLeaseIsCurrent(runtime, db, dispatchId, releasing, observationAfterArchive)) {
     return identityMismatchReceipt(
       db,
       dispatchId,
@@ -204,7 +205,6 @@ async function completeWorkerTerminalReleaseOnce(
       'The recorded worker lease changed while output was archived; worker release remains unknown.'
     )
   }
-  const observationAfterArchive = await inspectWorkerTerminal(runtime, db, dispatchId)
   if (
     !['live', 'exited'].includes(observationAfterArchive.status) ||
     !workerTerminalWorkspaceIsCurrent(releasing, observationAfterArchive)

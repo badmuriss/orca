@@ -1,18 +1,39 @@
 import type { OrcaRuntimeService } from '../../../orca-runtime'
+import {
+  LOCAL_EXECUTION_HOST_ID,
+  toSshExecutionHostId,
+  type ExecutionHostId
+} from '../../../../../shared/execution-host'
+import type { RuntimeTerminalShow } from '../../../../../shared/runtime-terminal-contracts'
 import type {
   WorkerTerminalArchiveRow,
   WorkerTerminalResourceRow,
   WorkerTerminalRetainedReason
 } from '../../worker-terminal-ownership'
 import type { WorkerTerminalTailArchive } from '../../worker-output-archive'
+import { parseWorkerTerminalHostScope } from '../../worker-terminal-process-liveness'
 import type { OrchestrationDb } from '../orchestration-db'
 
 export function workerTerminalLeaseIsCurrent(
   runtime: OrcaRuntimeService,
   db: OrchestrationDb,
   dispatchId: string,
-  resource: WorkerTerminalResourceRow
+  resource: WorkerTerminalResourceRow,
+  observation?: {
+    status: string
+    terminal: RuntimeTerminalShow | null
+    exact: boolean
+  }
 ): boolean {
+  if (observation?.status === 'exited') {
+    return exitedWorkerTerminalLeaseIsCurrent(
+      db,
+      dispatchId,
+      resource,
+      observation.terminal,
+      observation.exact
+    )
+  }
   const worker = db.getWorkerDispatch(dispatchId)
   const authority = runtime.getOrchestrationDispatchAuthority(resource.terminal_handle)
   return Boolean(
@@ -33,6 +54,52 @@ export function workerTerminalLeaseIsCurrent(
     }) &&
     !db.workerTerminalResourceHasIdentityConflict(resource.id)
   )
+}
+
+export function exitedWorkerTerminalLeaseIsCurrent(
+  db: OrchestrationDb,
+  dispatchId: string,
+  resource: WorkerTerminalResourceRow,
+  terminal: RuntimeTerminalShow | null,
+  exact: boolean
+): boolean {
+  const worker = db.getWorkerDispatch(dispatchId)
+  const expectedHostId = workerTerminalExecutionHostId(resource)
+  const observedProcessIncarnation =
+    terminal?.ptyId && terminal.incarnationId ? `${terminal.ptyId}:${terminal.incarnationId}` : null
+  return Boolean(
+    exact &&
+    terminal &&
+    terminal.handle === resource.terminal_handle &&
+    terminal.connected === false &&
+    worker?.agent_terminal_handle === resource.terminal_handle &&
+    resource.worktree_id !== null &&
+    terminal.worktreeId === resource.worktree_id &&
+    resource.pane_key !== null &&
+    resource.process_incarnation !== null &&
+    observedProcessIncarnation === resource.process_incarnation &&
+    expectedHostId !== null &&
+    terminal.executionHostId === expectedHostId &&
+    db.isDispatchProcessCurrent({
+      dispatchId,
+      paneKey: resource.pane_key,
+      processIncarnation: resource.process_incarnation
+    }) &&
+    !db.workerTerminalResourceHasIdentityConflict(resource.id)
+  )
+}
+
+function workerTerminalExecutionHostId(
+  resource: WorkerTerminalResourceRow
+): ExecutionHostId | null {
+  const hostScope = parseWorkerTerminalHostScope(resource.host_scope)
+  if (!hostScope) {
+    return null
+  }
+  if (hostScope.kind === 'ssh') {
+    return toSshExecutionHostId(hostScope.targetId)
+  }
+  return hostScope.kind === 'local' ? LOCAL_EXECUTION_HOST_ID : null
 }
 
 export function summarizeWorkerTerminalArchive(archive: WorkerTerminalArchiveRow): {

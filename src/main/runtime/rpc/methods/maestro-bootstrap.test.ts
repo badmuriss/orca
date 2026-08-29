@@ -60,7 +60,7 @@ function harness(options: { execution?: 'folder' | 'git'; clientCapabilities?: [
   )
   const gitExecution = options.execution === 'git'
   vi.spyOn(runtime, 'showManagedTerminalWorkspace').mockImplementation(async (selector) => {
-    if (selector === 'id:folder:home-1') {
+    if (selector === 'folder:home-1') {
       return {
         id: 'folder:home-1',
         repoId: 'folder-workspace:group-1',
@@ -68,7 +68,7 @@ function harness(options: { execution?: 'folder' | 'git'; clientCapabilities?: [
         hostId: 'local'
       } as never
     }
-    if (gitExecution && selector === 'id:worktree:repo-1::/srv/repo') {
+    if (gitExecution && selector === 'worktree:repo-1::/srv/repo') {
       return {
         id: 'repo-1::/srv/repo',
         repoId: 'repo-1',
@@ -146,6 +146,7 @@ describe('Maestro composed bootstrap', () => {
         expect.objectContaining({ id: dispatch.id, type: 'attempt', taskId: task.id })
       ])
     )
+    expect(context.runtime.showManagedTerminalWorkspace).toHaveBeenCalledWith('folder:home-1')
     database.close()
   })
 
@@ -181,9 +182,8 @@ describe('Maestro composed bootstrap', () => {
       base_revision: 'a'.repeat(40),
       dirty_paths: ['src/index.ts']
     })
-    expect(runtime.getRuntimeGitStatus).toHaveBeenCalledExactlyOnceWith(
-      'id:worktree:repo-1::/srv/repo'
-    )
+    expect(runtime.getRuntimeGitStatus).toHaveBeenCalledExactlyOnceWith('id:repo-1::/srv/repo')
+    expect(runtime.showManagedTerminalWorkspace).toHaveBeenCalledWith('worktree:repo-1::/srv/repo')
     database.close()
   })
 

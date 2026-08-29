@@ -40,6 +40,7 @@ import type { RunRow } from '../../orchestration/types'
 import { encodeFederatedControlMessage } from '../../orchestration/federation-control-message'
 import { bindCoordinatorMutationPayload } from '../../orchestration/dispatch-message-binding'
 import { readExactWorkerProviderObservation } from '../../orchestration/worker-provider-session'
+import { exposeUtcTimestamp } from '../../orchestration/db/utc-timestamp'
 import {
   ORCHESTRATION_FEDERATION_CONTROL_MAIL_PROTOCOL_VERSION,
   ORCHESTRATION_FEDERATION_LIFECYCLE_SETTLEMENT_PROTOCOL_VERSION
@@ -141,7 +142,9 @@ function verifyWorkerSettlementActor(args: {
     dispatched_at: string | null
   }
 }): WorkerSettlementActorAuthority {
-  const observedAfter = Date.parse(args.dispatch.dispatched_at ?? args.dispatch.created_at)
+  const observedAfter = Date.parse(
+    exposeUtcTimestamp(args.dispatch.dispatched_at ?? args.dispatch.created_at) ?? ''
+  )
   const session = args.runtime.getExactWorkerProviderSession(
     args.terminalHandle,
     Number.isFinite(observedAfter) ? observedAfter : 0
