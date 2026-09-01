@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { exitedPtyStopReceipt } from '../../ipc/pty-ipc-test-constants'
 import {
   MOCK_GIT_WORKTREES,
   OrcaRuntimeService,
@@ -271,7 +272,7 @@ describe('OrcaRuntimeService', () => {
       const callOrder: string[] = []
       const stopAndWait = vi.fn(async (id: string) => {
         callOrder.push(`stop-and-wait:${id}`)
-        return true
+        return exitedPtyStopReceipt(id)
       })
       const localProvider = createProviderStub(async () => [])
       vi.mocked(assertWorktreeCleanForRemoval).mockImplementation(async () => {
@@ -326,7 +327,7 @@ describe('OrcaRuntimeService', () => {
       runtime.setPtyController({
         write: () => true,
         kill: vi.fn(() => true),
-        stopAndWait: vi.fn(async () => false),
+        stopAndWait: vi.fn(async () => null),
         getForegroundProcess: async () => null
       })
       syncSinglePty(runtime, 'pty-1')

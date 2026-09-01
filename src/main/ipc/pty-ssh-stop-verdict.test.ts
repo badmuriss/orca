@@ -252,7 +252,7 @@ describe('stopping a PTY whose SSH provider is unregistered', () => {
           'relay disconnected during kill'
         )
       )
-      expect(runtime.onPtyExit).toHaveBeenCalledWith(ptyId, -1, TEST_PTY_INCARNATION)
+      expect(runtime.onPtyExit).not.toHaveBeenCalled()
     } finally {
       deletePtyOwnership(ptyId)
       unregisterSshPtyProvider(connectionId)

@@ -532,10 +532,7 @@ describe('Maestro workspace Canvas authority', () => {
     const automatic = current.snapshot.automatic_links[0]!
     expect(current.snapshot.surfaces[automatic.source_surface_key]?.binding.kind).toBe('terminal')
     expect(current.snapshot.surfaces[automatic.target_surface_key]?.binding.kind).toBe('browser')
-    expect(current.snapshot.suggested_links).toHaveLength(2)
-    expect(current.snapshot.suggested_links.map((link) => link.source_surface_key)).not.toContain(
-      automatic.source_surface_key
-    )
+    expect(current.snapshot.suggested_links).toEqual([])
     database.close()
   })
 
@@ -624,7 +621,7 @@ describe('Maestro workspace Canvas authority', () => {
     }
   )
 
-  it('keeps suggestion identity stable and applies real accepted and hidden decisions', async () => {
+  it('does not infer suggestions from tab adjacency without formal authority', async () => {
     const { authority, database, runtime } = harness()
     runtime.listMobileSessionTabs.mockResolvedValue(linkedSession())
     attachLinkLease(database)
@@ -633,63 +630,7 @@ describe('Maestro workspace Canvas authority', () => {
     if (current.status !== 'available') {
       throw new Error('missing suggestion snapshot')
     }
-    const [accepted, hidden] = current.snapshot.suggested_links
-    if (!accepted || !hidden) {
-      throw new Error('missing suggestion fixtures')
-    }
-
-    const acceptedReceipt = await authority.mutate({
-      action: 'decide-suggestion',
-      scope,
-      actor_id: 'actor-1',
-      expected_authority_revision: current.snapshot.authority_revision,
-      expected_canvas_revision: current.canvas.revision,
-      idempotency_key: 'accept-suggestion-1',
-      fingerprint: accepted.fingerprint,
-      decision: 'accepted',
-      link_type: 'context-for',
-      label: 'Accepted exact tabs'
-    })
-    expect(acceptedReceipt).toMatchObject({ status: 'applied' })
-    const afterAccepted = await authority.query(scope, 'actor-1')
-    if (afterAccepted.status !== 'available') {
-      throw new Error('missing accepted snapshot')
-    }
-    expect(afterAccepted.snapshot.suggested_links[0]).toMatchObject({
-      fingerprint: accepted.fingerprint,
-      revision: accepted.revision
-    })
-    expect(afterAccepted.canvas.document.suggestion_decisions[accepted.fingerprint]).toMatchObject({
-      state: 'accepted',
-      suggestion_revision: accepted.revision,
-      accepted_link: {
-        source_surface_key: accepted.source_surface_key,
-        target_surface_key: accepted.target_surface_key,
-        label: 'Accepted exact tabs'
-      }
-    })
-
-    await expect(
-      authority.mutate({
-        action: 'decide-suggestion',
-        scope,
-        actor_id: 'actor-1',
-        expected_authority_revision: afterAccepted.snapshot.authority_revision,
-        expected_canvas_revision: afterAccepted.canvas.revision,
-        idempotency_key: 'hide-suggestion-2',
-        fingerprint: hidden.fingerprint,
-        decision: 'hidden'
-      })
-    ).resolves.toMatchObject({ status: 'applied' })
-    const decided = await authority.query(scope, 'actor-1')
-    if (decided.status !== 'available') {
-      throw new Error('missing decided snapshot')
-    }
-    expect(decided.canvas.document.suggestion_decisions[hidden.fingerprint]).toMatchObject({
-      state: 'hidden',
-      suggestion_revision: hidden.revision,
-      accepted_link: null
-    })
+    expect(current.snapshot.suggested_links).toEqual([])
     database.close()
   })
 })

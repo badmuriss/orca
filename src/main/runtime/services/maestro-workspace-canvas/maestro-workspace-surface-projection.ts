@@ -11,6 +11,8 @@ import type {
 import { parseWorkspaceKey } from '../../../../shared/workspace-scope'
 import type { WorkspaceCanvasDocument } from '../../../../shared/maestro-document-contract'
 
+type WorkspaceCanvasClientTab = Exclude<RuntimeMobileSessionClientTab, { type: 'agent-session' }>
+
 export function workspaceCanvasSelector(scope: RuntimeMaestroWorkspaceCanvasScope): string {
   const parsed = parseWorkspaceKey(scope.workspace_key)
   if (parsed?.type === 'folder') {
@@ -30,14 +32,14 @@ function groupIdForTab(snapshot: RuntimeMobileSessionTabsResult, tabId: string):
   )
 }
 
-function contentType(tab: RuntimeMobileSessionClientTab): 'editor' | 'diff' {
+function contentType(tab: WorkspaceCanvasClientTab): 'editor' | 'diff' {
   return tab.type === 'file' && tab.mode === 'diff' ? 'diff' : 'editor'
 }
 
 function projectSurface(
   scope: RuntimeMaestroWorkspaceCanvasScope,
   snapshot: RuntimeMobileSessionTabsResult,
-  tab: RuntimeMobileSessionClientTab,
+  tab: WorkspaceCanvasClientTab,
   revision: number,
   resolveTerminalIncarnation: (terminalHandle: string) => string | null,
   annotations: WorkspaceCanvasDocument['annotations']
@@ -140,9 +142,12 @@ export function projectWorkspaceSurfaces(
   surfaces: Record<string, ReturnType<typeof projectSurface>>
   unsupportedBrowserCount: number
 } {
-  const distinctTabs = new Map<string, RuntimeMobileSessionClientTab>()
+  const distinctTabs = new Map<string, WorkspaceCanvasClientTab>()
   let unsupportedBrowserCount = 0
   for (const tab of session.tabs) {
+    if (tab.type === 'agent-session') {
+      continue
+    }
     if (tab.type === 'browser' && !tab.browserPageId) {
       unsupportedBrowserCount += 1
       continue

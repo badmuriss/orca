@@ -10,6 +10,7 @@ import type { PtyIncarnationId } from '../../shared/pty-incarnation'
 import type { PtyBindingSourceExpectation } from '../persistence'
 import type { ExecutionHostId } from '../../shared/execution-host'
 import type { PtyProviderBufferSnapshot, PtyProcessInfo, PtySpawnResult } from '../providers/types'
+import type { PtyStopReceipt } from '../../shared/pty-stop-receipt'
 
 export type RuntimePtyController = {
   claimStablePaneCreate?(args: {
@@ -102,7 +103,7 @@ export type RuntimePtyController = {
   stopAndWait?(
     ptyId: string,
     opts?: { keepHistory?: boolean; deadlineMs?: number }
-  ): Promise<boolean>
+  ): Promise<PtyStopReceipt | null>
   markReversibleStops?(ptyIds: readonly string[]): () => void
   getCwd?(ptyId: string): Promise<string | null>
   getForegroundProcess(ptyId: string): Promise<string | null>

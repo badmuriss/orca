@@ -7,6 +7,7 @@ import {
 import { teardownRpcDeadline } from './worktree-teardown'
 import type { RuntimeWorktreeTerminalSleepResult } from '../../shared/runtime-types'
 import type { WorktreeTerminalMutationKind } from './worktree-terminal-mutation-lock'
+import { ptyStopReceiptProvesExit } from '../../shared/pty-stop-receipt'
 
 export class OrcaRuntimeWithStopTerminalsForWorktree extends OrcaRuntimeWithResolveTerminalSplitSourceAuthority {
   async stopTerminalsForWorktree(
@@ -79,13 +80,17 @@ export class OrcaRuntimeWithStopTerminalsForWorktree extends OrcaRuntimeWithReso
           // deadline so a wedged daemon yields the accurate stop failure; no deadline
           // (non-destructive) keeps the provider default RPC timeout.
           if (options.deadline !== undefined) {
-            return (
-              this.ptyController?.stopAndWait?.(ptyId, {
-                deadlineMs: teardownRpcDeadline(options.deadline)
-              }) ?? false
-            )
+            return this.ptyController?.stopAndWait
+              ? this.ptyController
+                  .stopAndWait(ptyId, {
+                    deadlineMs: teardownRpcDeadline(options.deadline)
+                  })
+                  .then(ptyStopReceiptProvesExit)
+              : false
           }
-          return this.ptyController?.stopAndWait?.(ptyId) ?? false
+          return this.ptyController?.stopAndWait
+            ? this.ptyController.stopAndWait(ptyId).then(ptyStopReceiptProvesExit)
+            : false
         }
         return Boolean(this.ptyController?.kill(ptyId))
       }

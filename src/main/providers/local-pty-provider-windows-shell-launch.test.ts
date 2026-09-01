@@ -477,7 +477,9 @@ describe('LocalPtyProvider', () => {
       )
       const shutdown = new Promise<void>((resolve, reject) => {
         queueMicrotask(() => {
-          provider.shutdown('probe-shutdown-session', { immediate: true }).then(resolve, reject)
+          provider
+            .shutdown('probe-shutdown-session', { immediate: true })
+            .then(() => resolve(), reject)
         })
       })
 

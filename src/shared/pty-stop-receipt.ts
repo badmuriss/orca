@@ -47,6 +47,12 @@ export type PtyStopReceiptExpectation = {
   ptyIncarnation?: PtyIncarnationId
 }
 
+export function ptyStopReceiptProvesExit(
+  receipt: PtyStopReceipt | null | undefined
+): receipt is Extract<PtyStopReceipt, { verdict: 'exited' }> {
+  return receipt?.verdict === 'exited' && receipt.processTreeVerified
+}
+
 export function createPtyStopReceipt(
   params: Omit<PtyStopReceiptBase, 'version' | 'capabilityVersion' | 'timestamp'> &
     Pick<PtyStopReceipt, 'verdict' | 'processTreeVerified'> & { reason?: string }

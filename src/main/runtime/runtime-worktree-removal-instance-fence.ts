@@ -6,7 +6,7 @@ export function assertRuntimeWorktreeRemovalInstance(params: {
   store: RuntimeStore
   repoId: string
   worktreeId: string
-  hostId?: ExecutionHostId
+  hostId: ExecutionHostId
   expectedInstanceId?: string
 }): void {
   if (!params.expectedInstanceId) {

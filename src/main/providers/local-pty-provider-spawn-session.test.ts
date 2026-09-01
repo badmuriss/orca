@@ -385,7 +385,7 @@ describe('LocalPtyProvider', () => {
           queueMicrotask(() => {
             envProvider
               .shutdown('resolved-env-build-session', { immediate: true })
-              .then(resolve, reject)
+              .then(() => resolve(), reject)
           })
         })
       })

@@ -43,13 +43,6 @@ export class OrcaRuntimeWithRemoveManagedWorktree extends OrcaRuntimeWithCreateM
     const store = this.store
     const cleanupHostId = parseExecutionHostId(hostId)?.id
     const removalTarget = await this.resolveWorktreeRemovalTarget(worktreeSelector, cleanupHostId)
-    assertRuntimeWorktreeRemovalInstance({
-      store,
-      repoId: removalTarget.repoId,
-      worktreeId: removalTarget.id,
-      hostId: cleanupHostId,
-      expectedInstanceId
-    })
     const cleanupScopeKey = preservedBranchCleanupScopeKey({
       worktreeId: removalTarget.id,
       hostId: cleanupHostId
@@ -81,14 +74,19 @@ export class OrcaRuntimeWithRemoveManagedWorktree extends OrcaRuntimeWithCreateM
           )
         }
         const repo = repoOwner.kind === 'resolved' ? repoOwner.repo : undefined
-        assertRuntimeWorktreeRemovalInstance({
-          store,
-          repoId: removalTarget.repoId,
-          worktreeId: removalTarget.id,
-          hostId: cleanupHostId ?? (repo ? getRepoExecutionHostId(repo) : undefined),
-          expectedInstanceId
-        })
         const removalHostId = repo ? (cleanupHostId ?? getRepoExecutionHostId(repo)) : cleanupHostId
+        if (expectedInstanceId && !removalHostId) {
+          throw new Error('Checkout execution host is unavailable before worktree removal.')
+        }
+        if (removalHostId) {
+          assertRuntimeWorktreeRemovalInstance({
+            store,
+            repoId: removalTarget.repoId,
+            worktreeId: removalTarget.id,
+            hostId: removalHostId,
+            expectedInstanceId
+          })
+        }
         const orphanOrFolderResult = await removeOrphanOrFolderWorktree({
           runtime: this,
           store,
