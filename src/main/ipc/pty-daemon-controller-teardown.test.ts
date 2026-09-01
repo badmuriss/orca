@@ -184,15 +184,16 @@ describe('registerPtyHandlers', () => {
         )
         expect(runtime.onPtyExit).not.toHaveBeenCalled()
       })
-      it('bounds keep-history inventory polls by the settlement deadline', async () => {
+      it('threads the settlement deadline into receipt-backed shutdown', async () => {
         vi.useFakeTimers()
         try {
           const listProcesses = vi.fn(async (_opts?: { deadlineMs?: number }) => [])
+          const shutdown = vi.fn(async (id: string) => exitedPtyStopReceipt(id))
           setLocalPtyProvider({
             spawn: vi.fn(),
             write: vi.fn(),
             resize: vi.fn(),
-            shutdown: vi.fn(async () => undefined),
+            shutdown,
             sendSignal: vi.fn(),
             getCwd: vi.fn(),
             getInitialCwd: vi.fn(),
@@ -219,7 +220,7 @@ describe('registerPtyHandlers', () => {
             stopAndWait: (
               ptyId: string,
               opts?: { keepHistory?: boolean; deadlineMs?: number }
-            ) => Promise<boolean>
+            ) => Promise<ReturnType<typeof exitedPtyStopReceipt> | null>
           }
           const callerDeadlineMs = Date.now() + 5_000
           const stopPromise = controller.stopAndWait('local-pty', {
@@ -228,14 +229,12 @@ describe('registerPtyHandlers', () => {
           })
 
           await vi.advanceTimersByTimeAsync(1_000)
-          await expect(stopPromise).resolves.toBe(true)
+          await expect(stopPromise).resolves.toMatchObject({ verdict: 'exited' })
 
-          expect(listProcesses.mock.calls[0]?.[0]).toEqual({ deadlineMs: callerDeadlineMs })
-          const settlementDeadlines = listProcesses.mock.calls
-            .slice(1)
-            .map(([opts]) => opts?.deadlineMs)
-          expect(settlementDeadlines.length).toBeGreaterThan(0)
-          expect(new Set(settlementDeadlines)).toEqual(new Set([callerDeadlineMs - 4_000]))
+          expect(shutdown).toHaveBeenCalledWith(
+            'local-pty',
+            expect.objectContaining({ keepHistory: true, deadlineMs: callerDeadlineMs })
+          )
         } finally {
           vi.useRealTimers()
         }
@@ -323,7 +322,7 @@ describe('registerPtyHandlers', () => {
         const shutdown = vi.fn(async (id: string, opts: { expectedIncarnationId: string }) =>
           exitedPtyStopReceipt(id, opts)
         )
-        const store = { markSshRemotePtyLease: vi.fn() }
+        const store = { markSshRemotePtyLease: vi.fn(), clearSshRemotePtyKillIntent: vi.fn() }
         const runtime = {
           setPtyController: vi.fn(),
           onPtyExit: vi.fn()
@@ -398,7 +397,7 @@ describe('registerPtyHandlers', () => {
           getDefaultShell: vi.fn(),
           getProfiles: vi.fn()
         } as never)
-        const store = { markSshRemotePtyLease: vi.fn() }
+        const store = { markSshRemotePtyLease: vi.fn(), clearSshRemotePtyKillIntent: vi.fn() }
         const runtime = {
           setPtyController: vi.fn(),
           onPtyExit: vi.fn()
@@ -426,7 +425,8 @@ describe('registerPtyHandlers', () => {
       })
       it('marks a detached SSH lease terminated when runtime controller kill has no provider', async () => {
         const store = {
-          markSshRemotePtyLease: vi.fn()
+          markSshRemotePtyLease: vi.fn(),
+          clearSshRemotePtyKillIntent: vi.fn()
         }
         const runtime = {
           setPtyController: vi.fn(),
@@ -458,7 +458,8 @@ describe('registerPtyHandlers', () => {
       it('keeps a rejected SSH PTY unverifiable after kill shutdown fails transiently', async () => {
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
         const store = {
-          markSshRemotePtyLease: vi.fn()
+          markSshRemotePtyLease: vi.fn(),
+          clearSshRemotePtyKillIntent: vi.fn()
         }
         const runtime = {
           setPtyController: vi.fn(),
@@ -568,6 +569,8 @@ describe('registerPtyHandlers', () => {
               ORCA_TAB_ID: 'tab-1',
               ORCA_WORKTREE_ID: 'wt-1'
             },
+            tabId: 'tab-1',
+            leafId: '11111111-1111-4111-8111-111111111111',
             connectionId: 'ssh-1'
           })
           const env = sshSpawn.mock.calls.at(-1)![0].env

@@ -42,8 +42,11 @@ vi.mock('../main/daemon/terminal-session-teardown', () => ({
 }))
 
 import { IMMEDIATE_PTY_EXIT_TIMEOUT_MS, type PtyHandler } from './pty-handler'
-import { beginPtyHandlerTest, endPtyHandlerTest } from './pty-handler-test-harness'
+import { beginPtyHandlerTest, endPtyHandlerTest, testPtyId } from './pty-handler-test-harness'
 import type { MockDispatcher } from './pty-handler-test-harness'
+
+const PTY_1 = testPtyId(1)
+const PTY_2 = testPtyId(2)
 
 describe('PtyHandler', () => {
   let dispatcher: MockDispatcher
@@ -92,7 +95,7 @@ describe('PtyHandler', () => {
     expect(onExitCb).toBeDefined()
     onExitCb!({ exitCode: 0 })
 
-    expect(exits).toEqual([{ id: 'pty-1', paneKey: 'tab-2:1' }])
+    expect(exits).toEqual([{ id: PTY_1, paneKey: 'tab-2:1' }])
   })
 
   it('keeps immediate shutdown pending until onExit and invokes the exit listener once', async () => {
@@ -113,8 +116,8 @@ describe('PtyHandler', () => {
       env: { ORCA_PANE_KEY: 'tab-shutdown:0' }
     })
     let settled = false
-    const shutdown = dispatcher.callRequest('pty.shutdown', { id: 'pty-1', immediate: true })
-    const duplicate = dispatcher.callRequest('pty.shutdown', { id: 'pty-1', immediate: true })
+    const shutdown = dispatcher.callRequest('pty.shutdown', { id: PTY_1, immediate: true })
+    const duplicate = dispatcher.callRequest('pty.shutdown', { id: PTY_1, immediate: true })
     void shutdown.then(() => {
       settled = true
     })
@@ -128,7 +131,7 @@ describe('PtyHandler', () => {
 
     expect(mockKill).toHaveBeenCalledWith('SIGKILL')
     expect(duplicateReceipt).toBe(receipt)
-    expect(exits).toEqual([{ id: 'pty-1', paneKey: 'tab-shutdown:0' }])
+    expect(exits).toEqual([{ id: PTY_1, paneKey: 'tab-shutdown:0' }])
     expect(handler.activePtyCount).toBe(0)
   })
 
@@ -193,7 +196,7 @@ describe('PtyHandler', () => {
     })
 
     await dispatcher.callRequest('pty.spawn', {})
-    const shutdown = dispatcher.callRequest('pty.shutdown', { id: 'pty-1', immediate: true })
+    const shutdown = dispatcher.callRequest('pty.shutdown', { id: PTY_1, immediate: true })
     await vi.advanceTimersByTimeAsync(IMMEDIATE_PTY_EXIT_TIMEOUT_MS)
     await expect(shutdown).resolves.toMatchObject({
       verdict: 'exited',
@@ -202,7 +205,7 @@ describe('PtyHandler', () => {
 
     expect(mockKill).toHaveBeenCalledTimes(1)
     expect(handler.activePtyCount).toBe(1)
-    const retry = dispatcher.callRequest('pty.shutdown', { id: 'pty-1', immediate: true })
+    const retry = dispatcher.callRequest('pty.shutdown', { id: PTY_1, immediate: true })
     expect(mockKill).toHaveBeenCalledTimes(1)
     await expect(retry).resolves.toMatchObject({ verdict: 'exited', processTreeVerified: true })
     onExitCb!({ exitCode: 137 })
@@ -300,7 +303,7 @@ describe('PtyHandler', () => {
     })
 
     await dispatcher.callRequest('pty.spawn', {})
-    await dispatcher.callRequest('pty.shutdown', { id: 'pty-1', immediate: false })
+    await dispatcher.callRequest('pty.shutdown', { id: PTY_1, immediate: false })
     vi.advanceTimersByTime(5000)
     expect(mockKill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']])
     expect(vi.getTimerCount()).toBe(1)
@@ -350,8 +353,8 @@ describe('PtyHandler', () => {
     }
     await dispose
     expect(exits).toEqual([
-      { id: 'pty-1', paneKey: 'tab-dispose:0' },
-      { id: 'pty-2', paneKey: 'tab-dispose:1' }
+      { id: PTY_1, paneKey: 'tab-dispose:0' },
+      { id: PTY_2, paneKey: 'tab-dispose:1' }
     ])
     expect(handler.activePtyCount).toBe(0)
   })

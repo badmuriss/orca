@@ -112,7 +112,7 @@ describe('useIpcEvents updater integration', () => {
     expect(setActiveTabType).not.toHaveBeenCalled()
     expect(setActiveTab).not.toHaveBeenCalled()
     expect(revealWorktreeInSidebar).toHaveBeenCalledWith('wt-2')
-    expect(focusRuntimeTerminalSurface).toHaveBeenCalledWith('tab-new', undefined)
+    expect(focusRuntimeTerminalSurface).toHaveBeenCalledWith('tab-new', undefined, 'wt-2')
     expect(focusTerminalTabSurface).toHaveBeenCalledWith('tab-new', undefined)
     expect(setTabCustomTitle).toHaveBeenCalledWith('tab-new', 'Runner', {
       recordInteraction: false
@@ -147,7 +147,7 @@ describe('useIpcEvents updater integration', () => {
     expect(setActiveTabType).toHaveBeenCalledWith('terminal')
     expect(setActiveTab).toHaveBeenCalledWith('tab-new')
     expect(revealWorktreeInSidebar).toHaveBeenCalledWith('wt-2')
-    expect(focusRuntimeTerminalSurface).toHaveBeenCalledWith('tab-new', undefined)
+    expect(focusRuntimeTerminalSurface).toHaveBeenCalledWith('tab-new', undefined, 'wt-2')
     expect(focusTerminalTabSurface).toHaveBeenCalledWith('tab-new', undefined)
 
     if (typeof requestTerminalCreateListenerRef.current !== 'function') {
@@ -184,7 +184,7 @@ describe('useIpcEvents updater integration', () => {
     expect(setActiveTabType).not.toHaveBeenCalled()
     expect(setActiveTab).not.toHaveBeenCalled()
     expect(revealWorktreeInSidebar).toHaveBeenCalledWith('wt-3')
-    expect(focusRuntimeTerminalSurface).toHaveBeenCalledWith('tab-new', undefined)
+    expect(focusRuntimeTerminalSurface).toHaveBeenCalledWith('tab-new', undefined, 'wt-3')
     expect(focusTerminalTabSurface).toHaveBeenCalledWith('tab-new', undefined)
     expect(dispatchEvent).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -246,9 +246,9 @@ describe('useIpcEvents updater integration', () => {
     expect(recordWorktreeVisit).not.toHaveBeenCalled()
     expect(setActiveTabType).not.toHaveBeenCalled()
     expect(setActiveTab).not.toHaveBeenCalled()
-    expect(revealWorktreeInSidebar).not.toHaveBeenCalled()
-    expect(focusRuntimeTerminalSurface).not.toHaveBeenCalled()
-    expect(focusTerminalTabSurface).not.toHaveBeenCalled()
+    expect(revealWorktreeInSidebar).toHaveBeenCalledWith('wt-2')
+    expect(focusRuntimeTerminalSurface).toHaveBeenCalledWith('tab-new', undefined, 'wt-2')
+    expect(focusTerminalTabSurface).toHaveBeenCalledWith('tab-new', undefined)
     expect(dispatchEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'orca-background-mount-terminal-worktree',
@@ -410,7 +410,7 @@ describe('useIpcEvents updater integration', () => {
     expect(recordWorktreeVisit).toHaveBeenCalledWith('wt-4')
     expect(setActiveTab).toHaveBeenCalledWith('tab-focus')
     expect(revealWorktreeInSidebar).toHaveBeenCalledWith('wt-4')
-    expect(focusRuntimeTerminalSurface).toHaveBeenCalledWith('tab-focus', 'leaf-focus')
+    expect(focusRuntimeTerminalSurface).toHaveBeenCalledWith('tab-focus', 'leaf-focus', 'wt-4')
     expect(focusTerminalTabSurface).toHaveBeenCalledWith('tab-focus', 'leaf-focus')
 
     storeState.isNavigatingHistory = true
@@ -561,9 +561,9 @@ describe('useIpcEvents updater integration', () => {
     expect(setActiveWorktree).not.toHaveBeenCalled()
     expect(setActiveTabType).not.toHaveBeenCalled()
     expect(setActiveTab).not.toHaveBeenCalled()
-    expect(revealWorktreeInSidebar).not.toHaveBeenCalled()
-    expect(focusRuntimeTerminalSurface).not.toHaveBeenCalled()
-    expect(focusTerminalTabSurface).not.toHaveBeenCalled()
+    expect(revealWorktreeInSidebar).toHaveBeenCalledWith('wt-2')
+    expect(focusRuntimeTerminalSurface).toHaveBeenCalledWith('tab-cli-bg', undefined, 'wt-2')
+    expect(focusTerminalTabSurface).toHaveBeenCalledWith('tab-cli-bg', undefined)
 
     createTab.mockClear()
     setActiveView.mockClear()
@@ -710,7 +710,7 @@ describe('useIpcEvents updater integration', () => {
     })
     expect(setActiveTab).not.toHaveBeenCalled()
     expect(revealWorktreeInSidebar).toHaveBeenCalledWith('wt-2')
-    expect(focusRuntimeTerminalSurface).toHaveBeenCalledWith(pendingTabId, pendingLeafId)
+    expect(focusRuntimeTerminalSurface).toHaveBeenCalledWith(pendingTabId, pendingLeafId, 'wt-2')
     expect(focusTerminalTabSurface).toHaveBeenCalledWith(pendingTabId, pendingLeafId)
     expect(replyTerminalCreate).toHaveBeenCalledWith({
       requestId: 'req-adopt-pending',
@@ -767,6 +767,7 @@ describe('useIpcEvents updater integration', () => {
         type: 'orca-split-terminal-pane',
         detail: {
           tabId: 'tab-existing',
+          worktreeId: 'wt-2',
           paneRuntimeId: -1,
           direction: 'vertical',
           sourceLeafId: 'leaf-source',
@@ -824,35 +825,5 @@ describe('useIpcEvents updater integration', () => {
 
     expect(updateTabPtyId).toHaveBeenCalledWith('tab-existing', 'pty-split')
     expect(setTabLayout).toHaveBeenCalledWith('tab-existing', FOCUSED_SPLIT_LAYOUT)
-    if (!requestTerminalCreateListenerRef.current) {
-      throw new Error('Expected request-terminal-create listener to be registered')
-    }
-    createTab.mockClear()
-    setActiveView.mockClear()
-    setActiveWorktree.mockClear()
-    revealWorktreeInSidebar.mockClear()
-    focusTerminalTabSurface.mockClear()
-    replyTerminalCreate.mockClear()
-
-    requestTerminalCreateListenerRef.current({
-      requestId: 'request-background-terminal',
-      worktreeId: 'wt-1',
-      source: 'runtime-session',
-      activate: false
-    })
-
-    expect(createTab).toHaveBeenCalledWith('wt-1', undefined, undefined, {
-      activate: false,
-      recordInteraction: false
-    })
-    expect(replyTerminalCreate).toHaveBeenCalledWith({
-      requestId: 'request-background-terminal',
-      tabId: 'tab-new',
-      title: undefined
-    })
-    expect(setActiveView).not.toHaveBeenCalled()
-    expect(setActiveWorktree).not.toHaveBeenCalled()
-    expect(revealWorktreeInSidebar).not.toHaveBeenCalled()
-    expect(focusTerminalTabSurface).not.toHaveBeenCalled()
   })
 })

@@ -172,6 +172,21 @@ describe('orchestration federation', () => {
     })
   })
 
+  it('carries an explicit worker label as user display-name provenance', async () => {
+    const task = peers.createHomeTask()
+
+    await peers.homeDispatcher.dispatch(
+      startRequest(task.id, { displayName: 'Windows release audit' })
+    )
+
+    expect(peers.workerRuntime.createManagedWorktree).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName: 'Windows release audit',
+        displayNameKind: 'user'
+      })
+    )
+  })
+
   it('bounds and redacts an older peer raw lastError instead of relaying it verbatim', async () => {
     const task = peers.createHomeTask()
     const realCall = peers.homeRuntime.callOrchestrationWorkerServer.bind(peers.homeRuntime)

@@ -7,6 +7,7 @@ import { getEditorDisplayLabel } from '@/components/editor/editor-labels'
 import { normalizeRelativePath } from '@/lib/path'
 import { getBrowserTabLabel } from './BrowserTab'
 import type { DropIndicator } from './drop-indicator'
+import { reconcileTabOrder } from './reconcile-order'
 import { resolveTabIndicatorEdges } from '../tab-group/tab-insertion'
 import type { HoveredTabInsertion } from '../tab-group/useTabDragSplit'
 
@@ -40,6 +41,13 @@ export type TabBarItem =
       data: Tab
     }
   | { type: 'maestro'; id: string; unifiedTabId: string; isPinned: boolean; data: Tab }
+  | {
+      type: 'agent-session'
+      id: string
+      unifiedTabId: string
+      isPinned: boolean
+      data: Tab & { contentType: 'agent-session' }
+    }
 
 export function getTabDragLabel(item: TabBarItem, generatedTitlesEnabled: boolean): string {
   if (item.type === 'terminal') {
@@ -48,8 +56,14 @@ export function getTabDragLabel(item: TabBarItem, generatedTitlesEnabled: boolea
   if (item.type === 'browser') {
     return getBrowserTabLabel(item.data)
   }
-  if (item.type === 'simulator' || item.type === 'maestro') {
-    return item.data.label || (item.type === 'maestro' ? 'Maestro' : 'Mobile Emulator')
+  if (item.type === 'maestro') {
+    return item.data.label || 'Maestro'
+  }
+  if (item.type === 'agent-session') {
+    return item.data.label || 'Codex Chat'
+  }
+  if (item.type === 'simulator') {
+    return item.data.label || 'Mobile Emulator'
   }
   return getEditorDisplayLabel(item.data)
 }
@@ -93,38 +107,6 @@ export function createUnifiedTabLookup(tabs: readonly Tab[], groupId: string): M
   return lookup
 }
 
-function reconcileRenderableTabOrder({
-  tabBarOrder,
-  terminalIds,
-  editorFileIds,
-  browserTabIds,
-  simulatorTabIds,
-  maestroTabIds
-}: {
-  tabBarOrder?: string[]
-  terminalIds: readonly string[]
-  editorFileIds: readonly string[]
-  browserTabIds: readonly string[]
-  simulatorTabIds: readonly string[]
-  maestroTabIds: readonly string[]
-}): string[] {
-  const renderableIds = [
-    ...terminalIds,
-    ...editorFileIds,
-    ...browserTabIds,
-    ...simulatorTabIds,
-    ...maestroTabIds
-  ]
-  const validIds = new Set(renderableIds)
-  const ids: string[] = []
-  for (const id of [...(tabBarOrder ?? []), ...renderableIds]) {
-    if (validIds.has(id) && !ids.includes(id)) {
-      ids.push(id)
-    }
-  }
-  return ids
-}
-
 export function buildOrderedTabItems({
   tabBarOrder,
   terminalIds,
@@ -132,9 +114,11 @@ export function buildOrderedTabItems({
   browserTabIds,
   simulatorTabIds,
   maestroTabIds,
+  agentSessionTabIds,
   terminalMap,
   editorMap,
   browserMap,
+  agentSessionMap,
   unifiedTabByVisibleId
 }: {
   tabBarOrder?: string[]
@@ -143,19 +127,21 @@ export function buildOrderedTabItems({
   browserTabIds: string[]
   simulatorTabIds: string[]
   maestroTabIds: string[]
+  agentSessionTabIds: string[]
   terminalMap: Map<string, TerminalTab & { unifiedTabId?: string }>
   editorMap: Map<string, OpenFile & { tabId?: string }>
   browserMap: Map<string, BrowserTabState & { tabId?: string }>
+  agentSessionMap: Map<string, Tab & { contentType: 'agent-session' }>
   unifiedTabByVisibleId: Map<string, Tab>
 }): TabBarItem[] {
-  const ids = reconcileRenderableTabOrder({
+  const ids = reconcileTabOrder(
     tabBarOrder,
     terminalIds,
-    editorFileIds,
+    [...editorFileIds, ...maestroTabIds],
     browserTabIds,
     simulatorTabIds,
-    maestroTabIds
-  })
+    agentSessionTabIds
+  )
   const items: TabBarItem[] = []
   for (const id of ids) {
     const terminal = terminalMap.get(id)
@@ -213,6 +199,17 @@ export function buildOrderedTabItems({
         isPinned: nativeTab.isPinned === true,
         data: nativeTab
       })
+      continue
+    }
+    const agentSession = agentSessionMap.get(id)
+    if (agentSession) {
+      items.push({
+        type: 'agent-session',
+        id,
+        unifiedTabId: agentSession.id,
+        isPinned: agentSession.isPinned === true,
+        data: agentSession
+      })
     }
   }
   return items
@@ -258,6 +255,9 @@ export function findActiveVisibleTabId(
     }
     if (item.type === 'maestro') {
       return active.activeTabType === 'editor' && item.id === active.activeMaestroTabId
+    }
+    if (item.type === 'agent-session') {
+      return active.activeTabType === 'agent-session' && item.id === active.activeTabId
     }
     return (
       (active.activeTabType === 'editor' || active.activeTabType === 'simulator') &&

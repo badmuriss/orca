@@ -38,6 +38,7 @@ export function useTabBarItemProjection({
     tabs,
     editorFiles,
     browserTabs,
+    agentSessionTabs,
     tabBarOrder,
     hoveredTabInsertion,
     activeTabId,
@@ -56,6 +57,10 @@ export function useTabBarItemProjection({
   const browserMap = useMemo(
     () => new Map((browserTabs ?? []).map((tab) => [tab.id, tab])),
     [browserTabs]
+  )
+  const agentSessionMap = useMemo(
+    () => new Map((agentSessionTabs ?? []).map((tab) => [tab.id, tab])),
+    [agentSessionTabs]
   )
   const terminalIds = useMemo(() => tabs.map((tab) => tab.id), [tabs])
   const editorFileIds = useMemo(
@@ -77,6 +82,10 @@ export function useTabBarItemProjection({
         .map((tab) => tab.id),
     [unifiedTabs, resolvedGroupId]
   )
+  const agentSessionTabIds = useMemo(
+    () => agentSessionTabs?.map((tab) => tab.id) ?? [],
+    [agentSessionTabs]
+  )
   const orderedItems = useMemo(
     () =>
       buildOrderedTabItems({
@@ -86,9 +95,11 @@ export function useTabBarItemProjection({
         browserTabIds,
         simulatorTabIds,
         maestroTabIds,
+        agentSessionTabIds,
         terminalMap,
         editorMap,
         browserMap,
+        agentSessionMap,
         unifiedTabByVisibleId
       }),
     [
@@ -98,9 +109,11 @@ export function useTabBarItemProjection({
       browserTabIds,
       simulatorTabIds,
       maestroTabIds,
+      agentSessionTabIds,
       terminalMap,
       editorMap,
       browserMap,
+      agentSessionMap,
       unifiedTabByVisibleId
     ]
   )

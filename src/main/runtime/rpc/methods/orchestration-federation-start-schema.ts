@@ -19,6 +19,7 @@ const FederationAttachStartCommon = {
   repo: OptionalString,
   baseBranch: OptionalString,
   displayName: OptionalString,
+  displayNameKind: z.enum(['generated', 'user']).optional(),
   comment: OptionalString,
   setup: z.enum(['run', 'skip', 'inherit']).optional(),
   setupSource: z.enum(['explicit_request', 'orchestration_default']).optional(),

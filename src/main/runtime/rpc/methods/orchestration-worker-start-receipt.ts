@@ -18,13 +18,11 @@ import {
   createWorkerStartRecoveryCommand,
   isReadinessUnverifiable
 } from './orchestration-worker-start'
-
-type DurableMutationIdentity = {
-  callerFingerprint: string
-  requestId: string
-  method: string
-  payloadHash: string
-}
+import { isAgentSessionPtyWriteRefusedError } from '../../../../shared/agent-session-pty-write-admission'
+import { structuredChatPtyWriteRefusalCopy } from '../../../../shared/agent-session-pty-write-refusal-copy'
+import { boundedRedactedDiagnostic } from './orchestration-worker-start-diagnostic'
+import type { DurableWorkerMutationIdentity } from './orchestration-worker-terminal-lease-types'
+export { boundedRedactedDiagnostic } from './orchestration-worker-start-diagnostic'
 
 export type WorkerTerminalLeaseArgs = {
   db: OrchestrationDb
@@ -37,7 +35,7 @@ export type WorkerTerminalLeaseArgs = {
   dispatchId: string
   attemptId: string
   retryOf?: string
-  mutation?: DurableMutationIdentity
+  mutation?: DurableWorkerMutationIdentity
   terminalHandle: string
   terminal: { tabId?: string; ptyId?: string | null }
   terminalAuthority: { paneKey: string; processIncarnation: string; hostScope?: string }
@@ -244,39 +242,6 @@ export async function activateWorkerTerminalLease(
   return { workerLease, transferReceipt }
 }
 
-type DiagnosticRedactionRule = {
-  pattern: RegExp
-  replace: (match: string) => string
-}
-
-// k=v runs first so durable diagnostics never leak a token that also matches a later rule.
-const SECRET_DIAGNOSTIC_RULES: readonly DiagnosticRedactionRule[] = [
-  {
-    pattern:
-      /\b[A-Za-z0-9_-]*(?:token|secret|password|passwd|api[_-]?key|credential)[A-Za-z0-9_-]*\s*[:=]\s*\S+/gi,
-    replace: (match) => {
-      const keyPrefix = match.match(/^(\S+?\s*[:=]\s*)/)?.[1] ?? ''
-      return `${keyPrefix}[redacted]`
-    }
-  },
-  { pattern: /\bBearer\s+[A-Za-z0-9._-]+/gi, replace: () => 'Bearer [redacted]' },
-  { pattern: /\b(?:sk|pk|ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{10,}\b/g, replace: () => '[redacted]' },
-  { pattern: /\b[A-Za-z0-9+/]{40,}={0,2}\b/g, replace: () => '[redacted]' }
-]
-
-const DIAGNOSTIC_MAX_LENGTH = 2000
-
-/** Bounds and redacts a raw failure message for durable storage. */
-export function boundedRedactedDiagnostic(rawMessage: string): string {
-  let redacted = rawMessage
-  for (const rule of SECRET_DIAGNOSTIC_RULES) {
-    redacted = redacted.replace(rule.pattern, rule.replace)
-  }
-  return redacted.length > DIAGNOSTIC_MAX_LENGTH
-    ? `${redacted.slice(0, DIAGNOSTIC_MAX_LENGTH)}… [truncated ${redacted.length - DIAGNOSTIC_MAX_LENGTH} chars]`
-    : redacted
-}
-
 export function failWorkerStartWithReceipt(args: {
   db: OrchestrationDb
   runId: string
@@ -290,7 +255,13 @@ export function failWorkerStartWithReceipt(args: {
   terminalHandle?: string
   leaseId?: string
 }): unknown {
-  const rawReason = args.error instanceof Error ? args.error.message : String(args.error)
+  const agentSessionRefusal = isAgentSessionPtyWriteRefusedError(args.error)
+    ? args.error.refusal
+    : undefined
+  const rawReason =
+    (agentSessionRefusal &&
+      structuredChatPtyWriteRefusalCopy(agentSessionRefusal, 'worker-start')) ??
+    (args.error instanceof Error ? args.error.message : String(args.error))
   const reason = boundedRedactedDiagnostic(rawReason)
   const readinessUnverifiable = isReadinessUnverifiable(args.error, args.failedStage)
   const unknown = readinessUnverifiable || isUnknownWorkerStartOutcome(args.error, args.failedStage)
@@ -317,6 +288,7 @@ export function failWorkerStartWithReceipt(args: {
     launch: args.launch,
     effects: JSON.parse(worker.effects) as unknown[],
     residualResources: JSON.parse(worker.residual_resources) as unknown[],
+    ...(agentSessionRefusal ? { agentSessionRefusal } : {}),
     ...(unknown
       ? {
           nextCommands: [
@@ -326,8 +298,7 @@ export function failWorkerStartWithReceipt(args: {
               dispatchId: args.dispatchId,
               attemptId: args.attemptId,
               terminalHandle: args.terminalHandle,
-              // start_unknown is intentionally not strict-retryable: retrying it is the
-              // impossible loop this recovery receipt must avoid.
+              // start_unknown is intentionally not strict-retryable.
               exactRetryAvailable: false
             })
           ]

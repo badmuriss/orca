@@ -53,6 +53,7 @@ export async function provisionFederatedWorkerWorkspace(args: ProvisionArgs) {
       name: params.name as string,
       baseBranch: params.baseBranch,
       displayName: params.displayName,
+      displayNameKind: params.displayNameKind,
       comment: params.comment,
       // setupDecision runs setup without the legacy runHooks activation side effect.
       runHooks: false,

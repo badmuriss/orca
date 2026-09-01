@@ -11,6 +11,7 @@ import type {
 } from '../../shared/runtime-types'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
 import { OrcaRuntimeService } from './orca-runtime'
+import * as mobileSessionTerminalProjection from './mobile-session-terminal-projection'
 
 // Freshness predicate of shouldApplyWebSessionTabsSnapshot in
 // src/renderer/src/runtime/web-session-tabs-sync.ts, copied as a literal
@@ -149,7 +150,6 @@ function makeRendererSnapshot(args: {
 }
 
 type RuntimeInternals = {
-  buildHeadlessMobileSessionTerminalTabs: (...args: unknown[]) => unknown[]
   offscreenBrowserBackend: unknown
   agentBrowserBridge: unknown
   mobileSessionTabsByWorktree: Map<string, RuntimeMobileSessionTabsSnapshot>
@@ -212,13 +212,13 @@ describe('graph-sync mobile snapshot gating', () => {
   })
 
   it('skips the serve-only hydrate rebuild and emits nothing when no serve ptys and no browser backend', () => {
-    const { runtime, events, sync } = createRuntime(
+    const { events, sync } = createRuntime(
       makeSession({
         tabsByWorktree: { [WT]: [makeTerminalTab('plain-tab', 'repo-1::wt@@abc')] }
       })
     )
     const buildSpy = vi.spyOn(
-      runtime as unknown as RuntimeInternals,
+      mobileSessionTerminalProjection,
       'buildHeadlessMobileSessionTerminalTabs'
     )
 

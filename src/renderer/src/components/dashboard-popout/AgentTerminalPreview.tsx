@@ -16,6 +16,7 @@ import { getBuiltinTheme, resolveEffectiveTerminalAppearance } from '@/lib/termi
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/store'
 import { createPreviewGridClaim } from './preview-grid-claim'
+import { dispatchAppMenuPasteEvent } from '@/lib/app-menu-paste'
 import { createInteractiveAgentTerminalPreviewController } from './agent-terminal-preview-interaction'
 import {
   connectAgentTerminalPreview,
@@ -28,29 +29,23 @@ import {
   scheduleAgentTerminalPreviewFrameTask,
   subscribeAgentTerminalPreviewStream
 } from './agent-terminal-preview-stream'
+import { installPreviewTerminalRightClickPaste } from './preview-terminal-right-click-paste'
+import { isWindowsUserAgent } from '@/components/terminal-pane/pane-helpers'
 
 const PREVIEW_SCROLLBACK_ROWS = 24
 // Why: main only ever serializes PREVIEW_SCROLLBACK_ROWS of history into this
 // terminal, so the pane's user-configured scrollback would only cost memory.
 const PREVIEW_SCROLLBACK_BUFFER_ROWS = 1000
-const FALLBACK_COLS = 80
-const FALLBACK_ROWS = 24
-const RESYNC_RETRY_DELAY_MS = 150
-const PASSIVE_RESIZE_SETTLE_MS = 120
-const NOOP = (): void => undefined
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
 function syncTerminalPreviewInput(terminal: Terminal, inputEnabled: boolean): void {
-  terminal.options.disableStdin = !inputEnabled
+  Object.assign(terminal.options ?? {}, { disableStdin: !inputEnabled })
   const textarea = terminal.textarea
-  if (!textarea) {
-    return
-  }
-  textarea.setAttribute('tabindex', inputEnabled ? '0' : '-1')
-  if (!inputEnabled && document.activeElement === textarea) {
+  textarea?.setAttribute('tabindex', inputEnabled ? '0' : '-1')
+  if (textarea && !inputEnabled && document.activeElement === textarea) {
     textarea.blur()
   }
 }
@@ -165,7 +160,7 @@ export function AgentTerminalPreview({
       : null
     const resizeScheduler = createAgentTerminalPreviewResizeScheduler({
       passive: !ownsPtyGrid,
-      settleMs: PASSIVE_RESIZE_SETTLE_MS,
+      settleMs: 120,
       scheduleFit,
       scheduleGrid: () => gridClaim?.schedule()
     })
@@ -178,7 +173,7 @@ export function AgentTerminalPreview({
     const previewWriter = createAgentTerminalPreviewWriter({
       getTerminal: () => terminal,
       isDisposed: () => disposed,
-      onParsedWrite: mode === 'interactive' ? scheduleFit : NOOP
+      onParsedWrite: mode === 'interactive' ? scheduleFit : () => undefined
     })
     const passiveLiveQueue = createPassiveAgentTerminalLiveQueue({
       ptyId,
@@ -211,6 +206,15 @@ export function AgentTerminalPreview({
           isReplaying: previewWriter.isReplaying
         })
       : null
+    const disposeRightClickPaste = installPreviewTerminalRightClickPaste({
+      container,
+      getTerminal: () => terminal,
+      isRightClickToPasteEnabled: () =>
+        acceptsInput &&
+        inputEnabledRef.current &&
+        (settingsRef.current?.terminalRightClickToPaste ?? isWindowsUserAgent()),
+      pasteClipboardText: () => void dispatchAppMenuPasteEvent()
+    })
 
     let resourcesReleased = false
     const releaseResources = (): void => {
@@ -235,6 +239,7 @@ export function AgentTerminalPreview({
       offData?.()
       offData = null
       interaction?.dispose()
+      disposeRightClickPaste()
       passiveLiveQueue.release()
       previewWriter.releasePending()
       releaseConnection()
@@ -250,8 +255,8 @@ export function AgentTerminalPreview({
     ): void => {
       const snap = connection.snapshot!
       const sourceGrid = {
-        cols: clamp(snap.cols ?? FALLBACK_COLS, 2, 500),
-        rows: clamp(snap.rows ?? FALLBACK_ROWS, 2, 200)
+        cols: clamp(snap.cols ?? 80, 2, 500),
+        rows: clamp(snap.rows ?? 24, 2, 200)
       }
       if (!terminal) {
         terminal = new Terminal({
@@ -297,7 +302,7 @@ export function AgentTerminalPreview({
           retryTimer = setTimeout(() => {
             retryTimer = null
             requestRefresh()
-          }, RESYNC_RETRY_DELAY_MS)
+          }, 150)
         })
       } else if (refreshAgain) {
         refreshAgain = false
@@ -402,7 +407,7 @@ export function AgentTerminalPreview({
     // Why: a size FIXED by the viewport (not shrink-to-fit) + overflow-hidden
     // keeps the dialog stable no matter how wide/tall the pane's serialized
     // buffer is. The terminal keeps the pane's true dimensions and is scaled/
-    // clipped to fit; fitToBox anchors whichever end keeps the cursor in view.
+    // clipped to fit; createPreviewBoxFit anchors the end that shows the cursor.
     <div
       data-terminal-preview-mode={mode}
       data-terminal-preview-input={inputEnabled ? 'enabled' : 'disabled'}
