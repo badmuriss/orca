@@ -147,12 +147,15 @@ describe('mobile RPC allowlist', () => {
     expect(
       [
         'maestro.list',
+        'maestro.humanReview.list',
+        'maestro.humanReview.transition',
+        'maestro.projection.get',
         'maestro.workspaceCanvas.get',
         'maestro.workspaceCanvas.readContent',
         'maestro.workspaceCanvas.mutate'
       ].every((method) => allowed.has(method))
     ).toBe(true)
-    expect(allowed.has('maestro.projection.get')).toBe(false)
+    expect(allowed.has('orchestration.browserSurface.focus')).toBe(true)
     expect(allowed.has('orchestration.run')).toBe(false)
   })
 })

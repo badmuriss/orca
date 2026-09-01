@@ -16,8 +16,9 @@ import {
 import type { WorkerStartInput } from './orchestration-worker-start-schema'
 import type { OrchestrationCompatibilityEvidence } from '../../../../shared/orchestration-compatibility-evidence'
 import { resolveOrchestrationCaller } from './orchestration-run-scope'
+import { createWorkerAgentDiscoveryReceipt } from './orchestration-worker-start'
 
-type WorkerStartLaunch = ReturnType<typeof resolveWorkerLaunchPreferences>
+type ResolvedWorkerStartAgent = ReturnType<typeof resolveWorkerStartAgent>
 
 export function assertWorkerTerminalIncarnation(
   runtime: OrcaRuntimeService,
@@ -58,10 +59,7 @@ export function resolveWorkerStartTask(args: {
   return { db, run, task }
 }
 
-/** getClientSettings() throws when no store is wired up; permission-mode reporting must degrade, not block worker-start. */
-function safeGetClientSettings(
-  runtime: OrcaRuntimeService
-): ReturnType<OrcaRuntimeService['getClientSettings']> | undefined {
+function safeGetClientSettings(runtime: OrcaRuntimeService) {
   try {
     return runtime.getClientSettings()
   } catch {
@@ -109,7 +107,7 @@ export function prepareLocalWorkerStart(args: {
   params: WorkerStartInput
   createsWorktree: boolean
   runtime: OrcaRuntimeService
-}): { agent: TuiAgent | undefined; launch: WorkerStartLaunch } {
+}): ResolvedWorkerStartAgent {
   const { params, createsWorktree, runtime } = args
   assertWorkerLaunchPreferencesCreateTerminal(params)
   if (params.terminal && params.agent) {
@@ -168,7 +166,11 @@ export async function prepareLocalWorkerStartTopology(args: {
 
   const requestedWorktree = params.worktree ?? 'current'
   const createsWorktree = requestedWorktree === 'new-child' || requestedWorktree === 'new-top-level'
-  const { agent, launch } = prepareLocalWorkerStart({ params, createsWorktree, runtime })
+  const { agent, agentDiscovery, launch } = prepareLocalWorkerStart({
+    params,
+    createsWorktree,
+    runtime
+  })
   const coordinatorTerminal = await runtime.showTerminal(params.from)
   const creationWorktree = createsWorktree
     ? await runtime.showManagedWorktree(`id:${coordinatorTerminal.worktreeId}`)
@@ -228,6 +230,7 @@ export async function prepareLocalWorkerStartTopology(args: {
     creationWorktree,
     resolvedWorktree,
     agent,
+    agentDiscovery,
     launch,
     retryPreflight,
     preflightExecutable
@@ -238,7 +241,7 @@ export function prepareFederationAttachmentWorkerStart(args: {
   params: FederationAttachStartInput
   createsWorktree: boolean
   runtime: OrcaRuntimeService
-}): { agent: TuiAgent | undefined; launch: WorkerStartLaunch } {
+}): ResolvedWorkerStartAgent {
   const { params, createsWorktree, runtime } = args
   assertWorkerLaunchPreferencesCreateTerminal(params)
   if (createsWorktree && (!params.name || !params.repo)) {
@@ -286,7 +289,7 @@ function resolveWorkerStartAgent(args: {
   model?: string
   effort?: string
   missingAgentMessage: string
-}): { agent: TuiAgent | undefined; launch: WorkerStartLaunch } {
+}) {
   if (!args.terminal && (!args.agent || !isTuiAgent(args.agent))) {
     throw new OrchestrationError('agent_unconfigured', args.missingAgentMessage)
   }
@@ -295,20 +298,18 @@ function resolveWorkerStartAgent(args: {
     args.runtime.validateOrchestrationAgentLauncher(agent)
     return {
       agent,
+      agentDiscovery: createWorkerAgentDiscoveryReceipt(agent),
       launch: resolveWorkerLaunchPreferences({
         agent,
         model: args.model,
         effort: args.effort,
-        // Why: permission-mode reporting is best-effort — a runtime without a
-        // live store (unset up in some test/degraded contexts) must not block
-        // worker-start over it; resolveRequestedAgentPermissionMode already
-        // degrades to the agent's shipped default when settings is undefined.
         settings: safeGetClientSettings(args.runtime)
       })
     }
   }
   return {
     agent: undefined,
+    agentDiscovery: undefined,
     launch: {
       preferences: undefined,
       receipt: createWorkerLaunchReceipt({ agent: null })

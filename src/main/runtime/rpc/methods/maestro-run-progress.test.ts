@@ -127,6 +127,10 @@ describe('Maestro Run progress RPC', () => {
 
     expect(response).toMatchObject({
       schemaVersion: 2,
+      documentRevision: null,
+      selectedRunId: run.id,
+      projectionRevisions: [{ runId: run.id, revision: 4 }],
+      projectionHealth: { state: 'healthy', revision: 4 },
       progress: {
         schema_version: 2,
         run: { id: run.id, title: 'Project human Run progress' },

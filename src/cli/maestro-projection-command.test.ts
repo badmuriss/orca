@@ -17,6 +17,36 @@ afterEach(async () => {
 })
 
 describe('public Maestro projection commands', () => {
+  it('opens one authoritative Canvas binding by Run', async () => {
+    const call = vi
+      .fn()
+      .mockResolvedValueOnce({
+        result: {
+          entries: [
+            {
+              executionHostId: 'ssh:build',
+              workspaceKey: 'folder:workspace_1',
+              projectionRevisions: [{ runId: 'run_1' }]
+            }
+          ]
+        }
+      })
+      .mockResolvedValueOnce({ result: {} })
+
+    await MAESTRO_HANDLERS['maestro open']({
+      flags: new Map([['run', 'run_1']]),
+      client: { call },
+      cwd: '/repo',
+      json: true
+    } as never)
+
+    expect(call).toHaveBeenNthCalledWith(1, 'maestro.list')
+    expect(call).toHaveBeenNthCalledWith(2, 'maestro.canvas.open', {
+      execution_host_id: 'ssh:build',
+      workspace_key: 'folder:workspace_1'
+    })
+  })
+
   it('routes projection show to the canonical scoped RPC', async () => {
     const call = vi.fn().mockResolvedValue({ result: {} })
     await MAESTRO_HANDLERS['maestro projection show']({

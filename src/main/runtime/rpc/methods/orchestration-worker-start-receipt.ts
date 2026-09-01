@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto'
-import type { MaestroTerminalLaunchProfile } from '../../../../shared/maestro-terminal-lease'
+import type {
+  MaestroTerminalLaunchProfile,
+  MaestroTerminalLease
+} from '../../../../shared/maestro-terminal-lease'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import type { OrchestrationDb } from '../../orchestration/db'
 import { isAgentPromptStalledError } from '../../agent-prompt-submission-verification'
@@ -11,6 +14,10 @@ import {
   type WorkerSetupReceipt
 } from './orchestration-worker-topology'
 import type { OrchestrationWorkerLaunchReceipt } from './orchestration-worker-launch-preferences'
+import {
+  createWorkerStartRecoveryCommand,
+  isReadinessUnverifiable
+} from './orchestration-worker-start'
 
 type DurableMutationIdentity = {
   callerFingerprint: string
@@ -19,13 +26,13 @@ type DurableMutationIdentity = {
   payloadHash: string
 }
 
-export async function activateWorkerTerminalLease(args: {
+export type WorkerTerminalLeaseArgs = {
   db: OrchestrationDb
   runtime: OrcaRuntimeService
   runId: string
-  canDispatchSubWorkers: boolean
   taskId: string
   taskSpec: string
+  canDispatchSubWorkers: boolean
   coordinatorGeneration: number
   dispatchId: string
   attemptId: string
@@ -47,7 +54,18 @@ export async function activateWorkerTerminalLease(args: {
   onLeaseTransfer: (
     receipt: ReturnType<OrchestrationDb['transferMaestroWorkerTerminalLease']>
   ) => void
-}) {
+}
+
+export type PreparedWorkerTerminalLease = {
+  managedCliContext: ReturnType<OrcaRuntimeService['buildTerminalManagedCliContext']>
+  tabId: string
+  workerLease: MaestroTerminalLease
+  transferReceipt?: ReturnType<OrchestrationDb['transferMaestroWorkerTerminalLease']>
+}
+
+export function prepareWorkerTerminalLease(
+  args: WorkerTerminalLeaseArgs
+): PreparedWorkerTerminalLease {
   const { db, runtime } = args
   runtime.assertTerminalManagedCliAvailable(args.terminalHandle)
   const managedCliContext = runtime.buildTerminalManagedCliContext(args.terminalHandle)
@@ -149,6 +167,15 @@ export async function activateWorkerTerminalLease(args: {
       'Worker terminal lease transfer did not create one successor owner.'
     )
   }
+  return { managedCliContext, tabId, workerLease, transferReceipt }
+}
+
+export async function activateWorkerTerminalLease(
+  args: WorkerTerminalLeaseArgs & { prepared?: PreparedWorkerTerminalLease }
+) {
+  const { db, runtime } = args
+  const { managedCliContext, tabId, workerLease, transferReceipt } =
+    args.prepared ?? prepareWorkerTerminalLease(args)
   const preamble = buildDispatchPreamble({
     canDispatchSubWorkers: args.canDispatchSubWorkers,
     taskId: args.taskId,
@@ -219,19 +246,10 @@ export async function activateWorkerTerminalLease(args: {
 
 type DiagnosticRedactionRule = {
   pattern: RegExp
-  // Why: String.replace passes the numeric match offset as the 2nd callback
-  // arg whenever a pattern has NO capture group — truthiness-checking that
-  // arg (as an earlier draft of this function did) redacts to "37[redacted]"
-  // instead of "[redacted]". Each rule declares its own replacement shape so
-  // there is never an ambiguous positional argument to misread.
   replace: (match: string) => string
 }
 
-// Why: a raw error message can carry a bearer token, credential-file content,
-// or an embedded API key from a failed remote command; a worker-start
-// diagnostic is stored durably and shown to any coordinator, so it must never
-// leak one. Order matters — the k=v pattern must run first so a token also
-// matching a later blob pattern is already replaced.
+// k=v runs first so durable diagnostics never leak a token that also matches a later rule.
 const SECRET_DIAGNOSTIC_RULES: readonly DiagnosticRedactionRule[] = [
   {
     pattern:
@@ -248,15 +266,7 @@ const SECRET_DIAGNOSTIC_RULES: readonly DiagnosticRedactionRule[] = [
 
 const DIAGNOSTIC_MAX_LENGTH = 2000
 
-/**
- * Bounds and redacts a raw failure message for durable storage. Never emits
- * secrets or unbounded text. Naturally idempotent: an already-redacted
- * "[redacted]"/truncation marker matches none of the secret patterns and is
- * already under the length bound, so relaying an already-sanitized message
- * from a federated peer through this again is a no-op. The stage itself is
- * carried on the separate `failedStage`/`stage` receipt fields already
- * returned alongside this — it is not re-encoded into the message text.
- */
+/** Bounds and redacts a raw failure message for durable storage. */
 export function boundedRedactedDiagnostic(rawMessage: string): string {
   let redacted = rawMessage
   for (const rule of SECRET_DIAGNOSTIC_RULES) {
@@ -276,10 +286,14 @@ export function failWorkerStartWithReceipt(args: {
   error: unknown
   setup: WorkerSetupReceipt
   launch: OrchestrationWorkerLaunchReceipt
+  attemptId?: string
+  terminalHandle?: string
+  leaseId?: string
 }): unknown {
   const rawReason = args.error instanceof Error ? args.error.message : String(args.error)
   const reason = boundedRedactedDiagnostic(rawReason)
-  const unknown = isUnknownWorkerStartOutcome(args.error, args.failedStage)
+  const readinessUnverifiable = isReadinessUnverifiable(args.error, args.failedStage)
+  const unknown = readinessUnverifiable || isUnknownWorkerStartOutcome(args.error, args.failedStage)
   const worker = unknown
     ? args.db.markWorkerStartUnknown(args.dispatchId, args.failedStage, reason)
     : args.db.failWorkerStart(args.dispatchId, args.failedStage, reason, {
@@ -290,7 +304,11 @@ export function failWorkerStartWithReceipt(args: {
   return {
     runId: args.runId,
     taskId: args.taskId,
+    ...(args.attemptId ? { attemptId: args.attemptId } : {}),
     dispatchId: args.dispatchId,
+    ...(args.leaseId ? { leaseId: args.leaseId } : {}),
+    ...(args.terminalHandle ? { terminalHandle: args.terminalHandle } : {}),
+    readiness: readinessUnverifiable ? 'unverifiable' : 'failed',
     state: worker.state === 'start_unknown' ? 'outcome_unknown' : worker.state,
     stage: worker.stage,
     failedStage: args.failedStage,
@@ -302,8 +320,16 @@ export function failWorkerStartWithReceipt(args: {
     ...(unknown
       ? {
           nextCommands: [
-            `orca orchestration worker-show --dispatch ${args.dispatchId} --json`,
-            `orca orchestration worker-abandon --dispatch ${args.dispatchId} --json`
+            createWorkerStartRecoveryCommand({
+              executable: args.launch.effective?.executable ?? 'orca',
+              taskId: args.taskId,
+              dispatchId: args.dispatchId,
+              attemptId: args.attemptId,
+              terminalHandle: args.terminalHandle,
+              // start_unknown is intentionally not strict-retryable: retrying it is the
+              // impossible loop this recovery receipt must avoid.
+              exactRetryAvailable: false
+            })
           ]
         }
       : {})

@@ -108,6 +108,34 @@ describe('buildDispatchPreamble', () => {
     expect(result).toMatch(/never by rerunning\s+the entire suite/)
   })
 
+  it('prefers the Orca Browser and makes external browser fallback observable', () => {
+    const result = buildDispatchPreamble(baseParams())
+
+    expect(result).toContain('=== ORCA-NATIVE BROWSER ===')
+    expect(result).toContain('read the installed `orca-cli` skill')
+    expect(result).toContain('orca agent-context --json')
+    expect(result).toContain('`maestro browser-surface open` payload contract')
+    expect(result).toContain('task_abc123 as `task_id`')
+    expect(result).toContain('ctx_def456 as `attempt_id`')
+    expect(result).toContain('`surface_id` and `browser_page_id`')
+    expect(result).toContain('`--page <id>`')
+    expect(result).toContain('Do not replace a managed Harness surface with `orca tab create`')
+    expect(result).toContain('`maestro.browser-surface.v1`')
+    expect(result).toMatch(/External browser automation is a fallback only/)
+    expect(result).toMatch(
+      /record the exact\s+blocker in your next heartbeat and final worker_done body/
+    )
+    expect(result).toMatch(/Never silently open a\s+second Chromium/)
+  })
+
+  it('uses the selected managed CLI in Orca Browser examples', () => {
+    const result = buildDispatchPreamble(baseParams({ devMode: true }))
+
+    expect(result).toContain('orca-dev agent-context --json')
+    expect(result).toContain('`orca-dev tab create`')
+    expect(result).not.toMatch(/(^|\s)orca agent-context/m)
+  })
+
   it('includes ask block with BEHAVIOR RULE #1 forbidding AskUserQuestion', () => {
     const result = buildDispatchPreamble(baseParams())
     expect(result).toMatch(/orchestration ask --from term_worker/)

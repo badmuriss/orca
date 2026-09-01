@@ -51,6 +51,16 @@ export const ORCHESTRATION_WORKER_COMMAND_SPECS: CommandSpec[] = [
     ]
   },
   {
+    path: ['orchestration', 'replace-worker'],
+    summary: 'Atomically supersede one outcome-unknown worker Dispatch',
+    usage:
+      'orca orchestration replace-worker --task <task_id> --predecessor <dispatch_id> [--run <run_id>] [--from <handle>] [--retry-request <id>] [--json]',
+    allowedFlags: [...GLOBAL_FLAGS, 'task', 'predecessor', 'run', 'from', 'retry-request'],
+    notes: [
+      'Derives agent and placement from the outcome-unknown predecessor; acceptance fences the predecessor and records the successor before terminal effects.'
+    ]
+  },
+  {
     path: ['orchestration', 'worker-read'],
     summary: 'Read bounded output from one supervised worker',
     usage:

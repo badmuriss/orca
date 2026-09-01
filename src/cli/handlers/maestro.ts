@@ -1,6 +1,6 @@
 import type { CommandHandler } from '../dispatch'
 import { printResult } from '../format'
-import { getRequiredStringFlag } from '../flags'
+import { getOptionalStringFlag, getRequiredStringFlag } from '../flags'
 import { RuntimeClientError } from '../runtime-client'
 import { readJsonObjectInput } from '../structured-input'
 
@@ -144,6 +144,38 @@ export const MAESTRO_HANDLERS: Record<string, CommandHandler> = {
     }
   },
   'maestro open': async (handler) => {
+    const runId = getOptionalStringFlag(handler.flags, 'run')
+    const host = getOptionalStringFlag(handler.flags, 'host')
+    const workspace = getOptionalStringFlag(handler.flags, 'workspace')
+    if (runId) {
+      if (host || workspace) {
+        throw new RuntimeClientError(
+          'invalid_argument',
+          '--run cannot combine with --host or --workspace.'
+        )
+      }
+      const index = await handler.client.call<{
+        entries: {
+          executionHostId: string
+          workspaceKey: string
+          projectionRevisions: { runId: string }[]
+        }[]
+      }>('maestro.list')
+      const matches = index.result.entries.filter((entry) =>
+        entry.projectionRevisions.some((revision) => revision.runId === runId)
+      )
+      if (matches.length !== 1) {
+        throw new RuntimeClientError(
+          matches.length === 0 ? 'maestro_run_not_found' : 'maestro_run_ambiguous',
+          `Run ${runId} resolved ${matches.length} authoritative Maestro bindings; expected exactly one.`
+        )
+      }
+      await printCall(handler, 'maestro.canvas.open', {
+        execution_host_id: matches[0].executionHostId,
+        workspace_key: matches[0].workspaceKey
+      })
+      return
+    }
     await printCall(handler, 'maestro.canvas.open', {
       execution_host_id: getRequiredStringFlag(handler.flags, 'host'),
       workspace_key: getRequiredStringFlag(handler.flags, 'workspace')

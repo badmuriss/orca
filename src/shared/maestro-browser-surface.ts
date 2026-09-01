@@ -3,6 +3,8 @@ import { MaestroActorSchema, MaestroWorkspaceAnchorSchema } from './maestro-cont
 
 export const MAESTRO_BROWSER_SURFACE_PROTOCOL = 'maestro-browser-surface/v1' as const
 export const MAESTRO_BROWSER_EVIDENCE_PROTOCOL = 'maestro-browser-evidence/v1' as const
+export const MAESTRO_BROWSER_PROFILE_CONSENT_PROTOCOL =
+  'maestro-browser-profile-consent/v1' as const
 
 const identifier = z.string().regex(/^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$/)
 const boundedText = z.string().min(1).max(4096)
@@ -33,6 +35,43 @@ export const MaestroBrowserSurfaceStateSchema = z.enum([
   'outcome_unknown',
   'unavailable'
 ])
+
+export const MaestroBrowserProfileConsentReceiptSchema = z
+  .object({
+    schema_version: z.literal(1),
+    protocol: z.literal(MAESTRO_BROWSER_PROFILE_CONSENT_PROTOCOL),
+    consent_id: identifier,
+    profile_id: identifier,
+    run_id: identifier,
+    task_id: identifier,
+    attempt_id: identifier,
+    granted_by: MaestroActorSchema.extend({ kind: z.literal('user') }),
+    granted_at: z.string().datetime(),
+    expires_at: z.string().datetime(),
+    revoked_at: z.string().datetime().nullable()
+  })
+  .strict()
+
+export const MaestroBrowserProfileConsentGrantRequestSchema = z
+  .object({
+    schema_version: z.literal(1),
+    protocol: z.literal(MAESTRO_BROWSER_PROFILE_CONSENT_PROTOCOL),
+    workspace: MaestroWorkspaceAnchorSchema,
+    profile_id: identifier,
+    task_id: identifier,
+    attempt_id: identifier,
+    expires_at: z.string().datetime()
+  })
+  .strict()
+
+export const MaestroBrowserProfileConsentRevokeRequestSchema = z
+  .object({
+    schema_version: z.literal(1),
+    protocol: z.literal(MAESTRO_BROWSER_PROFILE_CONSENT_PROTOCOL),
+    workspace: MaestroWorkspaceAnchorSchema,
+    consent_id: identifier
+  })
+  .strict()
 
 /** `unobserved` means no paint probe ran; it is never a claim that the pane was blank. */
 export const MaestroBrowserPanePaintSchema = z.enum(['painted', 'unpainted', 'unobserved'])
@@ -108,6 +147,7 @@ export const MaestroBrowserSurfaceRequestSchema = z
     title: z.string().min(1).max(512),
     browser_page_id: identifier.optional(),
     profile_id: identifier.nullable(),
+    profile_consent_receipt: MaestroBrowserProfileConsentReceiptSchema.nullable().optional(),
     requested_visibility: MaestroBrowserVisibilitySchema,
     viewport,
     retention: z.enum(['release_when_settled', 'retain']),
@@ -125,6 +165,7 @@ export const MaestroBrowserSurfaceReleaseRequestSchema = z
     actor: MaestroActorSchema,
     coordinator_generation: z.number().int().min(1),
     surface_id: identifier,
+    profile_consent_receipt: MaestroBrowserProfileConsentReceiptSchema.nullable().optional(),
     reason: boundedText
   })
   .strict()
@@ -136,7 +177,8 @@ export const MaestroBrowserSurfaceActionRequestSchema = z
     workspace: MaestroWorkspaceAnchorSchema,
     actor: MaestroActorSchema,
     coordinator_generation: z.number().int().min(1),
-    surface_id: identifier
+    surface_id: identifier,
+    profile_consent_receipt: MaestroBrowserProfileConsentReceiptSchema.nullable().optional()
   })
   .strict()
 
@@ -175,6 +217,15 @@ export const MaestroBrowserSurfaceReceiptSchema = z
   .strict()
 
 export type MaestroBrowserSurfaceRequest = z.infer<typeof MaestroBrowserSurfaceRequestSchema>
+export type MaestroBrowserProfileConsentReceipt = z.infer<
+  typeof MaestroBrowserProfileConsentReceiptSchema
+>
+export type MaestroBrowserProfileConsentGrantRequest = z.infer<
+  typeof MaestroBrowserProfileConsentGrantRequestSchema
+>
+export type MaestroBrowserProfileConsentRevokeRequest = z.infer<
+  typeof MaestroBrowserProfileConsentRevokeRequestSchema
+>
 export type MaestroBrowserSurfaceReleaseRequest = z.infer<
   typeof MaestroBrowserSurfaceReleaseRequestSchema
 >

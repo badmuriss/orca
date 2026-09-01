@@ -17,6 +17,7 @@ export {
   type ComputerWindowInfo,
   type ComputerWindowListWindow
 } from './computer-use-runtime-types'
+export { collectRunOwnedChildWorktrees } from './runtime-worktree-contracts'
 export type {
   BrowserPaneFocusReceipt,
   BrowserPanePaintVerdict,
@@ -184,6 +185,9 @@ export type {
   RuntimeGitLocalBranches,
   RuntimeRepoList,
   RuntimeRepoSearchRefs,
+  RuntimeRunSettlementResult,
+  RuntimeRunWorktreeCleanupDisposition,
+  RuntimeRunWorktreeCleanupResult,
   RuntimeSpeechModelSummary,
   RuntimeSpeechSetupState,
   RuntimeWorktreeAgentRow,

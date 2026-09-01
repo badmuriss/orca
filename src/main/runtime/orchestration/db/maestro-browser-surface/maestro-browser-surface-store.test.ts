@@ -1,5 +1,11 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { MaestroBrowserSurfaceRequestSchema } from '../../../../../shared/maestro-browser-surface'
+import {
+  MaestroBrowserProfileConsentGrantRequestSchema,
+  MaestroBrowserSurfaceRequestSchema
+} from '../../../../../shared/maestro-browser-surface'
 import { OrchestrationDb } from '../orchestration-db'
 
 const request = MaestroBrowserSurfaceRequestSchema.parse({
@@ -82,5 +88,64 @@ describe('Maestro browser surface store', () => {
       observed_visibility: 'visible'
     })
     expect(database.listReconcilableMaestroBrowserSurfaces()).toHaveLength(1)
+  })
+
+  it('reopens an exact host-issued profile consent and persists its revocation', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'orca-browser-profile-consent-'))
+    const databasePath = join(directory, 'orchestration.sqlite')
+    database.close()
+    database = new OrchestrationDb(databasePath)
+    database.db.exec('DROP TABLE maestro_browser_profile_consents')
+    database.db.pragma('user_version = 35')
+    database.close()
+    database = new OrchestrationDb(databasePath)
+    expect(database.db.pragma('user_version', { simple: true })).toBe(36)
+    const grantRequest = MaestroBrowserProfileConsentGrantRequestSchema.parse({
+      schema_version: 1,
+      protocol: 'maestro-browser-profile-consent/v1',
+      workspace: request.workspace,
+      profile_id: 'profile-1',
+      task_id: request.task_id,
+      attempt_id: request.attempt_id,
+      expires_at: '2099-08-31T20:00:00.000Z'
+    })
+    const granted = database.grantMaestroBrowserProfileConsent(
+      grantRequest,
+      {
+        actor_id: 'human-1',
+        kind: 'user',
+        authenticated: true,
+        session_id: 'human-session-1'
+      },
+      new Date('2026-08-31T20:00:00.000Z')
+    )
+    database.close()
+    database = new OrchestrationDb(databasePath)
+
+    expect(database.getMaestroBrowserProfileConsent(granted, request.workspace)).toEqual(granted)
+    expect(
+      database.getMaestroBrowserProfileConsent(
+        { ...granted, expires_at: '2099-09-01T20:00:00.000Z' },
+        request.workspace
+      )
+    ).toBeUndefined()
+
+    const revoked = database.revokeMaestroBrowserProfileConsent(
+      {
+        schema_version: 1,
+        protocol: 'maestro-browser-profile-consent/v1',
+        workspace: request.workspace,
+        consent_id: granted.consent_id
+      },
+      new Date('2026-08-31T21:00:00.000Z')
+    )
+    database.close()
+    database = new OrchestrationDb(databasePath)
+
+    expect(revoked.revoked_at).toBe('2026-08-31T21:00:00.000Z')
+    expect(database.getMaestroBrowserProfileConsent(revoked, request.workspace)).toEqual(revoked)
+    database.close()
+    rmSync(directory, { recursive: true, force: true })
+    database = new OrchestrationDb(':memory:')
   })
 })

@@ -150,6 +150,30 @@ export type MaestroRunProgressV1 = MaestroRunProgressSummary
 export type MaestroRunProgressPayload = MaestroRunProgressV1 | MaestroRunProgressV2
 export type { MaestroRunProgressV2 }
 
+export type LegacyMaestroTaskProgress = {
+  completed: number
+  total: number
+  percent?: number
+  allSettled: boolean
+  hasFailures: boolean
+}
+
+export function legacyMaestroTaskProgress(
+  summary: MaestroRunProgressSummary
+): LegacyMaestroTaskProgress {
+  const counts = summary.task_counts
+  const completed = counts.approved + counts.failed
+  const total = Object.values(counts).reduce((sum, count) => sum + count, 0)
+  const allSettled = total > 0 && completed === total
+  return {
+    completed,
+    total,
+    ...(total > 0 ? { percent: allSettled ? 100 : Math.round((completed / total) * 100) } : {}),
+    allSettled,
+    hasFailures: counts.failed > 0
+  }
+}
+
 export type MaestroRunProgressAuthority = {
   runId: string
   workspace: { executionHostId: string; workspaceKey: string }

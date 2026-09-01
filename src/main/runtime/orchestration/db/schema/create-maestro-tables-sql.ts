@@ -32,6 +32,45 @@ CREATE TABLE IF NOT EXISTS maestro_deltas (
 CREATE INDEX IF NOT EXISTS idx_maestro_deltas_cursor
   ON maestro_deltas(execution_host_id, workspace_key, revision);
 
+CREATE TABLE IF NOT EXISTS maestro_run_projections (
+  run_id TEXT PRIMARY KEY,
+  home_execution_host_id TEXT NOT NULL,
+  home_workspace_key TEXT NOT NULL,
+  execution_execution_host_id TEXT NOT NULL,
+  execution_workspace_key TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  view_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS maestro_bootstrap_records (
+  mutation_id TEXT PRIMARY KEY,
+  execution_host_id TEXT NOT NULL,
+  workspace_key TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  request_json TEXT NOT NULL,
+  receipt_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_maestro_bootstrap_records_workspace
+  ON maestro_bootstrap_records(execution_host_id, workspace_key, updated_at);
+
+CREATE TABLE IF NOT EXISTS maestro_human_reviews (
+  review_id TEXT PRIMARY KEY,
+  request_id TEXT NOT NULL UNIQUE,
+  execution_host_id TEXT NOT NULL,
+  workspace_key TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  dispatch_id TEXT NOT NULL,
+  references_json TEXT NOT NULL,
+  review_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_maestro_human_reviews_run
+  ON maestro_human_reviews(execution_host_id, workspace_key, run_id, updated_at);
+
 CREATE TABLE IF NOT EXISTS maestro_context_snapshots (
   snapshot_id TEXT PRIMARY KEY,
   execution_host_id TEXT NOT NULL,

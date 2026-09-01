@@ -95,7 +95,50 @@ describe('Maestro list RPC', () => {
       documentRevision: 2,
       projectionState: 'ready',
       projectionRevision: 7,
+      selectedRunId: 'run-1',
+      projectionRevisions: [
+        {
+          runId: 'run-1',
+          revision: 7,
+          updatedAt: '2026-08-24T11:00:00.000Z'
+        }
+      ],
+      projectionHealth: { state: 'healthy', revision: 7 },
       recoveryHint: null
+    })
+  })
+
+  it('labels every Run revision and selects the newest projection independently', () => {
+    const result = buildLabeledMaestroCanvasIndex(
+      [entry('local', 'folder:alpha')],
+      [
+        {
+          executionHostId: 'local',
+          workspaceKey: 'folder:alpha',
+          revision: 8,
+          updatedAt: '2026-08-24T12:00:00.000Z',
+          runId: 'run-new'
+        },
+        {
+          executionHostId: 'local',
+          workspaceKey: 'folder:alpha',
+          revision: 12,
+          updatedAt: '2026-08-24T11:00:00.000Z',
+          runId: 'run-old'
+        }
+      ],
+      []
+    )
+
+    expect(result[0]).toMatchObject({
+      documentRevision: 2,
+      selectedRunId: 'run-new',
+      projectionRevision: 8,
+      projectionRevisions: [
+        { runId: 'run-new', revision: 8 },
+        { runId: 'run-old', revision: 12 }
+      ],
+      projectionHealth: { state: 'healthy', revision: 8 }
     })
   })
 })

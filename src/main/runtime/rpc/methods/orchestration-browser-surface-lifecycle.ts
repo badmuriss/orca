@@ -9,16 +9,20 @@ import {
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import { defineMethod, type RpcMethod } from '../core'
 import { resolveMaestroPrincipal } from '../maestro-principal'
-import { requireCoordinator, showExactSurface } from './orchestration-browser-surface-authority'
+import {
+  requireBrowserSurfaceActionAuthority,
+  requireBrowserSurfaceReleaseAuthority,
+  showExactSurface
+} from './orchestration-browser-surface-authority'
 
-/** Retain and release keep the exact surface's ownership decisions on the coordinator. */
+/** Retain and release preserve exact ownership for the coordinator or active owning worker. */
 export const BROWSER_SURFACE_LIFECYCLE_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'orchestration.browserSurface.retain',
     params: MaestroBrowserSurfaceActionRequestSchema,
     handler: async (request, context) => {
       const principal = await resolveMaestroPrincipal(context, request.workspace)
-      requireCoordinator(principal, request.workspace, request.coordinator_generation)
+      requireBrowserSurfaceActionAuthority(principal, request, context)
       const { record } = await showExactSurface(request, context)
       return context.runtime
         .getOrchestrationDb()
@@ -34,7 +38,7 @@ export const BROWSER_SURFACE_LIFECYCLE_METHODS: RpcMethod[] = [
     params: MaestroBrowserSurfaceReleaseRequestSchema,
     handler: async (request, context) => {
       const principal = await resolveMaestroPrincipal(context, request.workspace)
-      requireCoordinator(principal, request.workspace, request.coordinator_generation)
+      requireBrowserSurfaceReleaseAuthority(principal, request, context)
       const database = context.runtime.getOrchestrationDb()
       const record = database.getMaestroBrowserSurface(request.surface_id)
       if (!record) {

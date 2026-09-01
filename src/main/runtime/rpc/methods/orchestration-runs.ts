@@ -5,7 +5,8 @@ import { ORCHESTRATION_RUN_PAGE_LIMIT } from '../../../../shared/orchestration-r
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import {
   assertCallerHandleMatchesEvidence,
-  resolveOrchestrationCaller
+  resolveOrchestrationCaller,
+  resolveRunScope
 } from './orchestration-run-scope'
 import { ORCHESTRATION_COORDINATOR_HANDOFF_METHODS } from './orchestration-coordinator-handoff'
 
@@ -26,6 +27,10 @@ const RunListParams = z.object({
   cursor: z.string().min(1).optional()
 })
 const RunShowParams = z.object({ id: requiredString('Missing --id'), from: OptionalString })
+const RunSettleParams = z.object({
+  id: requiredString('Missing --id'),
+  from: requiredString('Missing coordinator terminal')
+})
 
 export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
   ...ORCHESTRATION_COORDINATOR_HANDOFF_METHODS,
@@ -131,6 +136,23 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
         throw new OrchestrationError('run_not_found', `Run ${params.id} was not found.`)
       }
       return { run }
+    }
+  }),
+  defineMethod({
+    name: 'orchestration.runSettle',
+    params: RunSettleParams,
+    handler: async (
+      params,
+      { legacyCoordinatorRunId, orchestrationCompatibilityEvidence, runtime }
+    ) => {
+      const run = resolveRunScope(runtime, {
+        runId: params.id,
+        callerTerminalHandle: params.from,
+        requireCurrentConsumer: true,
+        legacyCoordinatorRunId,
+        callerEvidence: orchestrationCompatibilityEvidence
+      })
+      return await runtime.settleOrchestrationRun(run.id)
     }
   })
 ]

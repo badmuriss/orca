@@ -1,4 +1,5 @@
 import type { AgentLaunchPreferences } from '../../../../shared/agent-session-host-authority'
+import type { ExecutionHostId } from '../../../../shared/execution-host'
 import { buildOrchestrationTaskDisplayMetadata } from '../../../../shared/orchestration-task-display'
 import type { TuiAgent } from '../../../../shared/tui-agent'
 import type { OrcaRuntimeService } from '../../orca-runtime'
@@ -21,6 +22,8 @@ export type WorkerEffect = {
   terminalId?: string
   surface?: 'visible' | 'background'
   warning?: string
+  executionHostId?: ExecutionHostId
+  worktreeInstanceId?: string
 }
 
 export type WorkerSetupReceipt = {
@@ -184,7 +187,9 @@ export async function createWorkerWorktree(args: {
   effects.push({
     kind: 'worktree',
     action: requestedWorktree === 'new-child' ? 'created_child' : 'created_top_level',
-    id: created.worktree.id
+    id: created.worktree.id,
+    ...(created.worktree.hostId ? { executionHostId: created.worktree.hostId } : {}),
+    ...(created.worktree.instanceId ? { worktreeInstanceId: created.worktree.instanceId } : {})
   })
   db.recordWorkerStage({
     dispatchId,

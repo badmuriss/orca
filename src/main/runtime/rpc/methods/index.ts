@@ -51,6 +51,7 @@ import { MAESTRO_PROJECTION_METHODS } from './maestro-projection'
 import { MAESTRO_RUN_PROGRESS_METHODS } from './maestro-run-progress'
 import { MAESTRO_INTENT_METHODS } from './maestro-intents'
 import { ORCHESTRATION_BROWSER_SURFACE_METHODS } from './orchestration-browser-surface'
+import { ORCHESTRATION_HUMAN_REVIEW_METHODS } from './orchestration-human-review'
 import { MAESTRO_WORKSPACE_CANVAS_METHODS } from './maestro-workspace-canvas'
 
 // Why: a flat manifest keeps registration order explicit and provides one
@@ -80,6 +81,7 @@ export const ALL_RPC_METHODS: readonly RpcAnyMethod[] = [
   ...MAESTRO_RUN_PROGRESS_METHODS,
   ...MAESTRO_INTENT_METHODS,
   ...ORCHESTRATION_BROWSER_SURFACE_METHODS,
+  ...ORCHESTRATION_HUMAN_REVIEW_METHODS,
   ...MAESTRO_WORKSPACE_CANVAS_METHODS,
   ...NOTIFICATION_METHODS,
   ...STATS_METHODS,

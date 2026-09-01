@@ -119,6 +119,41 @@ describe('lightweight Run CLI handlers', () => {
       takeoverLegacy: true
     })
   })
+
+  it('settles the explicit Run through the resolved coordinator identity', async () => {
+    const settlement = {
+      runId: 'run_1',
+      state: 'pending' as const,
+      worktrees: [
+        {
+          worktreeId: 'repo::child',
+          executionHostId: 'local',
+          disposition: 'pending' as const,
+          cause: 'dirty',
+          action: 'Commit changes and retry.'
+        }
+      ],
+      warnings: ['repo::child: dirty']
+    }
+    callMock.mockResolvedValue({ result: settlement })
+
+    await ORCHESTRATION_HANDLERS['orchestration run-settle']({
+      flags: new Map([
+        ['id', 'run_1'],
+        ['from', 'term_coord']
+      ]),
+      client: { call: callMock },
+      cwd: '/tmp/repo',
+      json: false
+    } as never)
+
+    expect(callMock).toHaveBeenCalledWith('orchestration.runSettle', {
+      id: 'run_1',
+      from: 'term_coord'
+    })
+    const format = vi.mocked(printResult).mock.calls.at(-1)?.[2]
+    expect(format?.(settlement)).toContain('Commit changes and retry.')
+  })
 })
 
 describe('orchestration reset CLI handler', () => {

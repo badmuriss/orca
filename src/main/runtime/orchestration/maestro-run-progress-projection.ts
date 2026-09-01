@@ -6,10 +6,14 @@ import {
   type MaestroRunProgressV2
 } from '../../../shared/maestro-run-progress'
 import type { OrchestrationNestedAgentActivity } from '../../../shared/orchestration-nested-agent-activity'
-import { buildOrchestrationTaskDisplayMetadata } from '../../../shared/orchestration-task-display'
 import type { DispatchContextRow, MessageRow, RunRow, TaskRow } from './types'
+import {
+  projectOperationalTaskOutcome,
+  projectTaskProgressOutcome,
+  type TaskProgressOutcome
+} from './db/tasks/task-progress-outcome'
+import { disambiguateTaskProgressTitles } from './db/tasks/task-progress-title'
 
-type TaskOutcome = keyof MaestroRunProgressV2['execution']['counts']
 type CreatedRow = { created_at: string; id: string }
 
 export type MaestroRunProgressProjectionInput = {
@@ -31,7 +35,8 @@ type TaskProjection = {
   title: string
   workerLabel?: string
   dispatch?: DispatchContextRow
-  outcome: TaskOutcome
+  outcome: TaskProgressOutcome
+  operationalOutcome?: NonNullable<TaskRow['operational_outcome']>
 }
 
 export function projectMaestroRunProgress(
@@ -48,7 +53,7 @@ export function projectMaestroRunProgress(
       .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt))
       .flatMap((lease) => (lease.taskId ? [[lease.taskId, lease] as const] : []))
   )
-  const titles = disambiguateTaskTitles(orderedTasks)
+  const titles = disambiguateTaskProgressTitles(orderedTasks, boundedText)
   const tasks = orderedTasks.map((task, index): TaskProjection => {
     const dispatch = dispatchesByTask.get(task.id)
     const lease = leasesByTask.get(task.id)
@@ -59,7 +64,10 @@ export function projectMaestroRunProgress(
       title,
       ...(workerLabel ? { workerLabel: boundedText(workerLabel, title) } : {}),
       ...(dispatch ? { dispatch } : {}),
-      outcome: taskOutcome(task, dispatch, lease)
+      outcome: projectTaskProgressOutcome(task, dispatch, lease),
+      ...(task.purpose === 'operational'
+        ? { operationalOutcome: projectOperationalTaskOutcome(task, lease) }
+        : {})
     }
   })
   const counts: MaestroRunProgressV2['execution']['counts'] = {
@@ -76,6 +84,21 @@ export function projectMaestroRunProgress(
   }
   const completed = counts.succeeded + counts.failed + counts.cancelled
   const total = tasks.length
+  const deliverableTasks = tasks.filter(({ task }) => task.purpose !== 'operational')
+  const deliverableCompleted = deliverableTasks.filter(({ outcome }) =>
+    ['succeeded', 'failed', 'cancelled'].includes(outcome)
+  ).length
+  const operationalReliability: NonNullable<MaestroRunProgressV2['operational_reliability']> = {
+    successful: 0,
+    failed: 0,
+    superseded: 0,
+    unverifiable: 0
+  }
+  for (const task of tasks) {
+    if (task.operationalOutcome) {
+      operationalReliability[task.operationalOutcome] += 1
+    }
+  }
   const executionState: MaestroRunProgressV2['execution']['state'] =
     total > 0 && completed === total
       ? counts.failed > 0
@@ -99,6 +122,14 @@ export function projectMaestroRunProgress(
       total,
       counts
     },
+    deliverables: {
+      ...(deliverableTasks.length
+        ? { progress_percent: Math.round((deliverableCompleted / deliverableTasks.length) * 100) }
+        : {}),
+      completed: deliverableCompleted,
+      total: deliverableTasks.length
+    },
+    operational_reliability: operationalReliability,
     projection_health: input.projectionHealth,
     cleanup_health: input.cleanupHealth,
     current: tasks
@@ -124,7 +155,10 @@ export function projectMaestroRunProgress(
         reference: task.task.id,
         title: task.title,
         worker_label: task.workerLabel,
-        outcome_summary: completedOutcome(task)
+        outcome_summary: completedOutcome(task),
+        purpose: task.task.purpose ?? 'deliverable',
+        ...(task.operationalOutcome ? { operational_outcome: task.operationalOutcome } : {}),
+        ...(task.task.successor_task_id ? { successor_reference: task.task.successor_task_id } : {})
       })),
     next: tasks
       .filter(({ outcome }) => outcome === 'pending')
@@ -164,56 +198,6 @@ export function projectMaestroRunProgress(
       revision: input.revision
     }
   })
-}
-
-function taskOutcome(
-  task: TaskRow,
-  dispatch: DispatchContextRow | undefined,
-  lease: MaestroTerminalLease | undefined
-): TaskOutcome {
-  if (task.status === 'completed') {
-    return 'succeeded'
-  }
-  if (task.status === 'failed') {
-    return dispatch?.termination_reason === 'operator_close' ? 'cancelled' : 'failed'
-  }
-  if (task.status === 'blocked') {
-    return 'blocked'
-  }
-  if (lease?.lifecycleState === 'input_required') {
-    return 'input_required'
-  }
-  if (task.status === 'dispatched') {
-    return 'running'
-  }
-  return 'pending'
-}
-
-function disambiguateTaskTitles(tasks: readonly TaskRow[]): string[] {
-  const candidates = tasks.map(taskTitleCandidate)
-  const totals = new Map<string, number>()
-  for (const candidate of candidates) {
-    totals.set(candidate, (totals.get(candidate) ?? 0) + 1)
-  }
-  const ordinals = new Map<string, number>()
-  return candidates.map((candidate) => {
-    const ordinal = (ordinals.get(candidate) ?? 0) + 1
-    ordinals.set(candidate, ordinal)
-    if (candidate !== 'Untitled task' && totals.get(candidate) === 1) {
-      return candidate
-    }
-    return boundedText(`${candidate} ${ordinal}`, 'Untitled task')
-  })
-}
-
-function taskTitleCandidate(task: TaskRow): string {
-  if (task.task_title?.trim()) {
-    return boundedText(task.task_title, 'Untitled task')
-  }
-  if (task.display_name?.trim()) {
-    return boundedText(task.display_name, 'Untitled task')
-  }
-  return buildOrchestrationTaskDisplayMetadata({ spec: task.spec }).taskTitle || 'Untitled task'
 }
 
 function currentActivity(task: TaskProjection, messages: readonly MessageRow[]): string {

@@ -65,7 +65,10 @@ export function requestWorkerTerminalRelease(
       return {
         disposition: 'retained',
         resource,
-        reason: (resource.retained_reason as WorkerTerminalRetainedReason) ?? 'identity_unproven'
+        reason:
+          resource.release_state === 'retained_for_review'
+            ? 'retained_for_review'
+            : ((resource.retained_reason as WorkerTerminalRetainedReason) ?? 'identity_unproven')
       }
     }
     if (worker.state === 'stopped' || worker.state === 'abandoned') {
@@ -104,7 +107,7 @@ export function requestWorkerTerminalRelease(
     }
     const releasableStates = options.auto
       ? "'not_requested'"
-      : "'not_requested', 'retained', 'requested', 'releasing', 'unknown'"
+      : "'not_requested', 'retained', 'retained_for_review', 'requested', 'releasing', 'unknown'"
     this.db
       .prepare(
         `UPDATE worker_terminal_resources
@@ -113,6 +116,7 @@ export function requestWorkerTerminalRelease(
                ELSE 'requested'
              END,
              retained_reason = NULL,
+             retention_owner = NULL, retention_expires_at = NULL, review_id = NULL,
              release_requested_at = COALESCE(release_requested_at, datetime('now')),
              release_error = NULL, updated_at = datetime('now')
          WHERE id = ? AND release_state IN (${releasableStates})`
@@ -177,6 +181,7 @@ export function settleDeadWorkerTerminalRelease(
       .prepare(
         `UPDATE worker_terminal_resources
          SET release_state = 'released', ownership_state = 'released', retained_reason = NULL,
+             retention_owner = NULL, retention_expires_at = NULL, review_id = NULL,
              release_requested_at = COALESCE(release_requested_at, datetime('now')),
              release_completed_at = datetime('now'), release_error = NULL,
              updated_at = datetime('now')

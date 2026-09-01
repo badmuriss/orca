@@ -18,6 +18,8 @@ export type MessagePriority = 'normal' | 'high' | 'urgent'
 export type MessageDeliveryContract = 'legacy_direct' | 'current_delivery' | 'audit_only'
 
 export type TaskStatus = 'pending' | 'ready' | 'dispatched' | 'completed' | 'failed' | 'blocked'
+export type TaskPurpose = 'deliverable' | 'operational'
+export type TaskOperationalOutcome = 'successful' | 'failed' | 'superseded' | 'unverifiable'
 
 export type DispatchStatus = 'pending' | 'dispatched' | 'completed' | 'failed' | 'circuit_broken'
 
@@ -256,6 +258,9 @@ export type TaskRow = {
   task_title: string | null
   display_name: string | null
   spec: string
+  purpose?: TaskPurpose
+  operational_outcome?: TaskOperationalOutcome | null
+  successor_task_id?: string | null
   status: TaskStatus
   deps: string
   result: string | null

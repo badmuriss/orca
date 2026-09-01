@@ -143,9 +143,13 @@ CREATE TABLE IF NOT EXISTS worker_terminal_resources (
     CHECK(ownership_state IN ('owned', 'transferred', 'user_owned', 'external', 'released')),
   release_state            TEXT NOT NULL DEFAULT 'not_requested'
     CHECK(release_state IN (
-      'not_requested', 'retained', 'requested', 'releasing', 'released', 'unknown'
+      'not_requested', 'retained', 'retained_for_review',
+      'requested', 'releasing', 'released', 'unknown'
     )),
   retained_reason          TEXT,
+  retention_owner          TEXT,
+  retention_expires_at     TEXT,
+  review_id                TEXT,
   release_requested_at     TEXT,
   release_completed_at     TEXT,
   release_error            TEXT,

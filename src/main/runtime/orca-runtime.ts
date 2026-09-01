@@ -475,11 +475,13 @@ import { runtimeTerminalDegradation } from './native-terminal-availability'
 import {
   BROWSER_UNAVAILABLE_ERROR_CODE,
   browserUnavailableMessage,
+  collectRunOwnedChildWorktrees,
   HEADLESS_RUNTIME_WINDOW_ID,
   type RuntimeDegradation,
   type RuntimeDesktopWindowStatus,
   type RuntimeGraphStatus,
   type RuntimeRepoSearchRefs,
+  type RuntimeRunSettlementResult,
   type RuntimeTerminalRead,
   type RuntimeTerminalRename,
   type RuntimeTerminalAgentStatus,
@@ -541,6 +543,7 @@ import {
   type BrowserScreencastResult,
   UNPUBLISHED_WORKTREE_PUBLICATION_EPOCH
 } from '../../shared/runtime-types'
+import { settleRunOwnedChildWorktrees } from './orchestration/run-owned-child-worktree-settlement'
 import type { PtyStopReceipt } from '../../shared/pty-stop-receipt'
 import {
   RUNTIME_GRAPH_RELOAD_TIMEOUT_MS,
@@ -4916,6 +4919,157 @@ export class OrcaRuntimeService {
     this.ensureOrchestrationFederationRelay()
     this.scheduleRestoredMessageRepoints()
     this.scheduleMaestroBrowserSurfaceReconciliation()
+  }
+
+  private async assertRunWorktreeAbsent(
+    worktreeId: string,
+    executionHostId: ExecutionHostId
+  ): Promise<void> {
+    if (!this.store) {
+      throw new Error('runtime_unavailable')
+    }
+    const target = parseExactWorktreeIdSelector(`id:${worktreeId}`)
+    if (!target) {
+      throw new Error(`Worktree identity is unverifiable: ${worktreeId}`)
+    }
+    const owner = resolveWorktreeRemovalRepoOwner(this.store, target.repoId, executionHostId)
+    if (owner.kind !== 'resolved') {
+      throw new Error(`Worktree project authority is unverifiable: ${worktreeId}`)
+    }
+    const repo = owner.repo
+    if (isFolderRepo(repo)) {
+      throw new Error('Folder workspaces are not worktree deletion targets.')
+    }
+    const remoteProvider = repo.connectionId ? requireSshGitProvider(repo.connectionId) : null
+    const localWorktreeGitOptions = repo.connectionId
+      ? {}
+      : getLocalProjectWorktreeGitOptions(this.requireStore(), repo)
+    await this.assertWorktreeRetirementAbsent({
+      repo,
+      worktreePath: target.path,
+      localWorktreeGitOptions,
+      remoteProvider
+    })
+    if (resolveWorktreeRemovalMetadata(this.store, target.repoId, target.id, executionHostId)) {
+      throw new Error(`Worktree remains registered in Orca after removal: ${worktreeId}`)
+    }
+  }
+
+  private retainRunWorktreeForDurableResource(
+    worktreeId: string,
+    executionHostId: ExecutionHostId
+  ): string | undefined {
+    const db = this.getOrchestrationDb()
+    for (const worker of db.listWorkerTerminalResources()) {
+      const resource = worker.resource
+      if (!resource || resource.worktree_id !== worktreeId) {
+        continue
+      }
+      const hostScope = parseWorkerTerminalHostScope(resource.host_scope)
+      if (!this.workerResourceBelongsToRetirementHost(hostScope, executionHostId)) {
+        continue
+      }
+      if (
+        resource.ownership_state === 'transferred' ||
+        resource.ownership_state === 'user_owned' ||
+        resource.release_state === 'retained' ||
+        resource.release_state === 'retained_for_review'
+      ) {
+        return `Worker terminal resource ${resource.id} is ${resource.ownership_state}/${resource.release_state}.`
+      }
+    }
+    const surfaces = db.db
+      .prepare(
+        `SELECT receipt_json FROM maestro_browser_surfaces
+         WHERE execution_host_id = ? AND workspace_key = ?`
+      )
+      .all(executionHostId, worktreeWorkspaceKey(worktreeId)) as { receipt_json: string }[]
+    for (const row of surfaces) {
+      try {
+        const receipt = JSON.parse(row.receipt_json) as { ownership?: string; retention?: string }
+        if (receipt.ownership === 'user' || receipt.retention === 'retain') {
+          return `Browser surface is ${receipt.ownership ?? 'harness'}/${receipt.retention ?? 'release'}.`
+        }
+      } catch {
+        return 'Browser surface ownership is unverifiable.'
+      }
+    }
+    return undefined
+  }
+
+  async settleOrchestrationRun(runId: string): Promise<RuntimeRunSettlementResult> {
+    const db = this.getOrchestrationDb()
+    if (!db.getRun(runId)) {
+      throw new Error(`Run ${runId} was not found.`)
+    }
+    const rows = db.db
+      .prepare(
+        `SELECT wd.effects FROM dispatch_contexts dc
+         JOIN worker_dispatches wd ON wd.dispatch_id = dc.id
+         WHERE dc.run_id = ? ORDER BY dc.id`
+      )
+      .all(runId) as { effects: string }[]
+    const owned = collectRunOwnedChildWorktrees(rows)
+    let processEvidence:
+      | {
+          summaries: RuntimeWorktreePsSummary[]
+          queriedHostIds: ReadonlySet<ExecutionHostId>
+        }
+      | undefined
+    let processEvidenceError: string | undefined
+    try {
+      const evidence = await this.getWorktreePs(Number.MAX_SAFE_INTEGER)
+      processEvidence = {
+        summaries: evidence.worktrees,
+        queriedHostIds: new Set(evidence.queriedHostIds)
+      }
+    } catch (error) {
+      processEvidenceError = error instanceof Error ? error.message : String(error)
+    }
+    return await settleRunOwnedChildWorktrees({
+      runId,
+      worktrees: owned.worktrees,
+      unreadableEffectRows: owned.unreadableEffectRows,
+      processEvidence,
+      processEvidenceError,
+      authority: {
+        assertAbsent: async (target) =>
+          await this.assertRunWorktreeAbsent(target.worktreeId, target.executionHostId),
+        retentionCause: (target) =>
+          this.retainRunWorktreeForDurableResource(target.worktreeId, target.executionHostId),
+        remove: async (target) => {
+          const meta = resolveWorktreeRemovalMetadata(
+            this.requireStore(),
+            splitWorktreeId(target.worktreeId)?.repoId ?? '',
+            target.worktreeId,
+            target.executionHostId
+          )
+          if (meta?.instanceId !== target.worktreeInstanceId) {
+            throw new Error('Checkout instance identity changed before Run settlement.')
+          }
+          if (meta) {
+            if (this.store?.setWorktreeMetaForHost) {
+              this.store.setWorktreeMetaForHost(target.worktreeId, target.executionHostId, {
+                preserveBranchOnDelete: true
+              })
+            } else if (meta.hostId === target.executionHostId) {
+              this.store?.setWorktreeMeta(target.worktreeId, { preserveBranchOnDelete: true })
+            } else {
+              throw new Error('Host-qualified worktree metadata updates are unavailable.')
+            }
+          }
+          await this.removeManagedWorktree(
+            `id:${target.worktreeId}`,
+            true,
+            false,
+            false,
+            target.executionHostId,
+            target.worktreeInstanceId
+          )
+          return { wasRegistered: Boolean(meta) }
+        }
+      }
+    })
   }
 
   private getLegacyWorkerTerminalRecoveryPlan(): LegacyWorkerTerminalRecoveryPlan {
@@ -21420,6 +21574,7 @@ export class OrcaRuntimeService {
     worktrees: RuntimeWorktreePsSummary[]
     totalCount: number
     truncated: boolean
+    queriedHostIds: ExecutionHostId[]
   }> {
     if (!Number.isInteger(limit) || limit <= 0) {
       throw new Error('invalid_limit')
@@ -21447,7 +21602,9 @@ export class OrcaRuntimeService {
     )
     // Why: worktree.ps backs the mobile sidebar, so it must use the same
     // host-owned imported-worktree visibility gate as worktree.list/desktop.
-    const freshPtyLiveness = await this.refreshPtyWorktreeRecordsFromController(resolvedWorktrees)
+    const ptyInventory =
+      await this.refreshPtyWorktreeRecordsWithControllerInventory(resolvedWorktrees)
+    const freshPtyLiveness = ptyInventory ? new Set(ptyInventory.livePtyIds) : null
     const repoById = new Map((this.store?.getRepos() ?? []).map((repo) => [repo.id, repo]))
     const platformByRepoId = resolvedWorktreeSnapshot.platformByRepoId
     const summaries = new Map<string, RuntimeWorktreePsSummary>()
@@ -21822,7 +21979,8 @@ export class OrcaRuntimeService {
     return {
       worktrees: sorted.slice(0, limit),
       totalCount: sorted.length,
-      truncated: sorted.length > limit
+      truncated: sorted.length > limit,
+      queriedHostIds: [...(ptyInventory?.queriedHostIds ?? [])]
     }
   }
 
@@ -28433,7 +28591,8 @@ export class OrcaRuntimeService {
     // Why (#11960): only an explicit Force Delete waives PTY-stop proof; `force`
     // alone is already set by the ordinary delete confirmation.
     allowUnverifiedPtyStop = false,
-    hostId?: string
+    hostId?: string,
+    expectedInstanceId?: string
   ): Promise<RuntimeWorktreeRemovalResult> {
     if (!this.store) {
       throw new Error('runtime_unavailable')
@@ -28465,7 +28624,7 @@ export class OrcaRuntimeService {
       worktreeId: removalTarget.id,
       hostId: cleanupHostId
     })
-    const optionsKey = getRuntimeWorktreeRemovalOptionsKey(force, runHooks, allowUnverifiedPtyStop)
+    const optionsKey = `${getRuntimeWorktreeRemovalOptionsKey(force, runHooks, allowUnverifiedPtyStop)}\0${expectedInstanceId ?? ''}`
     const inFlightRemoval = this.removeManagedWorktreeInFlight.get(cleanupScopeKey)
     if (inFlightRemoval) {
       if (inFlightRemoval.optionsKey === optionsKey) {
@@ -28532,6 +28691,9 @@ export class OrcaRuntimeService {
           removalTarget.id,
           cleanupHostId ?? getRepoExecutionHostId(repo)
         )
+        if (expectedInstanceId && removedMeta?.instanceId !== expectedInstanceId) {
+          throw new Error(`Worktree checkout identity changed before deletion: ${removalTarget.id}`)
+        }
         const removedPushTarget = removedMeta?.pushTarget ?? removalTarget.pushTarget
         const registeredWorktree = findRegisteredDeletableWorktree(
           repo.path,

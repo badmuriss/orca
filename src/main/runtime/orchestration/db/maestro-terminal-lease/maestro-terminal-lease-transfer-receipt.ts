@@ -211,7 +211,10 @@ function hasCoherentTransferReceipt(receipt: MaestroTerminalLeaseTransferReceipt
     return false
   }
   if (receipt.kind === 'settled_resource_reuse') {
-    return true
+    return (
+      predecessor.attemptId !== successor.attemptId &&
+      predecessor.dispatchId !== successor.dispatchId
+    )
   }
   return (
     predecessor.runId === successor.runId &&

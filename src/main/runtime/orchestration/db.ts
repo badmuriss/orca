@@ -19,6 +19,8 @@ export type {
   MessagePriority,
   MessageDeliveryContract,
   TaskStatus,
+  TaskPurpose,
+  TaskOperationalOutcome,
   DispatchStatus,
   GateStatus,
   CoordinatorStatus,

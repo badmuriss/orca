@@ -109,6 +109,9 @@ export function transferMaestroWorkerTerminalLease(
     }
     const predecessorWorker = this.getWorkerDispatch(predecessorDispatchId)
     const strictRetry = params.kind === 'strict_retry'
+    const settledReuseIdentityInvalid =
+      predecessor.attemptId === params.attemptId ||
+      predecessorDispatchId === params.successorDispatchId
     if (
       (strictRetry &&
         (predecessor.runId !== params.runId ||
@@ -119,14 +122,15 @@ export function transferMaestroWorkerTerminalLease(
           predecessor.retentionPolicy !== params.retentionPolicy ||
           !matchesMaestroTerminalLaunchProfile(predecessor.launchProfile, params.launchProfile))) ||
       (!strictRetry &&
-        (!predecessorWorker ||
+        (settledReuseIdentityInvalid ||
+          !predecessorWorker ||
           !['succeeded', 'failed', 'stopped', 'abandoned'].includes(predecessorWorker.state)))
     ) {
       throw new OrchestrationError(
         'lease_identity_conflict',
         strictRetry
           ? 'Strict retry must preserve the predecessor lease identity.'
-          : 'Settled resource reuse requires a settled predecessor Dispatch.'
+          : 'Settled resource reuse requires a settled predecessor and a new Attempt and Dispatch on the exact terminal incarnation.'
       )
     }
     if (this.getMaestroTerminalLeaseByWorkerResource(resource.id)?.id !== predecessor.id) {

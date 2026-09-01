@@ -131,7 +131,7 @@ describe('orchestration new-worktree workers', () => {
     const hookFound = options?.hookFound ?? true
     const state = options?.state ?? (hookFound ? 'running' : 'not_configured')
     vi.spyOn(runtime, 'createManagedWorktree').mockResolvedValue({
-      worktree: { id: 'repo::created', repoId: 'repo' },
+      worktree: { id: 'repo::created', repoId: 'repo', hostId: 'local' },
       startupTerminal: { spawned: true, handle: 'term_worker' },
       setupReceipt: {
         requested: state === 'skipped' ? 'skip' : 'run',
@@ -174,7 +174,8 @@ describe('orchestration new-worktree workers', () => {
         expect.objectContaining({
           kind: 'worktree',
           action: 'created_top_level',
-          id: 'repo::created'
+          id: 'repo::created',
+          executionHostId: 'local'
         }),
         expect.objectContaining({
           kind: 'terminal',
@@ -511,7 +512,7 @@ describe('orchestration new-worktree workers', () => {
     const { result } = await startWorker()
 
     expect(result).toMatchObject({
-      state: 'failed',
+      state: 'outcome_unknown',
       failedStage: 'agent_readiness',
       setup: { state: 'running' }
     })
@@ -553,7 +554,7 @@ describe('orchestration new-worktree workers', () => {
     })
     const durableEffect = await startWorker({ name: 'durable-effect' })
     expect(durableEffect.result).toMatchObject({
-      state: 'failed',
+      state: 'outcome_unknown',
       failedStage: 'agent_readiness',
       effects: expect.arrayContaining([
         expect.objectContaining({ kind: 'worktree', id: 'repo::created' }),
@@ -578,10 +579,7 @@ describe('orchestration new-worktree workers', () => {
     expect(result).toMatchObject({
       state: 'outcome_unknown',
       failedStage: 'worktree_create',
-      nextCommands: expect.arrayContaining([
-        expect.stringContaining('worker-show --dispatch'),
-        expect.stringContaining('worker-abandon --dispatch')
-      ])
+      nextCommands: [expect.stringContaining('replace-worker --task')]
     })
     expect(db.getTask(task.id)?.status).toBe('blocked')
   })
@@ -751,7 +749,7 @@ describe('orchestration new-worktree workers', () => {
     let finishPrompt:
       | ((value: Awaited<ReturnType<OrcaRuntimeService['sendTerminalAgentPrompt']>>) => void)
       | undefined
-    vi.mocked(runtime.waitForTerminal).mockImplementationOnce(
+    vi.mocked(runtime.waitForTerminal).mockImplementation(
       async () =>
         await new Promise((resolve) => {
           finishWait = resolve
@@ -765,17 +763,14 @@ describe('orchestration new-worktree workers', () => {
     )
 
     const pending = startWorker({ name: 'staged-worker' })
-    await vi.waitFor(() => {
-      const task = db.listTasks()[0]
-      const dispatch = task ? db.getDispatchContext(task.id) : undefined
-      expect(dispatch && db.getWorkerDispatch(dispatch.id)).toMatchObject({
-        state: 'starting',
-        stage: 'terminal_readying',
-        worktree_id: 'repo::created',
-        agent_terminal_handle: 'term_worker'
-      })
-    })
+    await vi.waitFor(() => expect(finishWait).toBeTypeOf('function'))
     const dispatch = db.getDispatchContext(db.listTasks()[0]!.id)!
+    expect(db.getWorkerDispatch(dispatch.id)).toMatchObject({
+      state: 'starting',
+      stage: 'authority_attached',
+      worktree_id: 'repo::created',
+      agent_terminal_handle: 'term_worker'
+    })
     expect(JSON.parse(db.getWorkerDispatch(dispatch.id)!.residual_resources)).toEqual(
       expect.arrayContaining([expect.objectContaining({ kind: 'worktree', id: 'repo::created' })])
     )
@@ -793,6 +788,7 @@ describe('orchestration new-worktree workers', () => {
         stage: 'authority_attached'
       })
     )
+    await vi.waitFor(() => expect(finishPrompt).toBeTypeOf('function'))
 
     finishPrompt?.({ handle: 'term_worker', accepted: true, bytesWritten: 1 })
     await expect(pending).resolves.toMatchObject({

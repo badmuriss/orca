@@ -286,4 +286,34 @@ describe('Maestro Run progress projection', () => {
       }
     })
   })
+
+  it('keeps deliverable completion separate from superseded operational work', () => {
+    const deliverable = task('task-1', 'completed', { purpose: 'deliverable' })
+    const superseded = task('task-2', 'failed', {
+      purpose: 'operational',
+      operational_outcome: 'superseded',
+      successor_task_id: 'task-3'
+    })
+    const successor = task('task-3', 'ready', { purpose: 'operational' })
+
+    const result = project({ tasks: [successor, superseded, deliverable] })
+
+    expect(result.deliverables).toEqual({ completed: 1, total: 1, progress_percent: 100 })
+    expect(result.operational_reliability).toEqual({
+      successful: 0,
+      failed: 0,
+      superseded: 1,
+      unverifiable: 0
+    })
+    expect(result.recently_completed).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reference: superseded.id,
+          purpose: 'operational',
+          operational_outcome: 'superseded',
+          successor_reference: successor.id
+        })
+      ])
+    )
+  })
 })

@@ -49840,6 +49840,282 @@ describe('OrcaRuntimeService', () => {
     return runtime
   }
 
+  function recordRunWorktreeEffects(
+    runtime: OrcaRuntimeService,
+    effects: Record<string, unknown>[]
+  ): string {
+    const db = runtime.getOrchestrationDb()
+    const run = db.createRun({
+      objective: 'settle child worktrees',
+      coordinatorHandle: 'term_cleanup',
+      coordinatorPaneKey: 'tab_cleanup:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    })
+    const task = db.createTask({ spec: 'cleanup', runId: run.id })
+    const started = db.createStartingWorkerDispatch({
+      creator: { kind: 'system' },
+      maxDepth: Number.MAX_SAFE_INTEGER,
+      taskId: task.id,
+      startOptions: { topology: 'current', agent: 'codex' }
+    })
+    db.recordWorkerStage({ dispatchId: started.dispatch.id, stage: 'settled', effects })
+    return run.id
+  }
+
+  it('settles only host-qualified child effects and accepts authoritative absence', async () => {
+    const childId = TEST_WORKTREE_ID
+    const falseReceiptId = `${TEST_REPO_ID}::/tmp/false-receipt`
+    const replayId = `${TEST_REPO_ID}::/tmp/already-absent`
+    const replacedId = `${TEST_REPO_ID}::/tmp/replaced`
+    const metaById = new Map(
+      [childId, falseReceiptId, replacedId].map((id) => [
+        id,
+        makeWorktreeMeta({ hostId: 'local', instanceId: `current-${id}` })
+      ])
+    )
+    const runtime = createWorktreeRemovalRuntime({
+      ...store,
+      getAllWorktreeMeta: () => Object.fromEntries(metaById),
+      getWorktreeMeta: (id: string) => metaById.get(id),
+      setWorktreeMeta: (id: string, patch: Partial<WorktreeMeta>) => {
+        const next = { ...(metaById.get(id) ?? makeWorktreeMeta()), ...patch }
+        metaById.set(id, next)
+        return next
+      }
+    })
+    const runId = recordRunWorktreeEffects(runtime, [
+      {
+        kind: 'worktree',
+        action: 'created_child',
+        id: childId,
+        executionHostId: 'local',
+        worktreeInstanceId: `current-${childId}`
+      },
+      {
+        kind: 'worktree',
+        action: 'created_child',
+        id: falseReceiptId,
+        executionHostId: 'local',
+        worktreeInstanceId: `current-${falseReceiptId}`
+      },
+      {
+        kind: 'worktree',
+        action: 'created_child',
+        id: replayId,
+        executionHostId: 'local',
+        worktreeInstanceId: 'retired-replay-instance'
+      },
+      {
+        kind: 'worktree',
+        action: 'created_child',
+        id: replacedId,
+        executionHostId: 'local',
+        worktreeInstanceId: 'retired-replaced-instance'
+      },
+      { kind: 'worktree', action: 'created_top_level', id: `${TEST_REPO_ID}::/tmp/top` },
+      { kind: 'worktree', action: 'reused', id: `${TEST_REPO_ID}::/tmp/reused` },
+      { kind: 'folder', action: 'created_child', id: 'folder::owned' },
+      { kind: 'worktree', action: 'created_child', id: `${TEST_REPO_ID}::/tmp/foreign` }
+    ])
+    vi.spyOn(runtime, 'getWorktreePs').mockResolvedValue({
+      worktrees: [
+        {
+          worktreeId: childId,
+          hostId: 'local',
+          status: 'inactive',
+          agents: [],
+          liveTerminalCount: 1,
+          hasAttachedPty: true,
+          worktreeInstanceId: `current-${childId}`
+        },
+        {
+          worktreeId: falseReceiptId,
+          hostId: 'local',
+          status: 'inactive',
+          agents: [],
+          worktreeInstanceId: `current-${falseReceiptId}`
+        },
+        {
+          worktreeId: replacedId,
+          hostId: 'local',
+          status: 'inactive',
+          agents: [],
+          worktreeInstanceId: `current-${replacedId}`
+        }
+      ],
+      totalCount: 1,
+      truncated: false,
+      queriedHostIds: ['local']
+    } as never)
+    const absent = new Set([replayId])
+    const remove = vi
+      .spyOn(runtime, 'removeManagedWorktree')
+      .mockImplementation(async (selector) => {
+        const id = selector.slice('id:'.length)
+        absent.add(id)
+        metaById.delete(id)
+        return (id === falseReceiptId ? { removed: false } : {}) as never
+      })
+    const internals = runtime as unknown as {
+      assertRunWorktreeAbsent: (id: string, hostId: string) => Promise<void>
+    }
+    vi.spyOn(internals, 'assertRunWorktreeAbsent').mockImplementation(async (id) => {
+      if (!absent.has(id) || metaById.has(id)) {
+        throw new Error('still present')
+      }
+    })
+
+    const result = await runtime.settleOrchestrationRun(runId)
+
+    expect(result).toMatchObject({ state: 'unverifiable' })
+    expect(result.worktrees).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ worktreeId: childId, disposition: 'removed' }),
+        expect.objectContaining({ worktreeId: falseReceiptId, disposition: 'removed' }),
+        expect.objectContaining({ worktreeId: replayId, disposition: 'already_absent' }),
+        expect.objectContaining({ worktreeId: replacedId, disposition: 'unverifiable' }),
+        expect.objectContaining({
+          worktreeId: `${TEST_REPO_ID}::/tmp/foreign`,
+          disposition: 'unverifiable'
+        })
+      ])
+    )
+    expect(remove).toHaveBeenCalledTimes(2)
+    expect(remove).toHaveBeenCalledWith(
+      `id:${childId}`,
+      true,
+      false,
+      false,
+      'local',
+      `current-${childId}`
+    )
+  })
+
+  it('retains reviewed, user-owned, dirty, live, and unverifiable child worktrees', async () => {
+    const ids = {
+      review: `${TEST_REPO_ID}::/tmp/review`,
+      user: `${TEST_REPO_ID}::/tmp/user`,
+      dirty: `${TEST_REPO_ID}::/tmp/dirty`,
+      live: `${TEST_REPO_ID}::/tmp/live`,
+      remote: `${TEST_REPO_ID}::/tmp/remote`,
+      failed: `${TEST_REPO_ID}::/tmp/failed`,
+      malformed: `${TEST_REPO_ID}::/tmp/malformed`
+    }
+    const metaById = new Map(
+      Object.values(ids).map((id) => [
+        id,
+        makeWorktreeMeta({ hostId: 'local', instanceId: `instance-${id}` })
+      ])
+    )
+    const runtime = createWorktreeRemovalRuntime({
+      ...store,
+      getAllWorktreeMeta: () => Object.fromEntries(metaById),
+      getWorktreeMeta: (id: string) => metaById.get(id),
+      setWorktreeMeta: (id: string, patch: Partial<WorktreeMeta>) => {
+        const next = { ...(metaById.get(id) ?? makeWorktreeMeta()), ...patch }
+        metaById.set(id, next)
+        return next
+      }
+    })
+    const runId = recordRunWorktreeEffects(
+      runtime,
+      Object.entries(ids).map(([key, id]) => ({
+        kind: 'worktree',
+        action: 'created_child',
+        id,
+        executionHostId: key === 'remote' ? 'ssh:offline' : 'local',
+        worktreeInstanceId: `instance-${id}`
+      }))
+    )
+    vi.spyOn(runtime, 'getWorktreePs').mockResolvedValue({
+      worktrees: [
+        {
+          worktreeId: ids.live,
+          hostId: 'local',
+          status: 'working',
+          agents: [],
+          worktreeInstanceId: `instance-${ids.live}`
+        },
+        {
+          worktreeId: ids.dirty,
+          hostId: 'local',
+          status: 'inactive',
+          agents: [],
+          worktreeInstanceId: `instance-${ids.dirty}`
+        },
+        {
+          worktreeId: ids.remote,
+          hostId: 'ssh:offline',
+          status: 'inactive',
+          agents: [],
+          worktreeInstanceId: `instance-${ids.remote}`
+        },
+        {
+          worktreeId: ids.failed,
+          hostId: 'local',
+          status: 'inactive',
+          agents: [],
+          worktreeInstanceId: `instance-${ids.failed}`
+        },
+        {
+          worktreeId: ids.malformed,
+          hostId: 'local',
+          status: 'inactive',
+          agents: [],
+          worktreeInstanceId: `instance-${ids.malformed}`
+        }
+      ],
+      totalCount: 1,
+      truncated: false,
+      queriedHostIds: ['local']
+    } as never)
+    const internals = runtime as unknown as {
+      retainRunWorktreeForDurableResource: (id: string, hostId: string) => string | undefined
+      assertRunWorktreeAbsent: (id: string, hostId: string) => Promise<void>
+    }
+    vi.spyOn(internals, 'retainRunWorktreeForDurableResource').mockImplementation((id) => {
+      if (id === ids.malformed) {
+        throw new Error('host_scope is missing')
+      }
+      return id === ids.review ? 'retained_for_review' : id === ids.user ? 'user_owned' : undefined
+    })
+    vi.spyOn(internals, 'assertRunWorktreeAbsent').mockRejectedValue(new Error('still present'))
+    const remove = vi
+      .spyOn(runtime, 'removeManagedWorktree')
+      .mockImplementation(async (selector) => {
+        if (selector.includes('/dirty')) {
+          throw new Error('Worktree has uncommitted changes')
+        }
+        if (selector.includes('/remote')) {
+          throw new Error('SSH connection disconnected')
+        }
+        throw new Error('git worktree remove failed')
+      })
+
+    const result = await runtime.settleOrchestrationRun(runId)
+
+    expect(result.state).toBe('unverifiable')
+    expect(result.worktrees).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ worktreeId: ids.review, disposition: 'retained' }),
+        expect.objectContaining({ worktreeId: ids.user, disposition: 'retained' }),
+        expect.objectContaining({ worktreeId: ids.live, disposition: 'retained' }),
+        expect.objectContaining({ worktreeId: ids.dirty, disposition: 'pending' }),
+        expect.objectContaining({ worktreeId: ids.remote, disposition: 'unverifiable' }),
+        expect.objectContaining({ worktreeId: ids.failed, disposition: 'pending' }),
+        expect.objectContaining({ worktreeId: ids.malformed, disposition: 'unverifiable' })
+      ])
+    )
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(ids.dirty),
+        expect.stringContaining(ids.remote),
+        expect.stringContaining(ids.failed),
+        expect.stringContaining(ids.malformed)
+      ])
+    )
+    expect(remove).not.toHaveBeenCalledWith(`id:${ids.live}`, expect.anything())
+  })
+
   it('replays one completed retirement receipt without repeating teardown', async () => {
     const { runtimeStore } = createStaleRuntimeWorktreeStore(TEST_WORKTREE_ID, {
       hostId: 'local'

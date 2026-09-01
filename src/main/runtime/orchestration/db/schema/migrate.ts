@@ -7,6 +7,8 @@ import { applySchemaMigrationV31 } from './migrate-v31'
 import { applySchemaMigrationV32 } from './migrate-v32'
 import { applySchemaMigrationV33 } from './migrate-v33'
 import { applySchemaMigrationV34 } from './migrate-v34'
+import { applySchemaMigrationV35 } from './migrate-v35'
+import { applySchemaMigrationV36 } from './migrate-v36'
 
 // Why: CREATE TABLE IF NOT EXISTS won't alter existing DBs; migrate in a txn that bumps user_version only on success (atomic all-or-nothing).
 export function migrate(this: OrchestrationDb): void {
@@ -24,6 +26,8 @@ export function migrate(this: OrchestrationDb): void {
     applySchemaMigrationV32.call(this, current)
     applySchemaMigrationV33.call(this, current)
     applySchemaMigrationV34.call(this, current)
+    applySchemaMigrationV35.call(this, current)
+    applySchemaMigrationV36.call(this, current)
     this.db.pragma(`user_version = ${SCHEMA_VERSION}`)
     this.db.exec('COMMIT')
   } catch (err) {

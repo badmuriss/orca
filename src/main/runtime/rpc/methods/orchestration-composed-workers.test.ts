@@ -154,7 +154,6 @@ describe('orchestration RPC methods', () => {
         displayName: 'Worker start engineer',
         spec: 'implement worker start'
       })
-
       const result = (await call('orchestration.workerStart', {
         task: task.id,
         from: 'term_coord',
@@ -313,6 +312,7 @@ describe('orchestration RPC methods', () => {
         from: 'term_coord',
         agent: 'codex'
       })) as {
+        dispatchId: string
         state: string
         warning?: string
         effects: { kind: string; surface?: string; warning?: string }[]
@@ -731,7 +731,7 @@ describe('orchestration RPC methods', () => {
       ).toEqual({ count: 1 })
     })
 
-    it('returns a failed receipt and preserves a created terminal as residual', async () => {
+    it('returns an unverifiable receipt with exact recovery identity after readiness silence', async () => {
       setup()
       mockCurrentWorkerStart({ ready: false })
       const task = db.createTask({ spec: 'worker timeout' })
@@ -740,12 +740,48 @@ describe('orchestration RPC methods', () => {
         task: task.id,
         from: 'term_coord',
         agent: 'codex'
-      })) as { state: string; failedStage: string; residualResources: { id: string }[] }
+      })) as {
+        dispatchId: string
+        state: string
+        readiness: string
+        attemptId: string
+        leaseId: string
+        terminalHandle: string
+        failedStage: string
+        residualResources: { id: string }[]
+        nextCommands: string[]
+      }
 
-      expect(result).toMatchObject({ state: 'failed', failedStage: 'agent_readiness' })
+      expect(result).toMatchObject({
+        state: 'outcome_unknown',
+        readiness: 'unverifiable',
+        attemptId: 'attempt-test',
+        leaseId: expect.any(String),
+        terminalHandle: 'term_worker',
+        failedStage: 'agent_readiness'
+      })
+      expect(result.nextCommands).toEqual([
+        expect.stringMatching(
+          /^orca orchestration replace-worker --task .+ --predecessor .+ --json$/
+        )
+      ])
       expect(result.residualResources).toEqual([expect.objectContaining({ id: 'term_worker' })])
-      expect(db.getTask(task.id)?.status).toBe('failed')
+      expect(db.getTask(task.id)?.status).toBe('blocked')
       expect(runtime.sendTerminalAgentPrompt).not.toHaveBeenCalled()
+      vi.mocked(runtime.createTerminal).mockRejectedValueOnce(new Error('replacement spawn failed'))
+      const replacement = (await call('orchestration.workerStart', {
+        task: task.id,
+        from: 'term_coord',
+        replacementOf: result.dispatchId
+      })) as { dispatchId: string; state: string }
+      expect(replacement.state).toBe('failed')
+      expect(db.getDispatchContextById(result.dispatchId)).toMatchObject({ status: 'failed' })
+      expect(JSON.parse(db.getWorkerDispatch(replacement.dispatchId)!.start_options)).toMatchObject(
+        {
+          replacementOf: result.dispatchId,
+          agent: 'codex'
+        }
+      )
     })
 
     it('returns a no-effect failure when terminal creation fails', async () => {

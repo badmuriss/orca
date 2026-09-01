@@ -1,4 +1,8 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { MaestroBootstrapReceiptSchema } from '../../../../../shared/maestro-bootstrap-contract'
 import type { AgentGraphView, MaestroWorkspaceAnchor } from '../../../../../shared/maestro-contract'
 import { OrchestrationDb } from '../orchestration-db'
 import {
@@ -6,7 +10,9 @@ import {
   applyMaestroProjection,
   getMaestroProjection,
   listMaestroProjectionIndex,
-  listMaestroRunProgress
+  listMaestroRunProgress,
+  recordMaestroBootstrap,
+  replayMaestroBootstrap
 } from './maestro-projection-store'
 
 const HOME = { execution_host_id: 'local', workspace_key: 'folder:home-1' }
@@ -71,6 +77,15 @@ function view(overrides: Partial<AgentGraphView> = {}): AgentGraphView {
   }
 }
 
+function runView(runId: string, overrides: Partial<AgentGraphView> = {}): AgentGraphView {
+  const initial = view()
+  return view({
+    run_id: runId,
+    workspace_scope: { ...initial.workspace_scope, run_id: runId },
+    ...overrides
+  })
+}
+
 describe('Maestro projection store', () => {
   it('publishes one strict projection to its home and execution scopes', () => {
     const database = new OrchestrationDb(':memory:')
@@ -82,6 +97,110 @@ describe('Maestro projection store', () => {
     expect(listMaestroProjectionIndex.call(database)).toHaveLength(1)
     expect(listMaestroRunProgress.call(database)).toHaveLength(1)
     database.close()
+  })
+
+  it('keeps exact Run projections and deltas after the database reopens', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'orca-maestro-projection-'))
+    const databasePath = join(directory, 'orchestration.sqlite')
+    try {
+      const firstDatabase = new OrchestrationDb(databasePath)
+      applyMaestroProjection.call(firstDatabase, anchor('run-1'), runView('run-1'))
+      const legacyProjection = firstDatabase.db
+        .prepare(
+          `SELECT run_id, revision, view_json, updated_at FROM maestro_run_projections
+           WHERE run_id = 'run-1'`
+        )
+        .get() as { run_id: string; revision: number; view_json: string; updated_at: string }
+      firstDatabase.db.exec(`
+        DROP INDEX idx_maestro_run_projections_home;
+        DROP INDEX idx_maestro_run_projections_execution;
+        DROP TABLE maestro_run_projections;
+        CREATE TABLE maestro_run_projections (
+          execution_host_id TEXT NOT NULL,
+          workspace_key TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          revision INTEGER NOT NULL,
+          view_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (execution_host_id, workspace_key)
+        );
+        CREATE TABLE maestro_run_projection_records (rejected_attempt_data TEXT);
+      `)
+      const insertLegacy = firstDatabase.db.prepare(
+        `INSERT INTO maestro_run_projections (
+           execution_host_id, workspace_key, run_id, revision, view_json, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      for (const scope of [HOME, EXECUTION]) {
+        insertLegacy.run(
+          scope.execution_host_id,
+          scope.workspace_key,
+          legacyProjection.run_id,
+          legacyProjection.revision,
+          legacyProjection.view_json,
+          legacyProjection.updated_at
+        )
+      }
+      firstDatabase.db.pragma('user_version = 34')
+      firstDatabase.close()
+
+      const migratedDatabase = new OrchestrationDb(databasePath)
+      expect(getMaestroProjection.call(migratedDatabase, EXECUTION, 'run-1')).toMatchObject({
+        runId: 'run-1',
+        revision: 0
+      })
+      expect(
+        migratedDatabase.db
+          .prepare(
+            `SELECT name FROM sqlite_master
+             WHERE type = 'table' AND name LIKE 'maestro_run_projection%'
+             ORDER BY name`
+          )
+          .all()
+      ).toEqual([{ name: 'maestro_run_projections' }])
+      applyMaestroProjection.call(migratedDatabase, anchor('run-2'), runView('run-2'))
+      applyMaestroProjection.call(
+        migratedDatabase,
+        anchor('run-1'),
+        runView('run-1', {
+          kind: 'delta',
+          revision: 1
+        })
+      )
+      expect(
+        migratedDatabase.db.prepare('SELECT count(*) AS count FROM maestro_run_projections').get()
+      ).toEqual({ count: 2 })
+      migratedDatabase.close()
+
+      const reopenedDatabase = new OrchestrationDb(databasePath)
+      expect(getMaestroProjection.call(reopenedDatabase, EXECUTION, 'run-1')).toMatchObject({
+        runId: 'run-1',
+        revision: 1
+      })
+      expect(getMaestroProjection.call(reopenedDatabase, EXECUTION, 'run-2')).toMatchObject({
+        runId: 'run-2',
+        revision: 0,
+        change: 'orchestration-run'
+      })
+      expect(listMaestroProjectionIndex.call(reopenedDatabase)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ runId: 'run-1', revision: 1 }),
+          expect.objectContaining({ runId: 'run-2', revision: 0 })
+        ])
+      )
+      expect(
+        reopenedDatabase.db
+          .prepare(
+            `SELECT name FROM sqlite_master
+             WHERE type = 'table' AND name LIKE 'maestro_run_projection%'
+             ORDER BY name`
+          )
+          .all()
+      ).toEqual([{ name: 'maestro_run_projections' }])
+      reopenedDatabase.close()
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
   })
 
   it('rejects schema spread before persistence', () => {
@@ -101,7 +220,55 @@ describe('Maestro projection store', () => {
     database.close()
   })
 
-  it('rejects conflicting base and Run bindings without overwriting the active projection', () => {
+  it('replays the durable bootstrap receipt after database reopen', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'orca-maestro-bootstrap-'))
+    const databasePath = join(directory, 'orchestration.sqlite')
+    const mutation = {
+      mutation_id: 'mutation-1',
+      execution_host_id: EXECUTION.execution_host_id,
+      workspace_key: EXECUTION.workspace_key,
+      run_id: 'run-1'
+    }
+    const request = {
+      schema_version: 1 as const,
+      protocol: 'maestro-bootstrap/v1' as const,
+      mutation,
+      coordinator_generation: 2
+    }
+    const receipt = MaestroBootstrapReceiptSchema.parse({
+      schema_version: 1 as const,
+      protocol: 'maestro-bootstrap-receipt/v1' as const,
+      mutation,
+      coordinator_generation: 2,
+      workspace_scope: view().workspace_scope,
+      projection_revision: 0 as const,
+      outcome: 'published' as const
+    })
+    try {
+      const firstDatabase = new OrchestrationDb(databasePath)
+      recordMaestroBootstrap.call(firstDatabase, request, receipt)
+      recordMaestroBootstrap.call(firstDatabase, request, receipt)
+      firstDatabase.close()
+
+      const reopenedDatabase = new OrchestrationDb(databasePath)
+      expect(replayMaestroBootstrap.call(reopenedDatabase, request)).toEqual({
+        ...receipt,
+        outcome: 'replayed'
+      })
+      expect(() =>
+        recordMaestroBootstrap.call(
+          reopenedDatabase,
+          { ...request, coordinator_generation: 3 },
+          receipt
+        )
+      ).toThrow(/reused with different input/)
+      reopenedDatabase.close()
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a conflicting base without preventing a newer Run in the same workspace', () => {
     const database = new OrchestrationDb(':memory:')
     applyMaestroBootstrapProjection.call(database, anchor(), view())
 
@@ -115,13 +282,14 @@ describe('Maestro projection store', () => {
       run_id: 'run-2',
       workspace_scope: { ...view().workspace_scope, run_id: 'run-2' }
     })
-    expect(() =>
-      applyMaestroBootstrapProjection.call(database, anchor('run-2'), conflictingRun)
-    ).toThrow('conflicts')
-    expect(getMaestroProjection.call(database, HOME)).toMatchObject({
+    expect(applyMaestroBootstrapProjection.call(database, anchor('run-2'), conflictingRun)).toBe(
+      'published'
+    )
+    expect(getMaestroProjection.call(database, HOME, 'run-1')).toMatchObject({
       runId: 'run-1',
       workspace: { executionHostId: 'local', workspaceKey: 'folder:home-1' }
     })
+    expect(getMaestroProjection.call(database, HOME, 'run-2')).toMatchObject({ runId: 'run-2' })
     database.close()
   })
 })

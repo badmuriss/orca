@@ -1,179 +1,193 @@
-import { createHash } from 'node:crypto'
-import { mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { app, nativeImage } from 'electron'
 import { canConsumeMaestroIntent } from '../../../../shared/maestro-actor'
 import type {
-  MaestroBrowserFocusReceipt,
-  MaestroBrowserPanePaint,
+  MaestroBrowserProfileConsentReceipt,
   MaestroBrowserSurfaceActionRequest,
-  MaestroBrowserSurfaceReceipt,
   MaestroBrowserSurfaceRequest
 } from '../../../../shared/maestro-browser-surface'
-import {
-  browserSurfaceWorktreeId,
-  browserSurfaceWorktreeSelector
-} from '../../orchestration/maestro-browser-surface-worktree-identity'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
+import type { OrchestrationDb } from '../../orchestration/db/orchestration-db'
 import type { RpcContext } from '../core'
 import type { resolveMaestroPrincipal } from '../maestro-principal'
+import { requireExactSurface } from './orchestration-browser-surface-observation'
+
+export {
+  capturedSurfaceState,
+  fileErrorCode,
+  NO_PANE_PAINT_REASON,
+  observedVisibility,
+  persistMaestroBrowserEvidence,
+  requireExactSurface,
+  showExactSurface,
+  UNOBSERVED_PANE_PAINT_REASON,
+  withPanePaintObservation
+} from './orchestration-browser-surface-observation'
 
 /** Authority, exact-surface resolution and evidence persistence for Browser surfaces. */
-export function requireCoordinator(
-  principal: Awaited<ReturnType<typeof resolveMaestroPrincipal>>,
-  workspace: MaestroBrowserSurfaceRequest['workspace'],
-  generation: number
-): void {
-  if (!canConsumeMaestroIntent(principal, workspace, generation)) {
-    throw new OrchestrationError(
-      'unauthorized',
-      'Only the authenticated current coordinator can manage browser surfaces.'
-    )
-  }
+type BrowserSurfacePrincipal = Awaited<ReturnType<typeof resolveMaestroPrincipal>>
+
+type ProfileConsentScope = {
+  run_id: string
+  task_id: string
+  attempt_id: string
 }
 
-export function requireExactSurface(
-  request: MaestroBrowserSurfaceActionRequest,
-  context: RpcContext
-) {
-  const record = context.runtime.getOrchestrationDb().getMaestroBrowserSurface(request.surface_id)
-  if (!record) {
-    throw new OrchestrationError(
-      'browser_surface_not_found',
-      `Browser surface ${request.surface_id} was not found.`
-    )
+export function requireActiveBrowserProfileConsent(
+  profileId: string | null,
+  consent: MaestroBrowserProfileConsentReceipt | null | undefined,
+  scope: ProfileConsentScope,
+  database?: OrchestrationDb,
+  workspace?: MaestroBrowserSurfaceRequest['workspace']
+): void {
+  if (profileId === null && !consent) {
+    return
   }
   if (
-    record.receipt.run_id !== request.workspace.run_id ||
-    record.receipt.execution_host_id !== request.workspace.execution_host_id ||
-    record.receipt.workspace_key !== request.workspace.workspace_key
+    profileId === null ||
+    !consent ||
+    consent.profile_id !== profileId ||
+    consent.run_id !== scope.run_id ||
+    consent.task_id !== scope.task_id ||
+    consent.attempt_id !== scope.attempt_id
   ) {
     throw new OrchestrationError(
-      'browser_surface_identity_mismatch',
-      'The browser surface does not belong to this run and workspace.'
+      'browser_profile_consent_required',
+      'Browser profile selection requires an exact human consent receipt.'
     )
   }
-  if (!record.receipt.browser_page_id) {
+  const issued =
+    database && workspace ? database.getMaestroBrowserProfileConsent(consent, workspace) : undefined
+  if (!issued) {
     throw new OrchestrationError(
-      'browser_surface_identity_missing',
-      'The browser surface has no page identity.'
+      'browser_profile_consent_not_issued',
+      'Browser profile selection requires a receipt issued by this host.'
     )
   }
-  return record
-}
-
-export function observedVisibility(
-  active: boolean,
-  paint: MaestroBrowserPanePaint
-): MaestroBrowserSurfaceReceipt['observed_visibility'] {
-  if (!active) {
-    return 'offscreen'
-  }
-  // Why: never-observed is not the same answer as observed-and-blank, so it keeps its own verdict.
-  if (paint === 'unobserved') {
-    return 'unverifiable'
-  }
-  return paint === 'painted' ? 'visible' : 'hidden'
-}
-
-export const NO_PANE_PAINT_REASON = 'The exact native Browser pane produced no paint.'
-export const UNOBSERVED_PANE_PAINT_REASON =
-  'The exact native Browser pane has not been observed for paint yet.'
-
-/** A genuine new observation replaces the recorded verdict; no observation leaves it untouched. */
-export function withPanePaintObservation(
-  focusReceipt: MaestroBrowserFocusReceipt,
-  observed: { nativePanePaint: MaestroBrowserPanePaint; observedAt: string | null } | undefined
-): MaestroBrowserFocusReceipt {
-  if (!observed || observed.nativePanePaint === 'unobserved') {
-    return focusReceipt
-  }
-  return {
-    ...focusReceipt,
-    native_pane_paint: observed.nativePanePaint,
-    observed_at: observed.observedAt,
-    unavailable_reason: observed.nativePanePaint === 'painted' ? null : NO_PANE_PAINT_REASON
+  const expiresAt = Date.parse(issued.expires_at)
+  if (issued.revoked_at !== null || expiresAt <= Date.now()) {
+    throw new OrchestrationError(
+      'browser_profile_consent_inactive',
+      'The Browser profile consent receipt is revoked or expired.'
+    )
   }
 }
 
-// Why: a capture is evidence, not a release decision — it must never pull a surface back out of
-// its release lifecycle, and it must respect the retention the surface was reserved with.
-const RELEASE_LIFECYCLE_STATES: ReadonlySet<MaestroBrowserSurfaceReceipt['state']> = new Set([
-  'release_pending',
-  'released',
-  'outcome_unknown'
-])
-
-export function capturedSurfaceState(
-  receipt: MaestroBrowserSurfaceReceipt
-): MaestroBrowserSurfaceReceipt['state'] {
-  if (RELEASE_LIFECYCLE_STATES.has(receipt.state)) {
-    return receipt.state
-  }
-  return receipt.retention === 'retain' ? 'retained' : 'active'
+function isCurrentCoordinator(
+  principal: BrowserSurfacePrincipal,
+  workspace: MaestroBrowserSurfaceRequest['workspace'],
+  generation: number
+): boolean {
+  return canConsumeMaestroIntent(principal, workspace, generation)
 }
 
-export async function showExactSurface(
+function requireActiveWorkerDispatch(
+  principal: BrowserSurfacePrincipal,
+  workspace: MaestroBrowserSurfaceRequest['workspace'],
+  generation: number,
+  context: RpcContext
+) {
+  const database = context.runtime.getOrchestrationDb()
+  const run = database.getRun(workspace.run_id)
+  const dispatch = database.getActiveDispatchForIdentity(principal.actor_id)
+  if (
+    principal.kind !== 'worker' ||
+    !run ||
+    run.consumer_generation !== generation ||
+    !dispatch ||
+    dispatch.run_id !== workspace.run_id
+  ) {
+    throw new OrchestrationError(
+      'unauthorized',
+      'Browser surfaces require the current coordinator or the exact active worker Dispatch.'
+    )
+  }
+  return dispatch
+}
+
+export function requireBrowserSurfaceCreateAuthority(
+  principal: Awaited<ReturnType<typeof resolveMaestroPrincipal>>,
+  request: MaestroBrowserSurfaceRequest,
+  context: RpcContext
+): void {
+  requireActiveBrowserProfileConsent(
+    request.profile_id,
+    request.profile_consent_receipt,
+    {
+      run_id: request.workspace.run_id,
+      task_id: request.task_id,
+      attempt_id: request.attempt_id
+    },
+    context.runtime.getOrchestrationDb(),
+    request.workspace
+  )
+  if (isCurrentCoordinator(principal, request.workspace, request.coordinator_generation)) {
+    return
+  }
+  const dispatch = requireActiveWorkerDispatch(
+    principal,
+    request.workspace,
+    request.coordinator_generation,
+    context
+  )
+  if (
+    request.ownership !== 'harness' ||
+    request.task_id !== dispatch.task_id ||
+    request.attempt_id !== dispatch.id
+  ) {
+    throw new OrchestrationError(
+      'unauthorized',
+      'A worker may create only a harness-owned surface for its exact Task and Dispatch.'
+    )
+  }
+}
+
+export function requireBrowserSurfaceActionAuthority(
+  principal: BrowserSurfacePrincipal,
+  request: MaestroBrowserSurfaceActionRequest,
+  context: RpcContext
+): void {
+  const record = requireBrowserSurfaceOwnershipAuthority(principal, request, context)
+  requireActiveBrowserProfileConsent(
+    record.receipt.profile_id,
+    request.profile_consent_receipt,
+    record.receipt,
+    context.runtime.getOrchestrationDb(),
+    request.workspace
+  )
+}
+
+export function requireBrowserSurfaceReleaseAuthority(
+  principal: BrowserSurfacePrincipal,
+  request: MaestroBrowserSurfaceActionRequest,
+  context: RpcContext
+): void {
+  requireBrowserSurfaceOwnershipAuthority(principal, request, context)
+}
+
+function requireBrowserSurfaceOwnershipAuthority(
+  principal: BrowserSurfacePrincipal,
   request: MaestroBrowserSurfaceActionRequest,
   context: RpcContext
 ) {
   const record = requireExactSurface(request, context)
-  const page = record.receipt.browser_page_id
-  if (!page) {
-    throw new OrchestrationError(
-      'browser_surface_identity_missing',
-      'The browser surface has no page identity.'
-    )
+  if (isCurrentCoordinator(principal, request.workspace, request.coordinator_generation)) {
+    return record
   }
-  const worktreeId = browserSurfaceWorktreeId(request.workspace.workspace_key)
-  const shown = await context.runtime.browserTabShow({
-    page,
-    worktree: browserSurfaceWorktreeSelector(request.workspace.workspace_key)
-  })
+  const dispatch = requireActiveWorkerDispatch(
+    principal,
+    request.workspace,
+    request.coordinator_generation,
+    context
+  )
   if (
-    shown.tab.browserPageId !== record.receipt.browser_page_id ||
-    (shown.tab.worktreeId !== null && shown.tab.worktreeId !== worktreeId) ||
-    (shown.tab.profileId ?? null) !== record.receipt.profile_id
+    record.receipt.owner_principal !== principal.actor_id ||
+    record.receipt.ownership !== 'harness' ||
+    record.receipt.task_id !== dispatch.task_id ||
+    record.receipt.attempt_id !== dispatch.id
   ) {
     throw new OrchestrationError(
-      'browser_surface_identity_mismatch',
-      'The native Browser page does not match the reserved workspace, page, and profile.'
+      'unauthorized',
+      'A worker may manage only the harness-owned browser surface for its active Dispatch.'
     )
   }
-  return { page, record, shown }
-}
-
-export function fileErrorCode(error: unknown): string | null {
-  if (typeof error !== 'object' || error === null || !('code' in error)) {
-    return null
-  }
-  return typeof error.code === 'string' ? error.code : null
-}
-
-export async function persistMaestroBrowserEvidence(data: string, format: 'png' | 'jpeg') {
-  const bytes = Buffer.from(data, 'base64')
-  const hash = createHash('sha256').update(bytes).digest('hex')
-  const directory = join(app.getPath('userData'), 'maestro-browser-evidence', 'sha256')
-  const filename = `${hash}.${format === 'jpeg' ? 'jpg' : 'png'}`
-  await mkdir(directory, { recursive: true, mode: 0o700 })
-  try {
-    await writeFile(join(directory, filename), bytes, { flag: 'wx', mode: 0o600 })
-  } catch (error) {
-    if (fileErrorCode(error) !== 'EEXIST') {
-      throw error
-    }
-  }
-  const size = nativeImage.createFromBuffer(bytes).getSize()
-  if (size.width < 1 || size.height < 1) {
-    throw new OrchestrationError(
-      'browser_surface_capture_invalid',
-      'The native Browser capture did not contain a valid image.'
-    )
-  }
-  return {
-    artifactRef: `artifact:maestro-browser-evidence/sha256/${filename}`,
-    artifactHash: `sha256:${hash}` as const,
-    width: size.width,
-    height: size.height
-  }
+  return record
 }

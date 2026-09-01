@@ -6,6 +6,7 @@ import {
   getRequiredStringFlag
 } from '../../flags'
 import { ORCHESTRATION_RUN_PAGE_LIMIT } from '../../../shared/orchestration-run-pagination'
+import type { RuntimeRunSettlementResult } from '../../../shared/runtime-worktree-contracts'
 import { callOrchestrationMutation } from './mutation-request'
 import { resolveCoordinatorTerminalHandle } from './terminal-identity'
 
@@ -81,5 +82,26 @@ export const ORCHESTRATION_RUN_HANDLERS: Record<string, CommandHandler> = {
         `${r.run.id}${r.run.legacy ? ' [legacy, inspect only]' : ''} ${r.run.objective}\n` +
         `consumer generation ${r.run.consumer_generation}; created ${r.run.created_at}`
     )
+  },
+
+  'orchestration run-settle': async ({ flags, client, cwd, json }) => {
+    const from = await resolveCoordinatorTerminalHandle(flags, cwd, client)
+    const result = await callOrchestrationMutation<RuntimeRunSettlementResult>(
+      client,
+      flags,
+      'orchestration.runSettle',
+      { id: getRequiredStringFlag(flags, 'id'), from }
+    )
+    printResult(result, json, (settlement) => {
+      const rows = settlement.worktrees.map((worktree) => {
+        const host = worktree.executionHostId ? ` on ${worktree.executionHostId}` : ''
+        const detail = [worktree.cause, worktree.action].filter(Boolean).join(' ')
+        return `${worktree.disposition}: ${worktree.worktreeId}${host}${detail ? `\n  ${detail}` : ''}`
+      })
+      const warnings = settlement.warnings.map((warning) => `Warning: ${warning}`)
+      return [`Run ${settlement.runId} settlement: ${settlement.state}`, ...rows, ...warnings].join(
+        '\n'
+      )
+    })
   }
 }

@@ -43,6 +43,16 @@ export const ORCHESTRATION_COMMAND_SPECS: CommandSpec[] = [
     allowedFlags: [...GLOBAL_FLAGS, 'id']
   },
   {
+    path: ['orchestration', 'run-settle'],
+    summary: 'Finalize a Run and clean its owned child worktrees',
+    usage:
+      'orca orchestration run-settle --id <run_id> [--from <handle>] [--retry-request <id>] [--json]',
+    allowedFlags: [...GLOBAL_FLAGS, 'id', 'from', 'retry-request'],
+    notes: [
+      'Only host-qualified created-child worktrees owned by this Run are eligible; retained or unverifiable resources remain pending with recovery actions.'
+    ]
+  },
+  {
     path: ['orchestration', 'send'],
     summary: 'Send an inter-agent message',
     usage:

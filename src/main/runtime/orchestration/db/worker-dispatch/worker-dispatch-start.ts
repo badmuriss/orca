@@ -14,6 +14,7 @@ export function createStartingWorkerDispatch(
     startOptions: unknown
     launchTokenHash?: string
     retryOf?: string
+    replacementOf?: string
     runtimeEpoch?: string
     federation?: {
       environmentId: string
@@ -62,7 +63,23 @@ export function createStartingWorkerDispatch(
     if (!task) {
       throw new OrchestrationError('task_not_found', `Task ${params.taskId} was not found.`)
     }
-    if (params.retryOf) {
+    if (params.replacementOf) {
+      const prior = this.getDispatchContextById(params.replacementOf)
+      const priorWorker = this.getWorkerDispatch(params.replacementOf)
+      const latest = this.getDispatchContext(task.id)
+      if (
+        !prior ||
+        prior.task_id !== task.id ||
+        latest?.id !== prior.id ||
+        priorWorker?.state !== 'start_unknown' ||
+        task.status !== 'blocked'
+      ) {
+        throw new OrchestrationError(
+          'task_not_startable',
+          `Task ${task.id} cannot replace outcome-unknown Dispatch ${params.replacementOf}.`
+        )
+      }
+    } else if (params.retryOf) {
       const prior = this.getDispatchContextById(params.retryOf)
       const priorWorker = this.getWorkerDispatch(params.retryOf)
       const latest = this.getDispatchContext(task.id)
@@ -87,6 +104,15 @@ export function createStartingWorkerDispatch(
     }
 
     const id = generateId('ctx')
+    if (params.replacementOf) {
+      this.db
+        .prepare(
+          `UPDATE dispatch_contexts
+           SET status = 'failed', last_failure = ?, completed_at = datetime('now')
+           WHERE id = ? AND status = 'pending'`
+        )
+        .run(`Superseded by replacement Dispatch ${id}.`, params.replacementOf)
+    }
     if (params.mutationReceipt) {
       this.db
         .prepare(

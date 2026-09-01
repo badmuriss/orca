@@ -30,5 +30,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_maestro_browser_surface_live_page
   WHERE browser_page_id IS NOT NULL AND state NOT IN ('released');
 CREATE INDEX IF NOT EXISTS idx_maestro_browser_surface_reconciliation
   ON maestro_browser_surfaces(state, retention, ownership, updated_at);
+CREATE TABLE IF NOT EXISTS maestro_browser_profile_consents (
+  consent_id TEXT PRIMARY KEY,
+  execution_host_id TEXT NOT NULL,
+  workspace_key TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  attempt_id TEXT NOT NULL,
+  profile_id TEXT NOT NULL,
+  receipt_json TEXT NOT NULL,
+  revoked_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_maestro_browser_profile_consent_active
+  ON maestro_browser_profile_consents(
+    execution_host_id, workspace_key, run_id, task_id, attempt_id, profile_id
+  ) WHERE revoked_at IS NULL;
 `
 }

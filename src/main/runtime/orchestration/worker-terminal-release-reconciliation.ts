@@ -12,6 +12,7 @@ export type WorkerTerminalReleaseReconciliationResult = {
   pending: number
   unknown: number
   retained: number
+  retainedForReview: number
 }
 
 type ActiveReconciliation = {
@@ -108,6 +109,7 @@ async function runReconciliationPasses(
     combined.pending += pass.pending
     combined.unknown += pass.unknown
     combined.retained += pass.retained
+    combined.retainedForReview += pass.retainedForReview
   } while (state.rerunRequested)
   if (combined.attempted > 0) {
     // Structured counts only; never transcript content or paths.
@@ -124,6 +126,9 @@ async function reconcileRequestedWorkerTerminalReleasesOnce(
   const db = runtime.getOrchestrationDb()
   const backlog = listReleaseReconciliationBacklog(db)
   const result = { ...emptyResult(), attempted: backlog.length }
+  result.retainedForReview = db
+    .listWorkerTerminalResources()
+    .filter(({ resource }) => resource?.release_state === 'retained_for_review').length
   for (const resource of backlog) {
     try {
       const receipt = await completeWorkerTerminalRelease({
@@ -216,7 +221,14 @@ function listReleaseReconciliationBacklog(db: OrchestrationDb): WorkerTerminalRe
 }
 
 function emptyResult(): WorkerTerminalReleaseReconciliationResult {
-  return { attempted: 0, released: 0, pending: 0, unknown: 0, retained: 0 }
+  return {
+    attempted: 0,
+    released: 0,
+    pending: 0,
+    unknown: 0,
+    retained: 0,
+    retainedForReview: 0
+  }
 }
 
 function workspaceHasExclusiveWorkerOwnership(

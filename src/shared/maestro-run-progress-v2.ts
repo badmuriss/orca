@@ -45,6 +45,34 @@ const MaestroRunProgressExecutionSchema = z
   })
   .strict()
 
+const MaestroDeliverableProgressSchema = z
+  .object({
+    progress_percent: z.number().int().min(0).max(100).optional(),
+    completed: CountSchema,
+    total: CountSchema
+  })
+  .strict()
+  .superRefine((progress, context) => {
+    const expected =
+      progress.total === 0 ? undefined : Math.round((progress.completed / progress.total) * 100)
+    if (progress.completed > progress.total || progress.progress_percent !== expected) {
+      addContractIssue(
+        context,
+        ['progress_percent'],
+        'Deliverable percentage must equal terminal deliverables over total deliverables'
+      )
+    }
+  })
+
+const MaestroOperationalReliabilitySchema = z
+  .object({
+    successful: CountSchema,
+    failed: CountSchema,
+    superseded: CountSchema,
+    unverifiable: CountSchema
+  })
+  .strict()
+
 const MaestroProjectionHealthSchema = z
   .object({
     state: z.enum(['healthy', 'partial', 'stale', 'unavailable']),
@@ -99,8 +127,28 @@ const MaestroCurrentProgressSchema = MaestroProgressReferenceBaseSchema.extend({
 }).strict()
 
 const MaestroCompletedProgressSchema = MaestroProgressReferenceBaseSchema.extend({
-  outcome_summary: BoundedTextSchema
-}).strict()
+  outcome_summary: BoundedTextSchema,
+  purpose: z.enum(['deliverable', 'operational']).optional(),
+  operational_outcome: z.enum(['successful', 'failed', 'superseded', 'unverifiable']).optional(),
+  successor_reference: BoundedReferenceSchema.optional()
+})
+  .strict()
+  .superRefine((entry, context) => {
+    if (entry.operational_outcome && entry.purpose !== 'operational') {
+      addContractIssue(
+        context,
+        ['operational_outcome'],
+        'Operational outcomes require explicit operational purpose'
+      )
+    }
+    if ((entry.operational_outcome === 'superseded') !== Boolean(entry.successor_reference)) {
+      addContractIssue(
+        context,
+        ['successor_reference'],
+        'Only a superseded operational outcome carries a successor reference'
+      )
+    }
+  })
 
 const MaestroNextProgressSchema = MaestroProgressReferenceBaseSchema.extend({
   next_step: BoundedTextSchema
@@ -126,6 +174,8 @@ export const MaestroRunProgressV2Schema = z
     schema_version: z.literal(2),
     run: z.object({ id: BoundedReferenceSchema, title: BoundedTextSchema }).strict(),
     execution: MaestroRunProgressExecutionSchema,
+    deliverables: MaestroDeliverableProgressSchema.optional(),
+    operational_reliability: MaestroOperationalReliabilitySchema.optional(),
     projection_health: MaestroProjectionHealthSchema,
     cleanup_health: MaestroCleanupHealthSchema,
     current: z.array(MaestroCurrentProgressSchema).max(MAESTRO_RUN_PROGRESS_LIST_LIMIT),

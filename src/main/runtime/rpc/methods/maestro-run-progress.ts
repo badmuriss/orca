@@ -7,7 +7,10 @@ import type {
 } from '../../../../shared/maestro-run-progress'
 import { MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
 import { projectMaestroRunProgress } from '../../orchestration/maestro-run-progress-projection'
-import { getMaestroProjection } from '../../orchestration/db/maestro/maestro-projection-store'
+import {
+  getMaestroProjection,
+  listMaestroProjectionIndexForScope
+} from '../../orchestration/db/maestro/maestro-projection-store'
 import {
   deserializeMaestroTerminalLease,
   type MaestroTerminalLeaseRow
@@ -18,27 +21,43 @@ import { exposeUtcTimestamp } from '../../orchestration/db/utc-timestamp'
 import { defineMethod, type RpcContext, type RpcMethod } from '../core'
 import { resolveMaestroDocumentReadScope } from '../maestro-principal'
 
-const params = z.object({ scope: MaestroDocumentReadScopeSchema }).strict()
+const params = z
+  .object({ scope: MaestroDocumentReadScopeSchema, runId: z.string().min(1).optional() })
+  .strict()
+
+type MaestroProjectionReadLabels = {
+  documentRevision: number | null
+  selectedRunId: string | null
+  projectionRevisions: { runId: string; revision: number; updatedAt: string }[]
+  projectionHealth: { state: 'healthy' | 'empty'; revision: number | null }
+}
 
 export type MaestroRunProgressResponse =
-  | { schemaVersion: 2; progress: MaestroRunProgressV2 }
+  | ({ schemaVersion: 2; progress: MaestroRunProgressV2 } & MaestroProjectionReadLabels)
   | { schemaVersion: 1; progress: MaestroRunProgress }
-  | { schemaVersion: null; progress: null }
+  | ({ schemaVersion: null; progress: null } & Partial<MaestroProjectionReadLabels>)
 
 export async function readMaestroRunProgress(
   context: RpcContext,
-  requestedScope: z.infer<typeof MaestroDocumentReadScopeSchema>
+  requestedScope: z.infer<typeof MaestroDocumentReadScopeSchema>,
+  requestedRunId?: string
 ): Promise<MaestroRunProgressResponse> {
   const scope = await resolveMaestroDocumentReadScope(context, requestedScope)
   const database = context.runtime.getOrchestrationDb()
-  const projection = getMaestroProjection.call(database, scope)
-  if (!projection) {
-    return { schemaVersion: null, progress: null }
-  }
-
   const supportsV2 =
     context.clientCapabilities === undefined ||
     context.clientCapabilities.includes(MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY)
+  const projection = getMaestroProjection.call(database, scope, requestedRunId)
+  if (!projection) {
+    if (!supportsV2) {
+      return { schemaVersion: null, progress: null }
+    }
+    return {
+      schemaVersion: null,
+      progress: null,
+      ...projectionReadLabels(database, scope, null)
+    }
+  }
   if (!supportsV2) {
     return { schemaVersion: 1, progress: projection.runProgress }
   }
@@ -76,6 +95,7 @@ export async function readMaestroRunProgress(
 
   return {
     schemaVersion: 2,
+    ...projectionReadLabels(database, scope, projection),
     progress: projectMaestroRunProgress({
       run,
       tasks,
@@ -89,6 +109,27 @@ export async function readMaestroRunProgress(
       projectionHealth: { state: 'healthy', revision: projection.revision },
       cleanupHealth: projectCleanupHealth(terminalLeases)
     })
+  }
+}
+
+function projectionReadLabels(
+  database: ReturnType<RpcContext['runtime']['getOrchestrationDb']>,
+  scope: z.infer<typeof MaestroDocumentReadScopeSchema>,
+  selected: ReturnType<typeof getMaestroProjection>
+): MaestroProjectionReadLabels {
+  const document = database.getMaestroDocument(scope)
+  return {
+    documentRevision: document.state === 'empty' ? null : document.revision,
+    selectedRunId: selected?.runId ?? null,
+    projectionRevisions: listMaestroProjectionIndexForScope.call(database, scope).map((entry) => ({
+      runId: entry.runId,
+      revision: entry.revision,
+      updatedAt: entry.updatedAt
+    })),
+    projectionHealth: {
+      state: selected ? 'healthy' : 'empty',
+      revision: selected?.revision ?? null
+    }
   }
 }
 
@@ -120,6 +161,6 @@ export const MAESTRO_RUN_PROGRESS_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'maestro.runProgress.get',
     params,
-    handler: ({ scope }, context) => readMaestroRunProgress(context, scope)
+    handler: ({ scope, runId }, context) => readMaestroRunProgress(context, scope, runId)
   })
 ]

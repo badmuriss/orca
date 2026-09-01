@@ -113,6 +113,30 @@ The same failure signature may occur at most twice across equivalent validations
 Validate a localized correction with its focused checkpoint, never by rerunning
 the entire suite.
 
+=== ORCA-NATIVE BROWSER ===
+
+When the task needs a website or web app, read the installed \`orca-cli\` skill
+and use Orca's built-in Browser before launching agent-browser, Playwright, a
+standalone Chromium, or another external browser process. This is a supervised
+Harness Dispatch, so start with \`${cli} agent-context --json\`, read the
+\`maestro browser-surface open\` payload contract, and open a harness-owned
+surface for this exact Task and Dispatch. Use ${params.taskId} as \`task_id\`,
+${params.dispatchId} as \`attempt_id\`, and the managed executionHostId/workspaceKey
+above. Keep the returned \`surface_id\` and \`browser_page_id\`; pass the page
+through \`--page <id>\` for every snapshot, navigation, and interaction, then use
+the typed focus, capture, retain, or release command for its lifecycle.
+
+Do not replace a managed Harness surface with \`${cli} tab create\`. Direct
+\`tab list/create\` is only the bounded compatibility fallback when the running
+Orca does not advertise \`maestro.browser-surface.v1\`; record that exact
+capability failure before using it.
+
+External browser automation is a fallback only when the Orca Browser lacks a
+required capability or the task explicitly depends on an external authenticated
+profile. Before falling back, make one bounded Orca attempt and record the exact
+blocker in your next heartbeat and final worker_done body. Never silently open a
+second Chromium after an Orca page already exists.
+
 === CLI COMMANDS ===
 
   # Report the terminal task outcome (REQUIRED exactly once).

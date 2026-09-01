@@ -29,6 +29,36 @@ describe('orchestration worker-start CLI contract', () => {
       json: true
     } as never)
 
+  const invokeReplacement = (flags: Map<string, string | boolean>) =>
+    ORCHESTRATION_HANDLERS['orchestration replace-worker']({
+      flags,
+      client: { call: callMock },
+      cwd: '/tmp/repo',
+      json: true
+    } as never)
+
+  it('executes the copy-safe replacement command as one workerStart mutation', async () => {
+    callMock.mockResolvedValue({
+      result: { taskId: 'task_1', dispatchId: 'ctx_new', state: 'ready' }
+    })
+
+    await invokeReplacement(
+      new Map([
+        ['task', 'task_1'],
+        ['predecessor', 'ctx_unknown'],
+        ['from', 'term_coord']
+      ])
+    )
+
+    expect(callMock).toHaveBeenCalledWith('orchestration.workerStart', {
+      task: 'task_1',
+      replacementOf: 'ctx_unknown',
+      run: undefined,
+      from: 'term_coord',
+      devMode: false
+    })
+  })
+
   it('passes the complete supported creation contract and retry receipt', async () => {
     callMock.mockResolvedValue({
       result: {

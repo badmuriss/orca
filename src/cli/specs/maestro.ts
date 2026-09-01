@@ -40,8 +40,9 @@ export const MAESTRO_COMMAND_SPECS: CommandSpec[] = [
   {
     path: ['maestro', 'open'],
     summary: 'Focus the exact workspace Maestro Canvas',
-    usage: 'orca maestro open --host <id> --workspace <key> [--json]',
-    allowedFlags: [...GLOBAL_FLAGS, 'host', 'workspace']
+    usage: 'orca maestro open (--run <run_id> | --host <id> --workspace <key>) [--json]',
+    allowedFlags: [...GLOBAL_FLAGS, 'run', 'host', 'workspace'],
+    notes: ['--run resolves exactly one authoritative projected Run binding before focus.']
   },
   {
     path: ['maestro', 'projection', 'show'],

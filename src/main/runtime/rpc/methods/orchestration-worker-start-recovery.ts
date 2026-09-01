@@ -16,6 +16,8 @@ type RecoverWorkerStartFailureArgs = {
   error: unknown
   setup: Parameters<typeof failWorkerStartWithReceipt>[0]['setup']
   launch: Parameters<typeof failWorkerStartWithReceipt>[0]['launch']
+  attemptId: string
+  terminalHandle?: string
   workerLease: MaestroTerminalLease | undefined
   leaseTransferReceipt: LeaseTransferReceipt | undefined
   recordMutationReceipt?: (receipt: unknown) => void
@@ -37,8 +39,12 @@ export function recoverWorkerStartFailure(args: RecoverWorkerStartFailureArgs) {
     const recovered = {
       runId,
       taskId,
+      attemptId: args.attemptId,
       dispatchId,
+      ...(args.workerLease ? { leaseId: args.workerLease.id } : {}),
+      ...(args.terminalHandle ? { terminalHandle: args.terminalHandle } : {}),
       state: 'outcome_unknown',
+      readiness: 'unverifiable',
       failedStage,
       leaseTransfer
     }
@@ -57,6 +63,9 @@ export function recoverWorkerStartFailure(args: RecoverWorkerStartFailureArgs) {
     failedStage,
     error: args.error,
     setup: args.setup,
-    launch: args.launch
+    launch: args.launch,
+    attemptId: args.attemptId,
+    terminalHandle: args.terminalHandle,
+    leaseId: args.workerLease?.id
   })
 }

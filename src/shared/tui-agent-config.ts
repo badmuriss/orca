@@ -12,6 +12,7 @@ export type AgentPromptInjectionMode =
 export type DraftPasteReadySignal =
   | 'render-quiet-after-bracketed-paste'
   | 'codex-composer-prompt'
+  | 'opencode-composer-prompt'
   | 'render-cursor-after-bracketed-paste'
   | 'grok-composer-prompt'
 
@@ -125,15 +126,13 @@ export const TUI_AGENT_CONFIG: Record<TuiAgent, TuiAgentConfig> = {
     launchCmd: 'opencode',
     expectedProcess: 'opencode',
     promptInjectionMode: 'flag-prompt',
-    // Why: opencode enables bracketed paste before its composer mounts; wait for the post-\x1b[?2004h show-cursor so paste lands.
-    draftPasteReadySignal: 'render-cursor-after-bracketed-paste'
+    draftPasteReadySignal: 'opencode-composer-prompt'
   },
   'mimo-code': {
     detectCmd: 'mimo',
     launchCmd: 'mimo',
     expectedProcess: 'mimo',
     promptInjectionMode: 'flag-prompt',
-    // Why: mirrors opencode's cursor-gated signal by parity; mimo's startup stream isn't separately validated.
     draftPasteReadySignal: 'render-cursor-after-bracketed-paste'
   },
   pi: {
@@ -141,7 +140,6 @@ export const TUI_AGENT_CONFIG: Record<TuiAgent, TuiAgentConfig> = {
     launchCmd: 'pi',
     expectedProcess: 'pi',
     promptInjectionMode: 'argv',
-    // Why: pi has no `--prefill` and paste-after-ready races its long startup; the orca-prefill extension seeds this env var instead.
     draftPromptEnvVar: 'ORCA_PI_PREFILL',
     // Why: Pi decodes CSI-u; Esc+CR submits after tool subprocesses reset live KKP state (#9703).
     windowsShiftEnterEncoding: 'csi-u'
@@ -152,7 +150,6 @@ export const TUI_AGENT_CONFIG: Record<TuiAgent, TuiAgentConfig> = {
     expectedProcess: 'omp',
     promptInjectionMode: 'argv',
     draftPromptEnvVar: 'ORCA_OMP_PREFILL',
-    // Why: OMP wraps Pi's TUI, so the bytes land in a Pi reader that decodes CSI-u (see pi above).
     windowsShiftEnterEncoding: 'csi-u'
   },
   'prime-agent': {

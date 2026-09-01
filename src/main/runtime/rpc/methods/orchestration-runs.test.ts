@@ -26,7 +26,7 @@ describe('orchestration RPC methods', () => {
 
   it('registers all expected methods', () => {
     const registry = buildRegistry(ORCHESTRATION_METHODS)
-    expect(registry.size).toBe(40)
+    expect(registry.size).toBe(42)
     expect(registry.has('orchestration.coordinatorHandoff')).toBe(true)
     expect(registry.has('orchestration.workerRelease')).toBe(true)
     expect(registry.has('orchestration.workerRetain')).toBe(true)
@@ -37,6 +37,7 @@ describe('orchestration RPC methods', () => {
     expect(registry.has('orchestration.runCurrent')).toBe(true)
     expect(registry.has('orchestration.runList')).toBe(true)
     expect(registry.has('orchestration.runShow')).toBe(true)
+    expect(registry.has('orchestration.runSettle')).toBe(true)
     expect(registry.has('orchestration.send')).toBe(true)
     expect(registry.has('orchestration.check')).toBe(true)
     expect(registry.has('orchestration.reply')).toBe(true)
@@ -69,6 +70,28 @@ describe('orchestration RPC methods', () => {
   })
 
   describe('lightweight Runs', () => {
+    it('settles only the Run currently owned by the authenticated coordinator', async () => {
+      setup()
+      const run = db.getCurrentRunForPane(coordinatorPaneKey)
+      const settle = vi.spyOn(runtime, 'settleOrchestrationRun').mockResolvedValue({
+        runId: run?.id ?? '',
+        state: 'settled',
+        worktrees: [],
+        warnings: []
+      })
+
+      const result = await call('orchestration.runSettle', {
+        id: run?.id,
+        from: 'term_coord'
+      })
+
+      expect(result).toMatchObject({ runId: run?.id, state: 'settled' })
+      expect(settle).toHaveBeenCalledWith(run?.id)
+      await expect(
+        call('orchestration.runSettle', { id: 'run_foreign', from: 'term_coord' })
+      ).rejects.toMatchObject({ code: 'run_not_found' })
+    })
+
     it('creates and binds a Run to the runtime-resolved caller pane', async () => {
       setup(false)
       vi.spyOn(runtime, 'getTerminalPaneKey').mockReturnValue(

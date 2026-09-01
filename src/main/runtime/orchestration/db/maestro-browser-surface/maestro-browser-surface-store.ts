@@ -5,66 +5,27 @@ import type {
 import { MaestroBrowserSurfaceReceiptSchema } from '../../../../../shared/maestro-browser-surface'
 import { OrchestrationError } from '../../orchestration-error'
 import type { OrchestrationDb } from '../orchestration-db'
+import {
+  getMaestroBrowserProfileConsent,
+  grantMaestroBrowserProfileConsent,
+  revokeMaestroBrowserProfileConsent
+} from './maestro-browser-profile-consent-store'
+import {
+  assertSameBrowserSurfaceRequest,
+  parseBrowserSurfaceRow,
+  publicBrowserUrl
+} from './maestro-browser-surface-record'
+import type {
+  BrowserSurfaceRow,
+  MaestroBrowserSurfaceRecord
+} from './maestro-browser-surface-record'
 
-type BrowserSurfaceRow = {
-  surface_id: string
-  request_id: string
-  execution_host_id: string
-  workspace_key: string
-  run_id: string
-  task_id: string
-  attempt_id: string
-  agent_id: string
-  owner_principal: string
-  ownership: 'harness' | 'user'
-  browser_page_id: string | null
-  navigation_url: string
-  state: MaestroBrowserSurfaceReceipt['state']
-  retention: MaestroBrowserSurfaceReceipt['retention']
-  receipt_json: string
-  created_at: string
-  updated_at: string
+export {
+  getMaestroBrowserProfileConsent,
+  grantMaestroBrowserProfileConsent,
+  revokeMaestroBrowserProfileConsent
 }
-
-export type MaestroBrowserSurfaceRecord = {
-  receipt: MaestroBrowserSurfaceReceipt
-  navigationUrl: string
-}
-
-function isoDate(value: string): string {
-  return `${value.replace(' ', 'T')}Z`
-}
-
-function publicUrl(value: string): { url: string; origin: string } {
-  const parsed = new URL(value)
-  parsed.username = ''
-  parsed.password = ''
-  parsed.search = ''
-  parsed.hash = ''
-  return { url: parsed.toString(), origin: parsed.origin }
-}
-
-function parseRow(row: BrowserSurfaceRow): MaestroBrowserSurfaceRecord {
-  let receiptValue: unknown
-  try {
-    receiptValue = JSON.parse(row.receipt_json)
-  } catch {
-    throw new OrchestrationError(
-      'browser_surface_receipt_invalid',
-      `Browser surface ${row.surface_id} has an invalid receipt.`
-    )
-  }
-  const storedReceipt = MaestroBrowserSurfaceReceiptSchema.parse(receiptValue)
-  const receipt = MaestroBrowserSurfaceReceiptSchema.parse({
-    ...storedReceipt,
-    browser_page_id: row.browser_page_id,
-    state: row.state,
-    retention: row.retention,
-    created_at: isoDate(row.created_at),
-    updated_at: isoDate(row.updated_at)
-  })
-  return { receipt, navigationUrl: row.navigation_url }
-}
+export type { MaestroBrowserSurfaceRecord } from './maestro-browser-surface-record'
 
 function getRowByRequest(
   database: OrchestrationDb,
@@ -95,30 +56,6 @@ function getRowByAttempt(
     ) as BrowserSurfaceRow | undefined
 }
 
-function assertSameRequest(
-  receipt: MaestroBrowserSurfaceReceipt,
-  request: MaestroBrowserSurfaceRequest
-): void {
-  if (
-    receipt.run_id !== request.workspace.run_id ||
-    receipt.execution_host_id !== request.workspace.execution_host_id ||
-    receipt.workspace_key !== request.workspace.workspace_key ||
-    receipt.task_id !== request.task_id ||
-    receipt.attempt_id !== request.attempt_id ||
-    receipt.agent_id !== request.agent_id ||
-    receipt.owner_principal !== request.actor.actor_id ||
-    receipt.ownership !== request.ownership ||
-    receipt.requested_visibility !== request.requested_visibility ||
-    receipt.retention !== request.retention ||
-    receipt.profile_id !== request.profile_id
-  ) {
-    throw new OrchestrationError(
-      'request_mismatch',
-      `Browser surface request ${request.request_id} is already bound to another identity.`
-    )
-  }
-}
-
 export function getMaestroBrowserSurface(
   this: OrchestrationDb,
   surfaceId: string
@@ -126,7 +63,7 @@ export function getMaestroBrowserSurface(
   const row = this.db
     .prepare('SELECT * FROM maestro_browser_surfaces WHERE surface_id = ?')
     .get(surfaceId) as BrowserSurfaceRow | undefined
-  return row ? parseRow(row) : undefined
+  return row ? parseBrowserSurfaceRow(row) : undefined
 }
 
 export function getMaestroBrowserSurfaceByRequest(
@@ -134,7 +71,7 @@ export function getMaestroBrowserSurfaceByRequest(
   requestId: string
 ): MaestroBrowserSurfaceRecord | undefined {
   const row = getRowByRequest(this, requestId)
-  return row ? parseRow(row) : undefined
+  return row ? parseBrowserSurfaceRow(row) : undefined
 }
 
 export function reserveMaestroBrowserSurface(
@@ -145,15 +82,15 @@ export function reserveMaestroBrowserSurface(
   try {
     const existingRow = getRowByRequest(this, request.request_id) ?? getRowByAttempt(this, request)
     if (existingRow) {
-      const existing = parseRow(existingRow)
-      assertSameRequest(existing.receipt, request)
+      const existing = parseBrowserSurfaceRow(existingRow)
+      assertSameBrowserSurfaceRequest(existing.receipt, request)
       this.db.exec('RELEASE maestro_browser_surface_reserve')
       return existing
     }
 
     const surfaceId = `browser-surface-${request.request_id}`
     const browserPageId = request.browser_page_id ?? `maestro-${request.request_id}`
-    const publicLocation = publicUrl(request.url)
+    const publicLocation = publicBrowserUrl(request.url)
     const now = new Date().toISOString()
     const receipt = MaestroBrowserSurfaceReceiptSchema.parse({
       schema_version: 1,
@@ -277,10 +214,13 @@ export function listReconcilableMaestroBrowserSurfaces(
        ORDER BY created_at, surface_id`
     )
     .all() as BrowserSurfaceRow[]
-  return rows.map(parseRow)
+  return rows.map(parseBrowserSurfaceRow)
 }
 
 export type MaestroBrowserSurfaceStoreMethods = {
+  getMaestroBrowserProfileConsent: typeof getMaestroBrowserProfileConsent
+  grantMaestroBrowserProfileConsent: typeof grantMaestroBrowserProfileConsent
+  revokeMaestroBrowserProfileConsent: typeof revokeMaestroBrowserProfileConsent
   getMaestroBrowserSurface: typeof getMaestroBrowserSurface
   getMaestroBrowserSurfaceByRequest: typeof getMaestroBrowserSurfaceByRequest
   reserveMaestroBrowserSurface: typeof reserveMaestroBrowserSurface
@@ -290,6 +230,9 @@ export type MaestroBrowserSurfaceStoreMethods = {
 
 export function attachMaestroBrowserSurfaceStore(ctor: { prototype: object }): void {
   Object.assign(ctor.prototype, {
+    getMaestroBrowserProfileConsent,
+    grantMaestroBrowserProfileConsent,
+    revokeMaestroBrowserProfileConsent,
     getMaestroBrowserSurface,
     getMaestroBrowserSurfaceByRequest,
     reserveMaestroBrowserSurface,
