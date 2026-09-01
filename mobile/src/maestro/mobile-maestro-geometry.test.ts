@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  focusMobileMaestroFrame,
   fitMobileMaestroFrames,
   mobileMaestroInspectorInsets,
   projectMobileMaestroFrame,
@@ -7,6 +8,19 @@ import {
 } from './mobile-maestro-geometry'
 
 describe('mobile Maestro geometry', () => {
+  it('focuses a desktop-sized terminal inside the useful phone area', () => {
+    const frame = { x: 400, y: 200, width: 760, height: 530 }
+    const usable = { width: 390, height: 664, insetTop: 104, insetBottom: 0 }
+    const viewport = focusMobileMaestroFrame(frame, usable)
+    const projected = projectMobileMaestroFrame(viewport, frame, usable)
+
+    expect(projected.x).toBeGreaterThanOrEqual(16)
+    expect(projected.x + projected.width).toBeLessThanOrEqual(usable.width - 16)
+    expect(projected.y).toBeGreaterThanOrEqual(usable.insetTop + 16)
+    expect(projected.y + projected.height).toBeLessThanOrEqual(usable.height - 16)
+    expect(viewport.zoom).toBeGreaterThan(0.4)
+  })
+
   it('reveals a selected card outside the phone inspector', () => {
     const insets = mobileMaestroInspectorInsets(false, true)
     const next = revealMobileMaestroFrame(

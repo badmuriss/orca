@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
 import * as Clipboard from 'expo-clipboard'
 import { ChevronRight, Copy, X } from 'lucide-react-native'
-import { Pressable, ScrollView, Text, useColorScheme, View } from 'react-native'
+import { Pressable, ScrollView, Text, View } from 'react-native'
 import { BottomDrawer } from '../components/BottomDrawer'
-import { mobileThemeColors } from '../theme/mobile-theme'
+import { colors } from '../theme/mobile-theme'
 import {
   buildMobileMaestroProgressModel,
   type MobileMaestroProgressEntry,
@@ -12,21 +12,28 @@ import {
 } from './mobile-maestro-progress-model'
 import { createMobileMaestroProgressStyles } from './mobile-maestro-progress-styles'
 import type { MobileMaestroRunProgress } from './mobile-maestro-run-progress'
+import { MobileMaestroHumanReview } from './MobileMaestroHumanReview'
+import type { MobileMaestroHumanReviewResource } from './mobile-maestro-human-review'
+import type { WorkspaceSurfaceSnapshot } from '../../../src/shared/maestro-workspace-canvas'
 
 type MobileMaestroProgressProps = {
   progress: MobileMaestroRunProgress
   wide: boolean
+  humanReview?: {
+    resource: MobileMaestroHumanReviewResource
+    snapshot: WorkspaceSurfaceSnapshot
+    onOpenExactTab: (surface: WorkspaceSurfaceSnapshot['surfaces'][string]) => void
+  }
 }
 
 type ProgressStyles = ReturnType<typeof createMobileMaestroProgressStyles>
 
 function useMobileMaestroProgressTheme() {
-  const themeColors = mobileThemeColors(useColorScheme())
-  const styles = useMemo(() => createMobileMaestroProgressStyles(themeColors), [themeColors])
-  return { styles, themeColors }
+  const styles = useMemo(() => createMobileMaestroProgressStyles(colors), [])
+  return { styles, themeColors: colors }
 }
 
-export function MobileMaestroProgress({ progress, wide }: MobileMaestroProgressProps) {
+export function MobileMaestroProgress({ progress, wide, humanReview }: MobileMaestroProgressProps) {
   const [detailsOpen, setDetailsOpen] = useState(false)
   const model = useMemo(() => buildMobileMaestroProgressModel(progress), [progress])
   const { styles, themeColors } = useMobileMaestroProgressTheme()
@@ -39,7 +46,7 @@ export function MobileMaestroProgress({ progress, wide }: MobileMaestroProgressP
           contentContainerStyle={styles.tabletContent}
           showsVerticalScrollIndicator={false}
         >
-          <MobileMaestroProgressDetails model={model} />
+          <MobileMaestroProgressDetails model={model} humanReview={humanReview} />
         </ScrollView>
       </View>
     )
@@ -61,10 +68,28 @@ export function MobileMaestroProgress({ progress, wide }: MobileMaestroProgressP
           </Text>
           <ChevronRight size={17} color={themeColors.textSecondary} />
         </View>
-        <Text style={styles.summaryMeta} numberOfLines={1}>
-          {model.outcome} · {model.progressLabel}
-          {model.warnings.length ? ' · Health warning' : ''}
-        </Text>
+        <View style={styles.summaryMetaRow}>
+          <Text style={styles.summaryStatus}>{model.outcome}</Text>
+          <Text style={styles.summaryProgress}>{model.progressLabel}</Text>
+        </View>
+        {model.progressPercent === undefined ? null : (
+          <View
+            accessibilityRole="progressbar"
+            accessibilityValue={{ min: 0, max: 100, now: model.progressPercent }}
+            style={styles.summaryProgressTrack}
+          >
+            <View style={[styles.summaryProgressFill, { flex: model.progressPercent }]} />
+            <View style={{ flex: 100 - model.progressPercent }} />
+          </View>
+        )}
+        <View style={styles.summaryFooter}>
+          <Text style={styles.summaryCounts} numberOfLines={1}>
+            {model.countsLabel}
+          </Text>
+          {model.warnings.length ? (
+            <Text style={styles.summaryWarning}>Attention needed</Text>
+          ) : null}
+        </View>
       </Pressable>
       <BottomDrawer
         visible={detailsOpen}
@@ -83,13 +108,19 @@ export function MobileMaestroProgress({ progress, wide }: MobileMaestroProgressP
             <X size={18} color={themeColors.textSecondary} />
           </Pressable>
         </View>
-        <MobileMaestroProgressDetails model={model} />
+        <MobileMaestroProgressDetails model={model} humanReview={humanReview} />
       </BottomDrawer>
     </>
   )
 }
 
-export function MobileMaestroProgressDetails({ model }: { model: MobileMaestroProgressModel }) {
+export function MobileMaestroProgressDetails({
+  model,
+  humanReview
+}: {
+  model: MobileMaestroProgressModel
+  humanReview?: MobileMaestroProgressProps['humanReview']
+}) {
   const { styles, themeColors } = useMobileMaestroProgressTheme()
   return (
     <View style={styles.detailContent} testID="mobile-maestro-progress-details">
@@ -130,6 +161,7 @@ export function MobileMaestroProgressDetails({ model }: { model: MobileMaestroPr
           ))}
         </View>
       ) : null}
+      {humanReview ? <MobileMaestroHumanReview {...humanReview} /> : null}
       {model.technical.length ? (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Technical details</Text>

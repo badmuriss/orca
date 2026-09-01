@@ -75,6 +75,16 @@ describe('MaestroWorkspaceWindow', () => {
     ).toBe('Desktop progress specialist')
   })
 
+  it('replaces an opaque Task id even when an older surface title includes worker metadata', () => {
+    expect(
+      resolveMaestroWorkspaceSurfaceTitle(
+        'task_355f776fd0fc · worker · Agent',
+        'Research open roles',
+        'task_355f776fd0fc'
+      )
+    ).toBe('Research open roles')
+  })
+
   it('preserves an explicit user title that does not match the generated default', () => {
     expect(
       resolveMaestroWorkspaceSurfaceTitle(

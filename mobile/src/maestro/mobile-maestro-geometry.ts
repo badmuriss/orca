@@ -125,3 +125,26 @@ export function fitMobileMaestroFrames(
     zoom
   }
 }
+
+export function focusMobileMaestroFrame(
+  frame: MaestroCardFrame,
+  usable: { width: number; height: number; insetTop: number; insetBottom: number }
+): MaestroViewport {
+  const safe = {
+    left: 16,
+    top: usable.insetTop + 16,
+    right: usable.width - 16,
+    bottom: usable.height - usable.insetBottom - 16
+  }
+  const availableWidth = Math.max(1, safe.right - safe.left)
+  const availableHeight = Math.max(1, safe.bottom - safe.top)
+  const zoom = Math.min(1, availableWidth / frame.width, availableHeight / frame.height)
+  const safeCenter = { x: (safe.left + safe.right) / 2, y: (safe.top + safe.bottom) / 2 }
+  return {
+    center: {
+      x: frame.x + frame.width / 2 + (usable.width / 2 - safeCenter.x) / zoom,
+      y: frame.y + frame.height / 2 + (usable.height / 2 - safeCenter.y) / zoom
+    },
+    zoom
+  }
+}

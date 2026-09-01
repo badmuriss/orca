@@ -1,13 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ActivityIndicator, Pressable, Text, View } from 'react-native'
-import {
-  ChevronLeft,
-  FilePlus2,
-  Globe,
-  Maximize2,
-  RefreshCw,
-  SquareTerminal
-} from 'lucide-react-native'
+import { Pressable, Text, View } from 'react-native'
+import { FilePlus2, Globe, SquareTerminal } from 'lucide-react-native'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { parseWorkspaceKey } from '../../../src/shared/workspace-scope'
@@ -17,8 +10,9 @@ import {
 } from '../../../src/shared/maestro-workspace-canvas'
 import { useHostClient } from '../transport/client-context'
 import { useResponsiveLayout } from '../layout/responsive-layout'
-import { colors } from '../theme/mobile-theme'
+import { ActionSheetModal } from '../components/ActionSheetModal'
 import {
+  focusMobileMaestroFrame,
   fitMobileMaestroFrames,
   mobileMaestroFrame,
   mobileMaestroInspectorInsets,
@@ -31,9 +25,16 @@ import {
   MobileMaestroAnnotationComposer,
   type MaestroAnnotationTone
 } from './MobileMaestroAnnotationComposer'
+import { MobileMaestroLoading, MobileMaestroUnavailable } from './MobileMaestroAvailability'
 import { MobileMaestroProgress } from './MobileMaestroProgress'
+import { MobileMaestroToolbar } from './MobileMaestroToolbar'
+import { useMobileMaestroHumanReview } from './mobile-maestro-human-review'
 import { useMobileMaestroWorkspace } from './mobile-maestro-workspace'
 import { mobileMaestroScreenStyles as styles } from './mobile-maestro-screen-styles'
+import {
+  buildMobileMaestroVisualFixture,
+  MOBILE_MAESTRO_VISUAL_FIXTURE_STATE
+} from './mobile-maestro-visual-fixture'
 
 export function MobileMaestroScreen() {
   const { hostId, executionHostId, workspaceKey, name } = useLocalSearchParams<{
@@ -45,6 +46,11 @@ export function MobileMaestroScreen() {
   const router = useRouter()
   const { client, state: connectionState } = useHostClient(hostId)
   const { isWideLayout, width, height } = useResponsiveLayout()
+  const parsedWorkspace = useMemo(() => parseWorkspaceKey(workspaceKey), [workspaceKey])
+  const resolvedWorktreeId =
+    parsedWorkspace?.type === 'folder'
+      ? parsedWorkspace.folderWorkspaceId
+      : (parsedWorkspace?.worktreeId ?? null)
   const scope = useMemo(
     () => ({ execution_host_id: executionHostId, workspace_key: workspaceKey }),
     [executionHostId, workspaceKey]
@@ -54,10 +60,12 @@ export function MobileMaestroScreen() {
     connectionState === 'connected',
     scope
   )
+  const humanReview = useMobileMaestroHumanReview(client, connectionState === 'connected', scope)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [previews, setPreviews] = useState<Record<string, string>>({})
   const [linkSourceKey, setLinkSourceKey] = useState<string | null>(null)
   const [composerOpen, setComposerOpen] = useState(false)
+  const [surfaceMenuOpen, setSurfaceMenuOpen] = useState(false)
   const [annotationText, setAnnotationText] = useState('')
   const [annotationTone, setAnnotationTone] = useState<MaestroAnnotationTone>('observation')
   const [mutationBusy, setMutationBusy] = useState(false)
@@ -76,11 +84,21 @@ export function MobileMaestroScreen() {
   )
   const persistedViewport = useMemo(() => {
     const inspectorInsets = mobileMaestroInspectorInsets(isWideLayout, Boolean(selectedKey))
+    if (!isWideLayout && frames.length > 0) {
+      const preferredIndex = surfaces.findIndex((surface) => surface.binding.kind === 'terminal')
+      const preferredFrame = frames[Math.max(0, preferredIndex)] ?? frames[0]!
+      return focusMobileMaestroFrame(preferredFrame, {
+        width: canvasSize.width,
+        height: canvasSize.height,
+        insetTop: value?.runProgress ? 104 : 8,
+        insetBottom: inspectorInsets.insetBottom
+      })
+    }
     return (
       value?.canvas.document.viewport ??
       fitMobileMaestroFrames(frames, { ...canvasSize, ...inspectorInsets })
     )
-  }, [canvasSize, frames, isWideLayout, selectedKey, value])
+  }, [canvasSize, frames, isWideLayout, selectedKey, surfaces, value])
   const viewport = localViewport ?? persistedViewport
   const selected = selectedKey ? (value?.snapshot.surfaces[selectedKey] ?? null) : null
   const selectedSuggestion = selectedKey
@@ -172,9 +190,7 @@ export function MobileMaestroScreen() {
   }, [previews, readContent, selected, selectedKey])
 
   const openExactTab = (surface: WorkspaceSurface) => {
-    const parsed = parseWorkspaceKey(workspaceKey)
-    const worktreeId = parsed?.type === 'folder' ? parsed.folderWorkspaceId : parsed?.worktreeId
-    if (!worktreeId) {
+    if (!resolvedWorktreeId) {
       return
     }
     router.push({
@@ -182,7 +198,7 @@ export function MobileMaestroScreen() {
       params: {
         hostId,
         executionHostId,
-        worktreeId,
+        worktreeId: resolvedWorktreeId,
         tabId: surface.id.unified_tab_id,
         name: name ?? surface.title
       }
@@ -190,98 +206,41 @@ export function MobileMaestroScreen() {
   }
 
   if (state.status === 'loading') {
-    return (
-      <SafeAreaView edges={['top', 'bottom']} style={styles.screen}>
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.textSecondary} />
-          <Text style={styles.centerText}>Loading workspace Canvas…</Text>
-        </View>
-      </SafeAreaView>
-    )
+    return <MobileMaestroLoading />
   }
   if (state.status !== 'available') {
-    return (
-      <SafeAreaView edges={['top', 'bottom']} style={styles.screen}>
-        <View style={styles.center}>
-          <Text style={styles.errorTitle}>Maestro unavailable</Text>
-          <Text style={styles.centerText}>{state.reason}</Text>
-          <Pressable style={styles.retry} onPress={() => void refresh()}>
-            <RefreshCw size={16} color={colors.textPrimary} />
-            <Text style={styles.retryText}>Retry</Text>
-          </Pressable>
-        </View>
-      </SafeAreaView>
-    )
+    return <MobileMaestroUnavailable reason={state.reason} onRetry={() => void refresh()} />
   }
   const available = state.value
+  const visualFixture =
+    __DEV__ && MOBILE_MAESTRO_VISUAL_FIXTURE_STATE
+      ? buildMobileMaestroVisualFixture(MOBILE_MAESTRO_VISUAL_FIXTURE_STATE, available.snapshot)
+      : null
+  const displayedProgress = visualFixture?.progress ?? available.runProgress
+  const displayedHumanReview = visualFixture?.resource ?? humanReview
 
   return (
     <SafeAreaView edges={['top', 'bottom']} style={styles.screen} testID="mobile-maestro-screen">
-      <View style={styles.toolbar}>
-        <Pressable
-          accessibilityLabel="Back"
-          onPress={() => router.back()}
-          style={styles.iconButton}
-        >
-          <ChevronLeft size={20} color={colors.textPrimary} />
-        </Pressable>
-        <View style={styles.heading}>
-          <Text style={styles.title}>Maestro</Text>
-          <Text style={styles.subtitle} numberOfLines={1}>
-            {name ?? workspaceKey}
-          </Text>
-        </View>
-        <Pressable
-          accessibilityLabel="New terminal surface"
-          disabled={mutationBusy}
-          onPress={() => void applyMutation({ action: 'create', surface_type: 'terminal' })}
-          style={styles.iconButton}
-        >
-          <SquareTerminal size={17} color={colors.textSecondary} />
-        </Pressable>
-        <Pressable
-          accessibilityLabel="New Browser surface"
-          disabled={mutationBusy}
-          onPress={() => void applyMutation({ action: 'create', surface_type: 'browser' })}
-          style={styles.iconButton}
-        >
-          <Globe size={17} color={colors.textSecondary} />
-        </Pressable>
-        <Pressable
-          accessibilityLabel="New semantic note"
-          onPress={() => setComposerOpen(true)}
-          style={styles.iconButton}
-        >
-          <FilePlus2 size={17} color={colors.textSecondary} />
-        </Pressable>
-        <Pressable
-          accessibilityLabel="Fit Canvas"
-          disabled={mutationBusy}
-          onPress={() => {
-            const inspectorInsets = mobileMaestroInspectorInsets(isWideLayout, Boolean(selectedKey))
-            const fitted = fitMobileMaestroFrames(frames, {
-              ...canvasSize,
-              ...inspectorInsets
-            })
-            setLocalViewport(fitted)
-            void applyMutation({
-              action: 'set-viewport',
-              viewport: fitted,
-              expected_canvas_revision: available.canvas.revision
-            })
-          }}
-          style={styles.iconButton}
-        >
-          <Maximize2 size={17} color={colors.textSecondary} />
-        </Pressable>
-        <Pressable
-          accessibilityLabel="Refresh Canvas"
-          onPress={() => void refresh()}
-          style={styles.iconButton}
-        >
-          <RefreshCw size={17} color={colors.textSecondary} />
-        </Pressable>
-      </View>
+      <MobileMaestroToolbar
+        title={name ?? workspaceKey}
+        mutationBusy={mutationBusy}
+        onBack={() => router.back()}
+        onAdd={() => setSurfaceMenuOpen(true)}
+        onFit={() => {
+          const inspectorInsets = mobileMaestroInspectorInsets(isWideLayout, Boolean(selectedKey))
+          const fitted = fitMobileMaestroFrames(frames, {
+            ...canvasSize,
+            ...inspectorInsets
+          })
+          setLocalViewport(fitted)
+          void applyMutation({
+            action: 'set-viewport',
+            viewport: fitted,
+            expected_canvas_revision: available.canvas.revision
+          })
+        }}
+        onRefresh={() => void refresh()}
+      />
       {mutationError ? (
         <View accessibilityRole="alert" style={styles.mutationError}>
           <Text style={styles.mutationErrorText}>Could not apply change: {mutationError}</Text>
@@ -313,6 +272,8 @@ export function MobileMaestroScreen() {
               links={links}
               selectedKey={selectedKey}
               previews={previews}
+              client={client}
+              worktreeId={resolvedWorktreeId}
               onSelect={selectSurface}
               onViewportLayout={(size) =>
                 setCanvasSize((current) =>
@@ -352,14 +313,59 @@ export function MobileMaestroScreen() {
               }
             />
           ) : null}
-          {available.runProgress && !isWideLayout ? (
-            <MobileMaestroProgress progress={available.runProgress} wide={false} />
+          {displayedProgress && !isWideLayout ? (
+            <MobileMaestroProgress
+              progress={displayedProgress}
+              wide={false}
+              humanReview={{
+                resource: displayedHumanReview,
+                snapshot: available.snapshot,
+                onOpenExactTab: openExactTab
+              }}
+            />
           ) : null}
         </View>
-        {available.runProgress && isWideLayout ? (
-          <MobileMaestroProgress progress={available.runProgress} wide />
+        {displayedProgress && isWideLayout ? (
+          <MobileMaestroProgress
+            progress={displayedProgress}
+            wide
+            humanReview={{
+              resource: displayedHumanReview,
+              snapshot: available.snapshot,
+              onOpenExactTab: openExactTab
+            }}
+          />
         ) : null}
       </View>
+      <ActionSheetModal
+        visible={surfaceMenuOpen}
+        title="Add to Canvas"
+        message="Choose the surface to open in this workspace."
+        onClose={() => setSurfaceMenuOpen(false)}
+        actions={[
+          {
+            label: 'New terminal',
+            hint: 'Open a live shell in the workspace',
+            icon: SquareTerminal,
+            disabled: mutationBusy,
+            onPress: () => void applyMutation({ action: 'create', surface_type: 'terminal' })
+          },
+          {
+            label: 'New Browser',
+            hint: 'Open a rendered Browser surface',
+            icon: Globe,
+            disabled: mutationBusy,
+            onPress: () => void applyMutation({ action: 'create', surface_type: 'browser' })
+          },
+          {
+            label: 'New annotation',
+            hint: 'Add a workspace note',
+            icon: FilePlus2,
+            closeBeforePress: true,
+            onPress: () => setComposerOpen(true)
+          }
+        ]}
+      />
       <MobileMaestroAnnotationComposer
         visible={composerOpen}
         text={annotationText}

@@ -39,7 +39,7 @@ import {
   Keyboard as KeyboardIcon,
   MessageSquare,
   Monitor,
-  PanelsTopLeft,
+  Workflow,
   MoreHorizontal,
   Plus,
   RefreshCw,
@@ -4487,7 +4487,7 @@ export default function SessionScreen() {
                   }
                   testID="mobile-maestro-system-tab"
                 >
-                  <PanelsTopLeft size={16} color={colors.textSecondary} strokeWidth={2.1} />
+                  <Workflow size={16} color={colors.textSecondary} strokeWidth={2} />
                 </Pressable>
                 {visibleTabs.map((t) => (
                   <Pressable

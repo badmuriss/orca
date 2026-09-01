@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act, cleanup, render } from '@testing-library/react'
+import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { callRuntimeRpc } = vi.hoisted(() => ({ callRuntimeRpc: vi.fn() }))
@@ -107,5 +107,46 @@ describe('MaestroWorkspaceBrowserPreview', () => {
     await vi.waitFor(() =>
       expect(previewImage()?.getAttribute('src')).toBe('data:image/png;base64,def456')
     )
+  })
+
+  it('forwards pointer input to the same Browser page without focusing its exact tab', async () => {
+    const onInteract = vi.fn()
+    render(
+      <MaestroWorkspaceBrowserPreview
+        target={{ kind: 'local' }}
+        pageId="page-1"
+        receiptRevision={1}
+        selected
+        onInteract={onInteract}
+      />
+    )
+    await vi.waitFor(() => expect(previewImage()).not.toBeNull())
+    callRuntimeRpc.mockClear()
+    const image = previewImage() as HTMLImageElement
+    Object.defineProperties(image, {
+      naturalWidth: { configurable: true, value: 800 },
+      naturalHeight: { configurable: true, value: 400 }
+    })
+    image.getBoundingClientRect = () => ({ left: 10, top: 20, width: 400, height: 200 }) as DOMRect
+
+    fireEvent.pointerDown(image, { button: 0, clientX: 210, clientY: 120 })
+
+    await vi.waitFor(() => expect(callRuntimeRpc).toHaveBeenCalledTimes(2))
+    expect(callRuntimeRpc).toHaveBeenNthCalledWith(
+      1,
+      { kind: 'local' },
+      'browser.mouseMove',
+      { page: 'page-1', x: 400, y: 200 },
+      { timeoutMs: 15_000, suppressFeatureInteraction: true }
+    )
+    expect(callRuntimeRpc).toHaveBeenNthCalledWith(
+      2,
+      { kind: 'local' },
+      'browser.mouseDown',
+      { page: 'page-1', button: 'left' },
+      { timeoutMs: 15_000, suppressFeatureInteraction: true }
+    )
+    expect(onInteract).toHaveBeenCalledOnce()
+    expect(callRuntimeRpc.mock.calls.some((call) => call[1] === 'browser.tabSwitch')).toBe(false)
   })
 })

@@ -84,6 +84,45 @@ function formalTaskIdBySurface(
   )
 }
 
+function formalTaskLabelBySurface(
+  projection: MaestroAgentFormalProjection | null | undefined,
+  taskIdBySurface: ReadonlyMap<string, string>
+): ReadonlyMap<string, string> {
+  if (!projection) {
+    return new Map()
+  }
+  const labelsByTaskId = new Map(
+    projection.nodes.flatMap((node) =>
+      node.type === 'task' && node.taskId && node.title.trim()
+        ? [[node.taskId, node.title.trim()] as const]
+        : []
+    )
+  )
+  return new Map(
+    [...taskIdBySurface].flatMap(([surfaceId, taskId]) => {
+      const label = labelsByTaskId.get(taskId)
+      return label ? [[surfaceId, label] as const] : []
+    })
+  )
+}
+
+function meaningfulFunctionLabel(...candidates: (string | undefined)[]): string {
+  for (const candidate of candidates) {
+    const label = candidate?.trim()
+    if (!label) {
+      continue
+    }
+    if (/^(?:agent|worker|task)$/i.test(label)) {
+      continue
+    }
+    if (/^(?:worker[-_])?task[_-][a-z0-9_-]+$/i.test(label)) {
+      continue
+    }
+    return label
+  }
+  return ''
+}
+
 export function projectMaestroAgentTopology(params: {
   surfaces: Readonly<Record<string, WorkspaceSurface>>
   orchestrationByPaneKey: Readonly<Record<string, AgentStatusOrchestrationContext>>
@@ -96,6 +135,7 @@ export function projectMaestroAgentTopology(params: {
   const surfaceByPaneKey = uniqueSurfaceByPaneKey(terminals)
   const surfaceByHandle = uniqueSurfaceByTerminalHandle(terminals, params.terminalHandleByPaneKey)
   const formalTaskIds = formalTaskIdBySurface(params.formalProjection, surfaceByHandle)
+  const formalTaskLabels = formalTaskLabelBySurface(params.formalProjection, formalTaskIds)
   const projectedFormalRelations = formalRelationsFromProjection(
     params.formalProjection,
     surfaceByHandle
@@ -224,11 +264,12 @@ export function projectMaestroAgentTopology(params: {
   const formalLabels = formalLabelCandidates(formalRelations)
   const nodes = terminals.flatMap((terminal): CanvasAgentNode[] => {
     const orchestration = params.orchestrationByPaneKey[terminal.paneKey]
-    const functionLabel =
-      orchestration?.displayName?.trim() ||
-      orchestration?.taskTitle?.trim() ||
-      formalLabels.get(terminal.surfaceId) ||
-      ''
+    const functionLabel = meaningfulFunctionLabel(
+      orchestration?.displayName,
+      orchestration?.taskTitle,
+      formalTaskLabels.get(terminal.surfaceId),
+      formalLabels.get(terminal.surfaceId)
+    )
     const inCoordinatorLineage =
       terminal.surfaceId === coordinatorSurfaceId || coordinatorDescendants.has(terminal.surfaceId)
     const parentSurfaceId = parentBySurfaceId.get(terminal.surfaceId)

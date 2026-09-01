@@ -2,9 +2,21 @@
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { MaestroRunProgressV2 } from '../../../../shared/maestro-run-progress'
+import type {
+  MaestroRunProgress,
+  MaestroRunProgressV2
+} from '../../../../shared/maestro-run-progress'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { MaestroWorkspaceHarnessOverlay } from './MaestroWorkspaceHarnessOverlay'
+
+const humanReview = {
+  status: 'ready' as const,
+  reviews: [],
+  error: null,
+  refresh: vi.fn(async () => undefined),
+  transition: vi.fn(async () => undefined),
+  focusBrowser: vi.fn(async () => undefined)
+}
 
 const activeProgress: MaestroRunProgressV2 = {
   schema_version: 2,
@@ -68,6 +80,44 @@ const activeProgress: MaestroRunProgressV2 = {
   }
 }
 
+const settledLegacyProgress: MaestroRunProgress = {
+  available: true,
+  authority: {
+    runId: 'run-legacy',
+    workspace: { executionHostId: 'local', workspaceKey: 'worktree:legacy' },
+    revision: 5
+  },
+  summary: {
+    schema_version: 1,
+    state: 'partial',
+    progress_percent: 60,
+    task_counts: {
+      approved: 6,
+      running: 0,
+      input_required: 0,
+      blocked: 0,
+      pending: 0,
+      failed: 4
+    },
+    current_tasks: [],
+    next_tasks: [],
+    cleanup: {
+      pending: { count: 0, ids: [], truncated: false },
+      unverifiable: { count: 0, ids: [], truncated: false },
+      failed: { count: 0, ids: [], truncated: false },
+      retained: { count: 0, ids: [], truncated: false }
+    },
+    last_activity: null,
+    blockers: Array.from({ length: 4 }, (_, index) => ({
+      task_id: `failed-task-${index}`,
+      attempt_id: null,
+      finding_ref: null,
+      cleanup_id: null
+    })),
+    material_findings: []
+  }
+}
+
 function renderOverlay(
   overrides: Partial<React.ComponentProps<typeof MaestroWorkspaceHarnessOverlay>> = {}
 ): ReturnType<typeof render> {
@@ -79,6 +129,7 @@ function renderOverlay(
         visibility="expanded"
         onVisibilityChange={vi.fn()}
         onActivateReference={() => true}
+        humanReview={humanReview}
         {...overrides}
       />
     </TooltipProvider>
@@ -147,6 +198,59 @@ describe('MaestroWorkspaceHarnessOverlay', () => {
     expect(screen.getByText(/Cleanup is unverifiable/)).not.toBeNull()
   })
 
+  it('separates deliverable readiness from operational reliability', () => {
+    renderOverlay({
+      progress: {
+        ...activeProgress,
+        deliverables: { completed: 2, total: 2, progress_percent: 100 },
+        operational_reliability: {
+          successful: 1,
+          failed: 1,
+          superseded: 1,
+          unverifiable: 1
+        }
+      }
+    })
+
+    expect(screen.getByText('Deliverable readiness')).not.toBeNull()
+    expect(
+      screen.getByText(/1 successful · 1 failed · 1 superseded · 1 unverifiable/)
+    ).not.toBeNull()
+  })
+
+  it('preserves urgent review count while compact or hidden', () => {
+    const urgentReview = {
+      ...humanReview,
+      reviews: [{ state: 'needs_input' } as never]
+    }
+    const { rerender } = renderOverlay({ visibility: 'compact', humanReview: urgentReview })
+    expect(screen.getByText('1 review')).not.toBeNull()
+
+    rerender(
+      <TooltipProvider>
+        <MaestroWorkspaceHarnessOverlay
+          progress={activeProgress}
+          authorityUnavailable={false}
+          visibility="hidden"
+          onVisibilityChange={vi.fn()}
+          onActivateReference={() => true}
+          humanReview={urgentReview}
+        />
+      </TooltipProvider>
+    )
+    expect(screen.getByText('1 review')).not.toBeNull()
+  })
+
+  it('shows settled legacy failures as completed work instead of blocked items', () => {
+    renderOverlay({ progress: settledLegacyProgress })
+
+    expect(screen.getByText('Completed with failures')).not.toBeNull()
+    expect(screen.getByText('10 of 10 tasks')).not.toBeNull()
+    expect(screen.getByText('100%')).not.toBeNull()
+    expect(screen.queryByText(/Blocked item/)).toBeNull()
+    expect(screen.queryByText(/failed-task-/)).toBeNull()
+  })
+
   it('compacts, hides, and restores without mutating Run state', () => {
     const changeVisibility = vi.fn()
     const { rerender } = renderOverlay({
@@ -165,6 +269,7 @@ describe('MaestroWorkspaceHarnessOverlay', () => {
           visibility="hidden"
           onVisibilityChange={changeVisibility}
           onActivateReference={() => true}
+          humanReview={humanReview}
         />
       </TooltipProvider>
     )

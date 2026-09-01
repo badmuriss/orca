@@ -9,12 +9,12 @@ export function createMobileMaestroProgressStyles(colors: MobileThemeColors) {
       left: spacing.md,
       right: spacing.md,
       maxWidth: 380,
-      minHeight: 72,
+      minHeight: 96,
       paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
+      paddingVertical: spacing.md,
       borderWidth: 1,
       borderColor: colors.borderSubtle,
-      borderRadius: radii.card,
+      borderRadius: 10,
       backgroundColor: colors.bgPanel,
       zIndex: 35,
       elevation: 8
@@ -24,13 +24,39 @@ export function createMobileMaestroProgressStyles(colors: MobileThemeColors) {
       flex: 1,
       color: colors.textPrimary,
       fontSize: typography.bodySize,
-      fontWeight: '700'
+      fontWeight: '600',
+      letterSpacing: -0.1
     },
-    summaryMeta: {
-      marginTop: spacing.xs,
-      color: colors.textSecondary,
-      fontSize: typography.metaSize
+    summaryMetaRow: {
+      marginTop: spacing.sm,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: spacing.sm
     },
+    summaryStatus: { color: colors.textSecondary, fontSize: typography.metaSize },
+    summaryProgress: {
+      color: colors.textPrimary,
+      fontSize: typography.metaSize,
+      fontWeight: '600'
+    },
+    summaryProgressTrack: {
+      height: 3,
+      marginTop: spacing.sm,
+      overflow: 'hidden',
+      borderRadius: 2,
+      backgroundColor: colors.bgRaised,
+      flexDirection: 'row'
+    },
+    summaryProgressFill: { height: 3, borderRadius: 2, backgroundColor: colors.textPrimary },
+    summaryFooter: {
+      marginTop: spacing.sm,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm
+    },
+    summaryCounts: { flex: 1, color: colors.textMuted, fontSize: 10 },
+    summaryWarning: { color: colors.statusAmber, fontSize: 10, fontWeight: '600' },
     statusRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
     statusDot: { width: 8, height: 8, borderRadius: 4 },
     statusNeutral: { backgroundColor: colors.textSecondary },

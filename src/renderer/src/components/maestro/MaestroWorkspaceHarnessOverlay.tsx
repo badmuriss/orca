@@ -1,5 +1,6 @@
 import { Gauge } from 'lucide-react'
 import { useState } from 'react'
+import { legacyMaestroTaskProgress } from '../../../../shared/maestro-run-progress'
 import { Badge } from '@/components/ui/badge'
 import { translate } from '@/i18n/i18n'
 import {
@@ -9,6 +10,8 @@ import {
   TechnicalDisclosure
 } from './MaestroRunProgressSections'
 import { MaestroStatePip } from './MaestroWindowFrame'
+import { MaestroHumanReview, urgentHumanReviewCount } from './MaestroHumanReview'
+import type { MaestroHumanReviewResource } from './useMaestroHumanReview'
 import type { MaestroRunPanelVisibility } from './maestro-run-panel-visibility'
 import {
   availableLegacyRunProgress,
@@ -29,6 +32,7 @@ type OverlayProps = {
   visibility: MaestroRunPanelVisibility
   onVisibilityChange: (visibility: MaestroRunPanelVisibility) => void
   onActivateReference: (reference: string) => boolean
+  humanReview: MaestroHumanReviewResource
 }
 
 export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.Element {
@@ -52,6 +56,7 @@ export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.E
       ? legacyStateLabel(legacyProgress)
       : V2_STATE_LABELS.outcome_unknown()
   const urgent = state === 'blocked' || state === 'input_required' || state === 'outcome_unknown'
+  const urgentReviews = urgentHumanReviewCount(props.humanReview.reviews)
 
   if (props.visibility === 'hidden') {
     return (
@@ -68,6 +73,11 @@ export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.E
         <MaestroStatePip tone={maestroStateTone(state)} />
         <span className="truncate text-xs font-medium text-foreground">{title}</span>
         <span className="shrink-0 text-[10px] text-muted-foreground">{stateLabel}</span>
+        {urgentReviews > 0 ? (
+          <Badge variant="outline" className="shrink-0">
+            {urgentReviews} review
+          </Badge>
+        ) : null}
         {urgent ? <span className="sr-only">{stateLabel}</span> : null}
       </button>
     )
@@ -91,18 +101,16 @@ export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.E
     )
   }
 
+  const legacyTaskProgress = legacyProgress
+    ? legacyMaestroTaskProgress(legacyProgress.summary)
+    : null
   const completed = humanProgress
     ? humanProgress.execution.completed
-    : (legacyProgress?.summary.task_counts.approved ?? 0)
-  const total = humanProgress
-    ? humanProgress.execution.total
-    : Object.values(legacyProgress?.summary.task_counts ?? {}).reduce(
-        (sum, count) => sum + count,
-        0
-      )
+    : (legacyTaskProgress?.completed ?? 0)
+  const total = humanProgress ? humanProgress.execution.total : (legacyTaskProgress?.total ?? 0)
   const percent = humanProgress
     ? humanProgress.execution.progress_percent
-    : legacyProgress?.summary.progress_percent
+    : legacyTaskProgress?.percent
   const rows = humanProgress ? humanProgressRows(humanProgress) : null
   const compactDetail =
     rows?.blocked[0]?.detail ??
@@ -143,6 +151,11 @@ export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.E
         <Badge variant="outline" className="shrink-0">
           {stateLabel}
         </Badge>
+        {urgentReviews > 0 ? (
+          <Badge variant="outline" className="shrink-0">
+            {urgentReviews} review
+          </Badge>
+        ) : null}
         <RunPanelControl
           label={translate(
             'auto.components.maestro.MaestroWorkspaceHarnessOverlay.expandRunPanel',
@@ -217,6 +230,26 @@ export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.E
         />
       </header>
       <div className="mt-3 space-y-1.5">
+        {humanProgress?.deliverables ? (
+          <div className="space-y-1.5">
+            <div className="flex items-baseline justify-between gap-3 text-[11px]">
+              <span className="font-medium text-foreground">Deliverable readiness</span>
+              <span className="tabular-nums text-muted-foreground">
+                {humanProgress.deliverables.completed}/{humanProgress.deliverables.total}
+              </span>
+            </div>
+            <ProgressMeter {...humanProgress.deliverables} />
+          </div>
+        ) : null}
+        {humanProgress?.operational_reliability ? (
+          <p className="text-[11px] text-muted-foreground">
+            <span className="font-medium text-foreground">Reliability</span>{' '}
+            {humanProgress.operational_reliability.successful} successful ·{' '}
+            {humanProgress.operational_reliability.failed} failed ·{' '}
+            {humanProgress.operational_reliability.superseded} superseded ·{' '}
+            {humanProgress.operational_reliability.unverifiable} unverifiable
+          </p>
+        ) : null}
         <div className="flex items-baseline justify-between gap-3">
           <span className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
             <Gauge className="size-3.5 text-muted-foreground" />
@@ -312,6 +345,14 @@ export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.E
         ) : legacyProgress ? (
           <LegacyRunProgressSections progress={legacyProgress} onActivate={activate} />
         ) : null}
+        <MaestroHumanReview
+          status={props.humanReview.status}
+          reviews={props.humanReview.reviews}
+          error={props.humanReview.error}
+          onRefresh={props.humanReview.refresh}
+          onTransition={props.humanReview.transition}
+          onFocusBrowser={props.humanReview.focusBrowser}
+        />
         <TechnicalDisclosure entries={technicalEntries} open={inspectedReference !== null} />
       </div>
     </aside>

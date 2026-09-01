@@ -4,25 +4,30 @@ import { colors, radii, spacing, typography } from '../theme/mobile-theme'
 export const mobileMaestroScreenStyles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bgBase },
   toolbar: {
-    minHeight: 58,
-    paddingHorizontal: spacing.sm,
+    minHeight: 62,
+    paddingHorizontal: spacing.xs,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
+    gap: 2,
     backgroundColor: colors.bgPanel,
     zIndex: 50
   },
   iconButton: {
-    width: 44,
-    height: 44,
+    width: 42,
+    height: 42,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: radii.button
   },
-  heading: { flex: 1 },
-  title: { color: colors.textPrimary, fontSize: typography.titleSize, fontWeight: '700' },
+  heading: { flex: 1, minWidth: 0, paddingLeft: spacing.xs },
+  title: {
+    color: colors.textPrimary,
+    fontSize: 17,
+    fontWeight: '700',
+    letterSpacing: -0.25
+  },
   subtitle: { color: colors.textMuted, fontSize: typography.metaSize },
   center: {
     flex: 1,

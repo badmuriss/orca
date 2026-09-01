@@ -1,7 +1,9 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { FileText, Globe, SquareTerminal } from 'lucide-react-native'
 import type { WorkspaceSurface } from '../../../src/shared/maestro-workspace-canvas'
+import type { RpcClient } from '../transport/rpc-client'
 import { colors, radii, spacing, typography } from '../theme/mobile-theme'
+import { MobileMaestroTerminalPreview } from './MobileMaestroTerminalPreview'
 
 const TONE_COLOR = {
   decision: colors.statusGreen,
@@ -21,11 +23,17 @@ export function MobileMaestroSurfaceCard({
   surface,
   selected,
   preview,
+  client,
+  worktreeId,
+  livePreview,
   onPress
 }: {
   surface: WorkspaceSurface
   selected: boolean
   preview?: string
+  client: RpcClient | null
+  worktreeId: string | null
+  livePreview: boolean
   onPress: () => void
 }) {
   const tone = surface.binding.kind === 'content' ? surface.binding.annotation?.tone : undefined
@@ -62,21 +70,43 @@ export function MobileMaestroSurfaceCard({
       testID={`maestro-surface-${surface.id.unified_tab_id}`}
     >
       <View style={styles.header}>
-        <Icon size={15} color={tone ? TONE_COLOR[tone] : colors.textSecondary} />
+        <View style={styles.iconFrame}>
+          <Icon size={13} color={tone ? TONE_COLOR[tone] : colors.textSecondary} />
+        </View>
         <Text style={styles.title} numberOfLines={1}>
           {surface.title}
         </Text>
-        <View style={[styles.availability, surface.availability === 'available' && styles.live]} />
+        <View style={styles.availabilityLabel}>
+          <View
+            style={[styles.availability, surface.availability === 'available' && styles.live]}
+          />
+          <Text style={styles.availabilityText}>
+            {surface.availability === 'available' ? 'Live' : surface.availability}
+          </Text>
+        </View>
       </View>
-      {tone ? (
-        <Text style={[styles.tone, { color: TONE_COLOR[tone] }]}>{TONE_LABEL[tone]}</Text>
-      ) : null}
-      <Text style={styles.preview} numberOfLines={5}>
-        {preview ?? detail}
-      </Text>
-      <Text style={styles.meta} numberOfLines={1}>
-        {surface.content_type} · rev {surface.revision}
-      </Text>
+      {surface.binding.kind === 'terminal' ? (
+        <MobileMaestroTerminalPreview
+          active={livePreview && surface.binding.liveness === 'live'}
+          client={client}
+          terminalTabId={surface.binding.terminal_tab_id}
+          paneKey={surface.binding.pane_key}
+          sessionId={surface.binding.session_id}
+          worktreeId={worktreeId}
+        />
+      ) : (
+        <View style={styles.contentPreview}>
+          {tone ? (
+            <Text style={[styles.tone, { color: TONE_COLOR[tone] }]}>{TONE_LABEL[tone]}</Text>
+          ) : null}
+          <Text style={styles.preview} numberOfLines={7}>
+            {preview ?? detail}
+          </Text>
+          <Text style={styles.meta} numberOfLines={1}>
+            {surface.content_type} · rev {surface.revision}
+          </Text>
+        </View>
+      )}
     </Pressable>
   )
 }
@@ -88,16 +118,40 @@ const styles = StyleSheet.create({
     borderColor: colors.borderSubtle,
     borderRadius: radii.row,
     backgroundColor: colors.editorSurface,
-    padding: spacing.md
+    overflow: 'hidden'
   },
-  selected: { borderColor: colors.surfaceBright, borderWidth: 2 },
+  selected: { borderColor: colors.accentBlue, borderWidth: 2 },
   pressed: { opacity: 0.82 },
-  header: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  title: { flex: 1, color: colors.textPrimary, fontSize: typography.bodySize, fontWeight: '600' },
+  header: {
+    minHeight: 40,
+    paddingHorizontal: spacing.sm + 2,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.borderSubtle,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.bgPanel
+  },
+  iconFrame: {
+    width: 22,
+    height: 22,
+    borderRadius: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.bgRaised
+  },
+  title: { flex: 1, color: colors.textPrimary, fontSize: 13, fontWeight: '600' },
+  availabilityLabel: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   availability: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.statusAmber },
   live: { backgroundColor: colors.statusGreen },
+  availabilityText: {
+    color: colors.textMuted,
+    fontSize: 9,
+    fontWeight: '600',
+    textTransform: 'uppercase'
+  },
+  contentPreview: { flex: 1, padding: spacing.md },
   tone: {
-    marginTop: spacing.sm,
     fontSize: 10,
     fontWeight: '700',
     textTransform: 'uppercase',

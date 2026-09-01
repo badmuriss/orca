@@ -2,6 +2,7 @@ import type {
   MaestroRunProgress,
   MaestroRunProgressV2
 } from '../../../src/shared/maestro-run-progress'
+import { legacyMaestroTaskProgress } from '../../../src/shared/maestro-run-progress'
 import type { MobileMaestroRunProgress } from './mobile-maestro-run-progress'
 
 export type MobileMaestroProgressTone = 'neutral' | 'success' | 'warning' | 'danger'
@@ -21,6 +22,8 @@ export type MobileMaestroProgressModel = {
   progressPercent?: number
   progressLabel: string
   countsLabel: string
+  reliabilityLabel: string
+  reliabilityTone: MobileMaestroProgressTone
   current: MobileMaestroProgressEntry[]
   completed: MobileMaestroProgressEntry[]
   blocked: MobileMaestroProgressEntry[]
@@ -68,6 +71,8 @@ function toneForLegacy(state: string): MobileMaestroProgressTone {
 
 function buildV2Model(progress: MaestroRunProgressV2): MobileMaestroProgressModel {
   const execution = progress.execution
+  const deliverables = progress.deliverables
+  const reliability = progress.operational_reliability
   const warnings: MobileMaestroProgressEntry[] = []
   if (progress.projection_health.state !== 'healthy') {
     warnings.push({
@@ -90,12 +95,22 @@ function buildV2Model(progress: MaestroRunProgressV2): MobileMaestroProgressMode
     title: progress.run.title,
     outcome: V2_OUTCOME_LABELS[execution.state],
     tone: toneForV2(execution.state),
-    progressPercent: execution.progress_percent,
-    progressLabel:
-      execution.progress_percent === undefined
+    progressPercent: deliverables?.progress_percent ?? execution.progress_percent,
+    progressLabel: deliverables
+      ? deliverables.progress_percent === undefined
+        ? 'No deliverables'
+        : `${deliverables.progress_percent}% · ${deliverables.completed}/${deliverables.total} deliverables`
+      : execution.progress_percent === undefined
         ? 'No tasks'
         : `${execution.progress_percent}% · ${execution.completed}/${execution.total} tasks`,
     countsLabel: v2CountsLabel(progress),
+    reliabilityLabel: reliability
+      ? operationalReliabilityLabel(reliability)
+      : 'Operational reliability unavailable',
+    reliabilityTone:
+      reliability && (reliability.failed > 0 || reliability.unverifiable > 0)
+        ? 'warning'
+        : 'neutral',
     current: progress.current.map((entry) => ({
       key: entry.reference,
       title: entry.title,
@@ -160,6 +175,8 @@ function buildLegacyModel(progress: MaestroRunProgress): MobileMaestroProgressMo
       tone: 'warning',
       progressLabel: 'Update or reconnect to inspect this Run',
       countsLabel: 'No current progress is available.',
+      reliabilityLabel: 'Operational reliability unavailable',
+      reliabilityTone: 'warning',
       current: [],
       completed: [],
       blocked: [],
@@ -171,6 +188,7 @@ function buildLegacyModel(progress: MaestroRunProgress): MobileMaestroProgressMo
   }
   const summary = progress.summary
   const taskCounts = summary.task_counts
+  const taskProgress = legacyMaestroTaskProgress(summary)
   const cleanupCount = Object.values(summary.cleanup).reduce(
     (total, group) => total + group.count,
     0
@@ -185,12 +203,25 @@ function buildLegacyModel(progress: MaestroRunProgress): MobileMaestroProgressMo
       ]
     : []
   return {
-    title: 'Harness progress',
-    outcome: humanize(summary.state),
-    tone: toneForLegacy(summary.state),
-    progressPercent: summary.progress_percent,
-    progressLabel: `${summary.progress_percent}%`,
+    title: 'Run progress',
+    outcome: taskProgress.allSettled
+      ? taskProgress.hasFailures
+        ? 'Completed with failures'
+        : 'Completed'
+      : humanize(summary.state),
+    tone: taskProgress.allSettled
+      ? taskProgress.hasFailures
+        ? 'danger'
+        : 'success'
+      : toneForLegacy(summary.state),
+    progressPercent: taskProgress.percent,
+    progressLabel:
+      taskProgress.percent === undefined
+        ? 'No tasks'
+        : `${taskProgress.percent}% · ${taskProgress.completed}/${taskProgress.total} tasks`,
     countsLabel: legacyCountsLabel(taskCounts),
+    reliabilityLabel: 'Operational reliability requires a newer Orca host',
+    reliabilityTone: 'warning',
     current: summary.current_tasks.map((entry, index) => ({
       key: `current-${index}`,
       title: 'Active task',
@@ -198,7 +229,7 @@ function buildLegacyModel(progress: MaestroRunProgress): MobileMaestroProgressMo
       state: humanize(entry.status)
     })),
     completed: [],
-    blocked: summary.blockers.map((_, index) => ({
+    blocked: summary.blockers.slice(0, taskCounts.blocked).map((_, index) => ({
       key: `blocked-${index}`,
       title: 'Blocked task',
       detail: 'Blocker details require a newer Orca host.'
@@ -217,6 +248,23 @@ function buildLegacyModel(progress: MaestroRunProgress): MobileMaestroProgressMo
       { label: 'Revision', value: String(progress.authority.revision) }
     ]
   }
+}
+
+function operationalReliabilityLabel(
+  reliability: NonNullable<MaestroRunProgressV2['operational_reliability']>
+): string {
+  const labels = [
+    ['successful', reliability.successful],
+    ['failed', reliability.failed],
+    ['superseded', reliability.superseded],
+    ['unverifiable', reliability.unverifiable]
+  ] as const
+  return (
+    labels
+      .filter(([, count]) => count > 0)
+      .map(([label, count]) => `${count} ${label}`)
+      .join(' · ') || 'No operational attempts'
+  )
 }
 
 function legacyCountsLabel(counts: {

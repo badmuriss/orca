@@ -5,6 +5,7 @@ import type {
   MaestroRunProgressReference,
   MaestroRunProgressV2
 } from '../../../../shared/maestro-run-progress'
+import { legacyMaestroTaskProgress } from '../../../../shared/maestro-run-progress'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { translate } from '@/i18n/i18n'
@@ -53,6 +54,18 @@ export function availableLegacyRunProgress(
 export function legacyStateLabel(
   progress: Extract<MaestroRunProgress, { available: true }>
 ): string {
+  const taskProgress = legacyMaestroTaskProgress(progress.summary)
+  if (taskProgress.allSettled) {
+    return taskProgress.hasFailures
+      ? translate(
+          'auto.components.maestro.MaestroWorkspaceHarnessOverlay.stateCompletedWithFailures',
+          'Completed with failures'
+        )
+      : translate(
+          'auto.components.maestro.MaestroWorkspaceHarnessOverlay.stateCompleted',
+          'Completed'
+        )
+  }
   const state = progress.summary.state
   const labels: Record<typeof state, string> = {
     active: translate(
@@ -183,42 +196,43 @@ export function LegacyRunProgressSections({
   progress: Extract<MaestroRunProgress, { available: true }>
   onActivate: (reference: string) => void
 }): React.JSX.Element {
-  const taskRows = [...progress.summary.current_tasks, ...progress.summary.next_tasks].map(
-    (task, index): MaestroRunProgressRow => ({
+  const visibleCurrentTasks = progress.summary.current_tasks.filter((task) => {
+    const count = progress.summary.task_counts[task.status]
+    return count > 0
+  })
+  const taskRows = [...visibleCurrentTasks, ...progress.summary.next_tasks].map(
+    (task): MaestroRunProgressRow => ({
       key: `${task.task_id}:${task.attempt_id ?? ''}`,
       reference: task.task_id,
-      title: translate(
-        'auto.components.maestro.MaestroWorkspaceHarnessOverlay.legacyTask',
-        'Task {{value0}}',
-        { value0: index + 1 }
-      ),
+      title: legacyTaskStatusTitle(task.status),
       detail: translate(
         'auto.components.maestro.MaestroWorkspaceHarnessOverlay.legacyTaskDetail',
-        'Detailed activity is unavailable from this peer.'
+        'This older host does not publish a human task summary.'
       ),
       state: task.status
     })
   )
-  const blockedRows = progress.summary.blockers.map((reference, index) => ({
-    key: `blocked:${index}`,
-    reference: reference.task_id ?? legacyReferenceValue(reference),
-    title: translate(
-      'auto.components.maestro.MaestroWorkspaceHarnessOverlay.legacyBlockedItem',
-      'Blocked item {{value0}}',
-      { value0: index + 1 }
-    ),
-    detail: translate(
-      'auto.components.maestro.MaestroWorkspaceHarnessOverlay.legacyBlockedDetail',
-      'The older peer did not provide a human blocker summary.'
-    ),
-    state: 'blocked'
-  }))
+  const blockedRows = progress.summary.blockers
+    .slice(0, progress.summary.task_counts.blocked)
+    .map((reference, index) => ({
+      key: `blocked:${index}`,
+      reference: reference.task_id ?? legacyReferenceValue(reference),
+      title: translate(
+        'auto.components.maestro.MaestroWorkspaceHarnessOverlay.legacyBlockedTask',
+        'Blocked task'
+      ),
+      detail: translate(
+        'auto.components.maestro.MaestroWorkspaceHarnessOverlay.legacyBlockedDetail',
+        'This older host does not publish a human blocker summary.'
+      ),
+      state: 'blocked'
+    }))
   return (
     <>
       <RunProgressSection
         label={translate(
           'auto.components.maestro.MaestroWorkspaceHarnessOverlay.legacyProgress',
-          'Legacy progress'
+          'Current work'
         )}
         rows={taskRows}
         onActivate={onActivate}
@@ -233,4 +247,15 @@ export function LegacyRunProgressSections({
       />
     </>
   )
+}
+
+function legacyTaskStatusTitle(status: MaestroRunProgressRow['state']): string {
+  const labels: Partial<Record<NonNullable<MaestroRunProgressRow['state']>, string>> = {
+    running: 'Running task',
+    input_required: 'Waiting for input',
+    blocked: 'Blocked task',
+    pending: 'Queued task',
+    failed: 'Failed task'
+  }
+  return labels[status ?? 'pending'] ?? 'Task'
 }

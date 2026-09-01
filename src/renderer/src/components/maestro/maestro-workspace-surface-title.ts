@@ -5,13 +5,13 @@ export function resolveMaestroWorkspaceSurfaceTitle(
 ): string {
   const functionLabel = agentFunctionLabel?.trim()
   const taskId = agentTaskId?.trim()
-  if (!functionLabel || !taskId) {
+  if (!functionLabel) {
     return title
   }
-  const generatedTitles = new Set([
-    `worker-${taskId}`,
-    `worker-task_${taskId}`,
-    `worker-task-${taskId}`
-  ])
-  return generatedTitles.has(title) ? functionLabel : title
+  const normalizedTitle = title.trim()
+  const generatedTitles = taskId
+    ? new Set([`worker-${taskId}`, `worker-task_${taskId}`, `worker-task-${taskId}`, taskId])
+    : new Set<string>()
+  const opaqueWorkerTitle = /^(?:worker[-_])?task[_-][a-z0-9_-]+(?:\s*·.*)?$/i.test(normalizedTitle)
+  return generatedTitles.has(normalizedTitle) || opaqueWorkerTitle ? functionLabel : title
 }

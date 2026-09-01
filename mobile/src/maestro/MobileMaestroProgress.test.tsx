@@ -9,16 +9,11 @@ import type {
 import { MobileMaestroProgress } from './MobileMaestroProgress'
 import type { MobileMaestroRunProgress } from './mobile-maestro-run-progress'
 
-const { useColorSchemeMock } = vi.hoisted(() => ({
-  useColorSchemeMock: vi.fn<() => 'light' | 'dark' | null>(() => 'dark')
-}))
-
 vi.mock('react-native', () => ({
   Pressable: 'Pressable',
   ScrollView: 'ScrollView',
   StyleSheet: { create: <T,>(styles: T) => styles },
   Text: 'Text',
-  useColorScheme: useColorSchemeMock,
   View: 'View'
 }))
 vi.mock('lucide-react-native', () => ({
@@ -27,6 +22,7 @@ vi.mock('lucide-react-native', () => ({
   X: 'X'
 }))
 vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn().mockResolvedValue(undefined) }))
+vi.mock('expo-crypto', () => ({ randomUUID: () => '00000000-0000-4000-8000-000000000001' }))
 vi.mock('../components/BottomDrawer', () => ({ BottomDrawer: 'BottomDrawer' }))
 
 const CLEAN_COUNTS = {
@@ -140,7 +136,6 @@ describe('MobileMaestroProgress', () => {
   afterEach(() => {
     act(() => renderer?.unmount())
     renderer = null
-    useColorSchemeMock.mockReturnValue('dark')
     vi.clearAllMocks()
   })
 
@@ -240,12 +235,46 @@ describe('MobileMaestroProgress', () => {
   it('keeps the v1 fallback bounded and hides raw task IDs from primary content', () => {
     const text = renderProgress(legacyProgress())
 
-    expect(text).toContain('Harness progress')
-    expect(text).toContain('25%')
+    expect(text).toContain('Run progress')
+    expect(text).toContain('25% · 1/4 tasks')
     expect(text).toContain('Active task')
     expect(text).toContain('Queued task')
     expect(text).not.toContain('raw-current-id')
     expect(text).not.toContain('raw-next-id')
+  })
+
+  it('treats terminal legacy failures as settled without inventing blockers', () => {
+    const payload = legacyProgress()
+    if (payload.schemaVersion !== 1 || !payload.progress.available) {
+      throw new Error('Expected available legacy progress')
+    }
+    payload.progress.summary = {
+      ...payload.progress.summary,
+      state: 'partial',
+      progress_percent: 60,
+      task_counts: {
+        approved: 6,
+        running: 0,
+        input_required: 0,
+        blocked: 0,
+        pending: 0,
+        failed: 4
+      },
+      current_tasks: [],
+      next_tasks: [],
+      blockers: Array.from({ length: 4 }, (_, index) => ({
+        task_id: `failed-${index}`,
+        attempt_id: null,
+        finding_ref: null,
+        cleanup_id: null
+      }))
+    }
+
+    const text = renderProgress(payload)
+
+    expect(text).toContain('Completed with failures')
+    expect(text).toContain('100% · 10/10 tasks')
+    expect(text).not.toContain('Blocked task')
   })
 
   it('names an unavailable legacy outcome without inventing progress', () => {
@@ -271,14 +300,13 @@ describe('MobileMaestroProgress', () => {
     expect(renderer!.root.findByType('BottomDrawer').props.visible).toBe(true)
   })
 
-  it('applies the system light palette to the progress pane and its phone drawer', () => {
-    useColorSchemeMock.mockReturnValue('light')
+  it('keeps the progress surface on the dark Maestro canvas palette', () => {
     renderProgress(progressV2(), false)
     const summary = renderer!.root.findByProps({ testID: 'mobile-maestro-progress' })
     const drawer = renderer!.root.findByType('BottomDrawer')
 
-    expect(summary.props.style).toMatchObject({ backgroundColor: '#ffffff' })
-    expect(drawer.props.surfaceColor).toBe('#ffffff')
+    expect(summary.props.style).toMatchObject({ backgroundColor: '#1a1a1a' })
+    expect(drawer.props.surfaceColor).toBe('#111111')
   })
 
   it('copies technical identifiers from explicit controls', async () => {

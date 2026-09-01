@@ -152,6 +152,9 @@ export function MaestroWorkspaceSurfacePreview({
         target={runtimeTarget}
         pageId={binding.browser_page_id}
         receiptRevision={receiptRevision}
+        selected={selected}
+        previewMode={previewMode}
+        onInteract={onRequestTerminalInput}
       />
     )
   }

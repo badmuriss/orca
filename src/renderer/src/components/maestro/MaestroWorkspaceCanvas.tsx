@@ -41,6 +41,7 @@ import {
 } from './maestro-workspace-placement-state'
 import { useMaestroRunPanelVisibility } from './maestro-run-panel-visibility'
 import { useMaestroRunReferenceActivation } from './maestro-run-reference-activation'
+import { useMaestroHumanReview } from './useMaestroHumanReview'
 
 export function MaestroWorkspaceCanvas({
   target,
@@ -68,6 +69,7 @@ export function MaestroWorkspaceCanvas({
   const humanRunProgress = useMaestroWorkspaceHumanRunProgress(target, scope)
   const agentTopology = useMaestroWorkspaceAgentTopology(result?.snapshot ?? null, projection)
   const runProgress = humanRunProgress ?? projection?.runProgress ?? null
+  const humanReview = useMaestroHumanReview(target, projection)
   const [runPanelVisibility, setRunPanelVisibility] = useMaestroRunPanelVisibility(scope)
   const topologyLayoutNodes = useMemo(
     () =>
@@ -405,6 +407,7 @@ export function MaestroWorkspaceCanvas({
           visibility={runPanelVisibility}
           onVisibilityChange={setRunPanelVisibility}
           onActivateReference={activateRunReference}
+          humanReview={humanReview}
         />
       ) : null}
     </main>

@@ -4,6 +4,7 @@ import {
   workspaceSurfaceKey,
   type WorkspaceSurface
 } from '../../../src/shared/maestro-workspace-canvas'
+import type { RpcClient } from '../transport/rpc-client'
 import { colors } from '../theme/mobile-theme'
 import {
   projectMobileMaestroFrame,
@@ -29,6 +30,8 @@ export function MobileMaestroBoard({
   links,
   selectedKey,
   previews,
+  client,
+  worktreeId,
   onSelect,
   onViewportLayout
 }: {
@@ -40,12 +43,20 @@ export function MobileMaestroBoard({
   links: BoardLink[]
   selectedKey: string | null
   previews: Record<string, string>
+  client: RpcClient | null
+  worktreeId: string | null
   onSelect: (key: string) => void
   onViewportLayout: (size: { width: number; height: number }) => void
 }) {
   const frameByKey = new Map(
     surfaces.map((surface, index) => [workspaceSurfaceKey(surface.id), frames[index]!])
   )
+  const featuredSurfaceKey =
+    selectedKey ??
+    surfaces
+      .filter((surface) => surface.binding.kind === 'terminal')
+      .map((surface) => workspaceSurfaceKey(surface.id))[0] ??
+    (surfaces[0] ? workspaceSurfaceKey(surfaces[0].id) : null)
   return (
     <ScrollView
       horizontal
@@ -129,18 +140,20 @@ export function MobileMaestroBoard({
                 key={key}
                 style={{
                   position: 'absolute',
-                  left: projected.x - (frame.width - projected.width) / 2,
-                  top: projected.y - (frame.height - projected.height) / 2,
-                  width: frame.width,
-                  height: frame.height,
-                  overflow: 'hidden',
-                  transform: [{ scale: viewport.zoom }]
+                  left: projected.x,
+                  top: projected.y,
+                  width: Math.max(104, projected.width),
+                  height: Math.max(72, projected.height),
+                  overflow: 'hidden'
                 }}
               >
                 <MobileMaestroSurfaceCard
                   surface={surface}
                   selected={selectedKey === key}
                   preview={previews[key]}
+                  client={client}
+                  worktreeId={worktreeId}
+                  livePreview={featuredSurfaceKey === key}
                   onPress={() => onSelect(key)}
                 />
               </View>

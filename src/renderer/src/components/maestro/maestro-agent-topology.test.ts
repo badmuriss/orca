@@ -146,6 +146,70 @@ describe('Maestro agent topology', () => {
     ])
   })
 
+  it('skips generic runtime labels in favor of the formal task function', () => {
+    const coordinatorPaneKey = paneKey('terminal-coordinator', LEAF_COORDINATOR)
+    const workerPaneKey = paneKey('terminal-worker', LEAF_IMPLEMENTATION)
+    const topology = projectMaestroAgentTopology({
+      surfaces: {
+        coordinator: terminalSurface('terminal-coordinator', LEAF_COORDINATOR, 'Coordinator'),
+        worker: terminalSurface('terminal-worker', LEAF_IMPLEMENTATION, 'task_research')
+      },
+      terminalHandleByPaneKey: {
+        [coordinatorPaneKey]: 'handle-coordinator',
+        [workerPaneKey]: 'handle-worker'
+      },
+      orchestrationByPaneKey: {
+        [workerPaneKey]: orchestration({
+          taskId: 'task-research',
+          displayName: 'Agent',
+          taskTitle: 'Worker',
+          coordinatorHandle: 'handle-coordinator',
+          parentTerminalHandle: 'handle-coordinator',
+          orchestrationRunId: 'run-1'
+        })
+      },
+      formalProjection: {
+        runId: 'run-1',
+        nodes: [
+          {
+            id: 'task-node',
+            type: 'task',
+            title: 'Research open roles',
+            summary: 'Research open roles',
+            rawStatus: 'active',
+            status: 'active',
+            taskId: 'task-research',
+            executionHostId: 'local',
+            workspaceKey: WORKSPACE.workspace_key,
+            position: { x: 0, y: 0 },
+            live: true
+          },
+          {
+            id: 'attempt-node',
+            type: 'attempt',
+            title: 'Agent',
+            summary: 'Agent',
+            rawStatus: 'active',
+            status: 'active',
+            taskId: 'task-research',
+            terminalId: 'handle-worker',
+            executionHostId: 'local',
+            workspaceKey: WORKSPACE.workspace_key,
+            position: { x: 0, y: 0 },
+            live: true
+          }
+        ],
+        edges: []
+      }
+    })
+
+    expect(topology.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ surfaceId: 'worker', functionLabel: 'Research open roles' })
+      ])
+    )
+  })
+
   it('resolves a reminted parent only through its stable pane identity', () => {
     const currentCoordinatorPaneKey = paneKey('coordinator-reminted', LEAF_COORDINATOR)
     const staleCoordinatorPaneKey = paneKey('coordinator-original', LEAF_COORDINATOR)
