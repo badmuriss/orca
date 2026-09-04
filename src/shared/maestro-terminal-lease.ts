@@ -30,6 +30,8 @@ export type MaestroTerminalLaunchProfile = {
   effort: string | null
   permissionMode: string
   routeRef: string | null
+  serviceTier?: 'default' | 'fast' | null
+  environmentPolicy?: string | null
 }
 
 export type MaestroTerminalCleanupReceipt = {

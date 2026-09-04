@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { MaestroRunResourcesSchema } from './maestro-run-resource'
 import { containsAgentGraphControlCharacter } from './workspace-scope'
 
 export const MAESTRO_RUN_PROGRESS_LIST_LIMIT = 64
@@ -185,6 +186,7 @@ export const MaestroRunProgressV2Schema = z
     next: z.array(MaestroNextProgressSchema).max(MAESTRO_RUN_PROGRESS_LIST_LIMIT),
     blocked: z.array(MaestroBlockedProgressSchema).max(MAESTRO_RUN_PROGRESS_LIST_LIMIT),
     nested_activity: z.array(MaestroNestedProgressSchema).max(MAESTRO_RUN_PROGRESS_LIST_LIMIT),
+    resources: MaestroRunResourcesSchema.optional(),
     technical: z
       .object({
         execution_host_id: BoundedReferenceSchema,

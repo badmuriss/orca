@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { MaestroTerminalLease } from '../../../shared/maestro-terminal-lease'
 import type { OrchestrationNestedAgentActivity } from '../../../shared/orchestration-nested-agent-activity'
-import type { DispatchContextRow, MessageRow, RunRow, TaskRow } from './types'
+import type { ExactWorkerProviderSession } from '../../../shared/orchestration-worker-output'
+import { browserReceipt } from '../rpc/methods/maestro-workspace-canvas-session-fixtures'
+import type { DispatchContextRow, MessageRow, RunRow, TaskRow, WorkerDispatchRow } from './types'
 import { projectMaestroRunProgress } from './maestro-run-progress-projection'
 
 const run: RunRow = {
@@ -70,15 +72,16 @@ function lease(
   taskId: string,
   lifecycleState: MaestroTerminalLease['lifecycleState']
 ): MaestroTerminalLease {
+  const dispatchId = `dispatch-${taskId.replace(/^task-/, '')}`
   return {
     id: `lease-${taskId}`,
     requestId: `request-${taskId}`,
     executionHostId: 'local',
     workspaceKey: 'folder:one',
-    terminalHandle: `terminal-${taskId}`,
-    tabId: `tab-${taskId}`,
-    paneKey: `tab-${taskId}:leaf-1`,
-    ptyIncarnation: `pty-${taskId}:1`,
+    terminalHandle: `terminal-${dispatchId}`,
+    tabId: `tab-${dispatchId}`,
+    paneKey: `tab-${dispatchId}:leaf-1`,
+    ptyIncarnation: `pty-${dispatchId}:1`,
     processRootId: `process-${taskId}`,
     runId: run.id,
     taskId,
@@ -97,7 +100,7 @@ function lease(
     },
     parentLeaseId: null,
     spawnedBy: 'coordinator-1',
-    ownerPrincipal: `dispatch:dispatch-${taskId}`,
+    ownerPrincipal: `dispatch:${dispatchId}`,
     retentionPolicy: 'auto_release',
     lifecycleState,
     observation: null,
@@ -144,12 +147,17 @@ function project(overrides: Partial<Parameters<typeof projectMaestroRunProgress>
     dispatches: [],
     messages: [],
     terminalLeases: [],
+    workerDispatches: [],
+    browserSurfaces: [],
+    providerExecutions: [],
     nestedActivity: [],
     executionHostId: 'local',
     workspaceKey: 'folder:one',
     revision: 3,
     projectionHealth: { state: 'healthy', revision: 3 },
     cleanupHealth: { state: 'clean', count: 0 },
+    recoveredAuthority: false,
+    browserSurfaceKeys: new Map(),
     ...overrides
   })
 }
@@ -177,12 +185,44 @@ describe('Maestro Run progress projection', () => {
       started_at: '2026-08-28T10:01:00.000Z',
       updated_at: '2026-08-28T10:02:00.000Z'
     }
+    const worker: WorkerDispatchRow = {
+      dispatch_id: firstDispatch.id,
+      runtime_epoch: 'runtime-1',
+      state: 'succeeded',
+      stage: 'ready',
+      worktree_id: 'folder:one',
+      agent_terminal_handle: 'terminal-task-1',
+      setup_state: 'ready',
+      effects: '[]',
+      residual_resources: '[]',
+      start_options: '{}',
+      last_error: null,
+      created_at: '2026-08-28T10:01:00.000Z',
+      updated_at: '2026-08-28T10:02:00.000Z'
+    }
+    const provider: ExactWorkerProviderSession = {
+      paneKey: firstDispatch.assignee_pane_key as string,
+      processIncarnation: firstDispatch.process_incarnation as string,
+      agent: 'codex',
+      providerSession: { key: 'session_id', id: 'provider-session-1' },
+      observedAt: Date.parse('2026-08-28T10:02:00.000Z')
+    }
 
     const result = project({
       tasks: [second, first],
       dispatches: [firstDispatch],
       messages: [rejected, accepted],
       terminalLeases: [lease(first.id, 'active')],
+      workerDispatches: [worker],
+      browserSurfaces: [
+        browserReceipt({
+          runId: run.id,
+          taskId: first.id,
+          attemptId: firstDispatch.id
+        })
+      ],
+      providerExecutions: [{ dispatchId: firstDispatch.id, session: provider }],
+      browserSurfaceKeys: new Map([['browser-page-1', 'browser-surface-key']]),
       nestedActivity: [nested]
     })
 
@@ -198,6 +238,44 @@ describe('Maestro Run progress projection', () => {
       parent_reference: first.id,
       child_id: 'child-1'
     })
+    expect(new Set(result.resources?.map((resource) => resource.kind))).toEqual(
+      new Set([
+        'coordinator',
+        'task',
+        'attempt',
+        'dispatch',
+        'provider',
+        'terminal',
+        'browser',
+        'cleanup'
+      ])
+    )
+    expect(result.resources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'terminal',
+          parent_reference: 'attempt-task-1',
+          terminal_handle: 'terminal-dispatch-1',
+          liveness: 'live'
+        }),
+        expect.objectContaining({
+          kind: 'attempt',
+          reference: 'attempt-task-1',
+          parent_reference: firstDispatch.id
+        }),
+        expect.objectContaining({ kind: 'browser', surface_key: 'browser-surface-key' }),
+        expect.objectContaining({
+          kind: 'coordinator',
+          state: 'unverifiable',
+          detail: 'Coordinator handle has no matching live terminal lease.'
+        }),
+        expect.objectContaining({
+          kind: 'provider',
+          reference: 'provider-session-1',
+          state: 'completed'
+        })
+      ])
+    )
   })
 
   it('reports terminal Tasks at 100 percent while preserving orthogonal health warnings', () => {

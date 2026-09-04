@@ -163,7 +163,7 @@ function verifyWorkerSettlementActor(args: {
     !session ||
     !observation ||
     !attestation ||
-    attestation.eventName !== 'PreToolUse' ||
+    !isWorkerSettlementEvent(attestation.provider, attestation.eventName) ||
     attestation.provider !== session.agent ||
     attestation.providerSessionId !== session.providerSession.id
   ) {
@@ -189,6 +189,10 @@ function verifyWorkerSettlementActor(args: {
     }
   }
   return { valid: true }
+}
+
+function isWorkerSettlementEvent(provider: string, eventName: string): boolean {
+  return provider === 'opencode' ? eventName === 'SessionBusy' : eventName === 'PreToolUse'
 }
 
 const SendParams = z

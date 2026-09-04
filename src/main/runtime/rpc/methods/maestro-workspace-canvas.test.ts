@@ -71,6 +71,31 @@ describe('Maestro workspace Canvas authority', () => {
     database.close()
   })
 
+  it('retains last-known resources as unverifiable when terminal inventory fails', async () => {
+    const { authority, database, runtime } = harness()
+    await authority.query(scope, 'actor-1')
+    runtime.listTerminals.mockRejectedValue(new Error('terminal_inventory_lost'))
+
+    const result = await authority.query(scope, 'actor-1')
+
+    expect(result).toMatchObject({
+      status: 'unavailable',
+      reason: 'authority-unreachable',
+      liveness: 'unverifiable'
+    })
+    if (result.status === 'unavailable') {
+      expect(Object.values(result.last_known_snapshot?.surfaces ?? {})).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            availability: 'unverifiable',
+            binding: expect.objectContaining({ kind: 'terminal', liveness: 'unverifiable' })
+          })
+        ])
+      )
+    }
+    database.close()
+  })
+
   it('focuses only an exact surface and replays its idempotent receipt', async () => {
     const { authority, database, runtime } = harness()
     const current = await authority.query(scope, 'actor-1')
@@ -96,7 +121,7 @@ describe('Maestro workspace Canvas authority', () => {
     await expect(authority.mutate(request)).resolves.toMatchObject({ status: 'replayed' })
     expect(runtime.activateMobileSessionTab).toHaveBeenCalledTimes(1)
     expect(runtime.activateMobileSessionTab).toHaveBeenCalledWith(
-      'id:folder-1',
+      'id:folder:folder-1',
       'terminal-tab-1',
       'leaf-1'
     )
@@ -266,7 +291,7 @@ describe('Maestro workspace Canvas authority', () => {
     })
     expect(runtime.commandMaestroWorkspaceTab).toHaveBeenCalledWith({
       kind: 'read-content',
-      worktreeId: 'folder-1',
+      worktreeId: 'folder:folder-1',
       tabId: 'editor-tab-1'
     })
     database.close()
@@ -430,7 +455,7 @@ describe('Maestro workspace Canvas authority', () => {
     expect(runtime.commandMaestroWorkspaceTab).toHaveBeenCalledTimes(1)
     expect(runtime.commandMaestroWorkspaceTab).toHaveBeenCalledWith({
       kind: 'rename',
-      worktreeId: 'folder-1',
+      worktreeId: 'folder:folder-1',
       tabId: surface.id.unified_tab_id,
       title: 'Exact title'
     })

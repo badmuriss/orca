@@ -11,7 +11,8 @@ import {
 } from '../../orchestration/maestro-terminal-lease-reconciliation'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import { defineMethod, type RpcMethod } from '../core'
-import { resolveWorkerLaunchPreferences } from './orchestration-worker-launch-preferences'
+import { requireCoordinatorHandoffStarter } from '../orchestration-legacy-current-authority'
+import { resolveCoordinatorLaunchProfile } from './orchestration-coordinator-launch-profile'
 
 async function waitForCoordinatorClaim(args: {
   timeoutMs: number
@@ -66,40 +67,47 @@ export const ORCHESTRATION_COORDINATOR_HANDOFF_METHODS: RpcMethod[] = [
         }
       }
 
-      const run = db.getRun(params.runId)
-      const callerPaneKey = runtime.getTerminalPaneKey(params.from)
-      if (
-        !run ||
-        run.coordinator_handle !== params.from ||
-        !callerPaneKey ||
-        run.coordinator_pane_key !== callerPaneKey
-      ) {
-        throw new OrchestrationError('consumer_fenced', 'Coordinator authority is stale.')
-      }
+      const { run, callerPaneKey } = requireCoordinatorHandoffStarter(runtime, {
+        ...params,
+        evidence: context.orchestrationCompatibilityEvidence
+      })
       const computedDigest = `sha256:${createHash('sha256').update(params.capsule).digest('hex')}`
       if (computedDigest !== params.capsuleDigest) {
         throw new OrchestrationError('request_mismatch', 'Coordinator capsule digest mismatched.')
       }
+      const replay = db.getCoordinatorHandoff(params.requestId)
       const target = await runtime.showManagedTerminalWorkspace(params.worktree)
-      const launch = resolveWorkerLaunchPreferences({
+      const predecessorLease = replay?.predecessorLeaseId
+        ? db.getMaestroTerminalLease(replay.predecessorLeaseId)
+        : db.getCoordinatorLease(params.runId, run.consumer_generation)
+      const {
+        launch,
+        effectiveProfile: effectiveLaunchProfile,
+        drifted: launchProfileDrift
+      } = resolveCoordinatorLaunchProfile({
         agent: params.agent,
         model: params.model,
         effort: params.effort,
-        settings: runtime.getClientSettings()
+        settings: runtime.getClientSettings(),
+        predecessorProfile: predecessorLease?.launchProfile
       })
-      await adoptCurrentCoordinatorLease({
-        runtime,
-        runId: params.runId,
-        generation: run.consumer_generation,
-        terminalHandle: params.from,
-        paneKey: callerPaneKey,
-        agent: params.agent,
-        spawnedBy: principal
-      })
+      if (!replay) {
+        await adoptCurrentCoordinatorLease({
+          runtime,
+          runId: params.runId,
+          generation: run.consumer_generation,
+          terminalHandle: params.from,
+          paneKey: callerPaneKey,
+          agent: params.agent,
+          spawnedBy: principal,
+          callerAuthority: context.orchestrationCompatibilityCallerAuthority
+        })
+      }
+      const successorGeneration = replay?.claimedGeneration ?? run.consumer_generation + 1
       const title = buildMaestroTerminalLeaseTitle({
         role: 'coordinator',
         runId: params.runId,
-        coordinatorGeneration: run.consumer_generation + 1,
+        coordinatorGeneration: successorGeneration,
         agent: params.agent
       })
       let receipt = db.reserveCoordinatorHandoff({
@@ -108,15 +116,9 @@ export const ORCHESTRATION_COORDINATOR_HANDOFF_METHODS: RpcMethod[] = [
         executionHostId: target.hostId ?? 'local',
         workspaceKey: parseWorkspaceKey(target.id) ? target.id : worktreeWorkspaceKey(target.id),
         title,
-        launchProfile: {
-          agent: params.agent,
-          model: launch.receipt.effective?.model ?? null,
-          effort: launch.receipt.effective?.effort ?? null,
-          permissionMode: launch.receipt.effective?.permissionMode ?? 'default',
-          routeRef: null
-        },
+        launchProfile: effectiveLaunchProfile,
         spawnedBy: principal,
-        ownerPrincipal: `coordinator:${params.runId}:g${run.consumer_generation + 1}`,
+        ownerPrincipal: `coordinator:${params.runId}:g${successorGeneration}`,
         capsuleDigest: params.capsuleDigest,
         inputIdempotencyKey: params.inputIdempotencyKey,
         expectedGraphRevision: params.expectedGraphRevision,
@@ -125,9 +127,6 @@ export const ORCHESTRATION_COORDINATOR_HANDOFF_METHODS: RpcMethod[] = [
       if (['blocked', 'outcome_unknown', 'predecessor_reconciled'].includes(receipt.phase)) {
         return { handoff: receipt }
       }
-      const launchProfileDrift =
-        (params.model !== undefined && launch.receipt.effective?.model !== params.model) ||
-        (params.effort !== undefined && launch.receipt.effective?.effort !== params.effort)
       if ((params.rolloverReason || launchProfileDrift) && receipt.predecessorLeaseId) {
         const rolloverReason =
           params.rolloverReason && !launchProfileDrift
@@ -209,7 +208,7 @@ export const ORCHESTRATION_COORDINATOR_HANDOFF_METHODS: RpcMethod[] = [
               principalId: principal,
               authority: 'coordinator',
               runId: params.runId,
-              coordinatorGeneration: run.consumer_generation
+              coordinatorGeneration: receipt.claimedGeneration
             },
             leaseId: receipt.successorLeaseId,
             executionHostId: managedContext.executionHostId,

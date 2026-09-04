@@ -290,10 +290,12 @@ export function projectAgentGraphView(
     runProgress: parseNegotiatedMaestroRunProgress(
       view.progress,
       view.run_id === view.workspace_scope.run_id &&
-        sameProjectedWorkspace(targetWorkspace, executionWorkspace)
+        [orchestrationHome, executionWorkspace].some((workspace) =>
+          sameProjectedWorkspace(targetWorkspace, workspace)
+        )
         ? {
             runId: view.run_id,
-            workspace: executionWorkspace,
+            workspace: targetWorkspace,
             revision: view.revision
           }
         : null

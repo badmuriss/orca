@@ -104,7 +104,7 @@ export type AgentActorAttestation = {
   incarnation: number
   revision: number
   observedAt: number
-  provider: 'claude' | 'codex'
+  provider: 'claude' | 'codex' | 'opencode'
   role: 'lead' | 'child'
   eventName: string
   providerSessionId?: string
@@ -396,15 +396,12 @@ function normalizeAgentStatusObject(parsed: unknown): ParsedAgentStatusPayload |
   }
   const obj = parsed as Record<string, unknown>
   // Why: explicit typeof guard rejects non-string values instead of leaning on Set.has to return false for mismatched types.
-  if (typeof obj.state !== 'string') {
+  if (typeof obj.state !== 'string' || !VALID_STATES.has(obj.state)) {
     return null
   }
-  const state = obj.state
-  if (!VALID_STATES.has(state)) {
-    return null
-  }
+  const state = obj.state as AgentStatusState
   return {
-    state: state as AgentStatusState,
+    state,
     workingMode: state === 'working' && obj.workingMode === 'monitoring' ? 'monitoring' : undefined,
     prompt: normalizePromptField(obj.prompt),
     // Why: normalize like the other single-line fields so embedded newlines (e.g. `agentType: "claude\nrogue"`) can't break single-line UI and equality checks.

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildRegistry, type RpcContext } from '../core'
 import { ORCHESTRATION_METHODS } from './orchestration'
@@ -22,6 +23,55 @@ describe('orchestration RPC methods', () => {
 
   async function call(name: string, params: Record<string, unknown>) {
     return h.call(name, params, ctx)
+  }
+
+  function seedCurrentCoordinatorLease(runId: string) {
+    const lease = db.reserveMaestroTerminalLease({
+      requestId: `coordinator:${runId}:g1`,
+      executionHostId: 'local',
+      workspaceKey: 'folder:one',
+      runId,
+      coordinatorGeneration: 1,
+      role: 'coordinator',
+      coordinatorRunId: runId,
+      title: 'Current coordinator',
+      launchProfile: {
+        agent: 'codex',
+        model: null,
+        effort: null,
+        permissionMode: 'default',
+        routeRef: null
+      },
+      spawnedBy: 'coordinator:g1',
+      ownerPrincipal: 'coordinator:g1',
+      retentionPolicy: 'retain'
+    })
+    db.attachMaestroTerminalLease({
+      leaseId: lease.id,
+      terminalHandle: 'term_coord',
+      tabId: 'tab_coord',
+      paneKey: coordinatorPaneKey,
+      ptyIncarnation: 'runtime_test:term_coord:1',
+      processRootId: 'runtime_test:term_coord'
+    })
+    db.retainMaestroTerminalLease(lease.id)
+    return lease
+  }
+
+  function coordinatorHandoffParams(runId: string) {
+    const capsule = 'continue the Run'
+    return {
+      operation: 'start',
+      requestId: 'handoff:restart',
+      runId,
+      from: 'term_coord',
+      worktree: 'folder:one',
+      capsule,
+      capsuleDigest: `sha256:${createHash('sha256').update(capsule).digest('hex')}`,
+      inputIdempotencyKey: 'handoff:restart:input',
+      expectedGraphRevision: 1,
+      agent: 'codex'
+    }
   }
 
   it('registers all expected methods', () => {
@@ -150,6 +200,133 @@ describe('orchestration RPC methods', () => {
       await expect(
         call('orchestration.runUse', { id: 'run_legacy_local', from: 'term_new' })
       ).rejects.toMatchObject({ code: 'run_not_found' })
+    })
+
+    it('re-adopts the authenticated current coordinator lease after a runtime restart', async () => {
+      setup()
+      const run = db.getCurrentRunForPane(coordinatorPaneKey)
+      const processIncarnation = 'folder:coordinator@@pty:incarnation-1'
+      vi.spyOn(runtime, 'showTerminal').mockResolvedValue({
+        handle: 'term_coord',
+        ptyId: 'folder:coordinator@@pty',
+        tabId: 'tab_coord',
+        agentIdentity: 'codex'
+      } as never)
+      vi.spyOn(runtime, 'getTerminalProcessIncarnation').mockReturnValue(processIncarnation)
+      vi.spyOn(runtime, 'buildTerminalManagedCliContext').mockReturnValue({
+        executionHostId: 'local',
+        workspaceKey: 'folder:coordinator'
+      } as never)
+      ctx = {
+        runtime,
+        orchestrationCompatibilityCallerAuthority: {
+          hostScope: { kind: 'local', hostId: 'local' },
+          terminalHandle: 'term_coord',
+          paneKey: coordinatorPaneKey,
+          processIncarnation,
+          launchTokenHash: 'authenticated-launch-token-hash'
+        }
+      }
+
+      const rebound = (await call('orchestration.runUse', {
+        id: run?.id,
+        from: 'term_coord'
+      })) as { run: { consumer_generation: number } }
+
+      expect(rebound.run.consumer_generation).toBe(1)
+      expect(db.getCoordinatorLease(run!.id, 1)).toMatchObject({
+        terminalHandle: 'term_coord',
+        paneKey: coordinatorPaneKey,
+        ptyIncarnation: processIncarnation,
+        executionHostId: 'local',
+        workspaceKey: 'folder:coordinator',
+        lifecycleState: 'retained'
+      })
+    })
+
+    it('rejects a coordinator handoff lease rebind without authenticated caller authority', async () => {
+      setup()
+      const run = db.getCurrentRunForPane(coordinatorPaneKey)!
+      const lease = seedCurrentCoordinatorLease(run.id)
+      vi.spyOn(runtime, 'showManagedTerminalWorkspace').mockResolvedValue({
+        id: 'folder:one',
+        hostId: 'local'
+      } as never)
+      vi.spyOn(runtime, 'getClientSettings').mockReturnValue({} as never)
+      vi.spyOn(runtime, 'showTerminal').mockResolvedValue({
+        handle: 'term_coord',
+        tabId: 'tab_coord',
+        ptyId: 'runtime_test:term_coord',
+        agentIdentity: 'codex'
+      } as never)
+      vi.spyOn(runtime, 'buildTerminalManagedCliContext').mockReturnValue({
+        executionHostId: 'local',
+        workspaceKey: 'folder:one'
+      } as never)
+
+      await expect(
+        call('orchestration.coordinatorHandoff', coordinatorHandoffParams(run.id))
+      ).rejects.toMatchObject({ code: 'consumer_fenced' })
+      expect(db.getCoordinatorHandoff('handoff:restart')).toBeUndefined()
+      expect(db.getMaestroTerminalLease(lease.id)).toMatchObject({
+        terminalHandle: 'term_coord',
+        ptyIncarnation: 'runtime_test:term_coord:1'
+      })
+    })
+
+    it('replays a reserved coordinator handoff without rebinding its successor lease', async () => {
+      setup()
+      const run = db.getCurrentRunForPane(coordinatorPaneKey)!
+      const predecessor = seedCurrentCoordinatorLease(run.id)
+      const params = coordinatorHandoffParams(run.id)
+      const reserved = db.reserveCoordinatorHandoff({
+        requestId: params.requestId,
+        runId: run.id,
+        executionHostId: 'local',
+        workspaceKey: 'folder:one',
+        title: 'Successor coordinator',
+        launchProfile: predecessor.launchProfile,
+        spawnedBy: 'coordinator:g1',
+        ownerPrincipal: 'coordinator:g2',
+        capsuleDigest: params.capsuleDigest,
+        inputIdempotencyKey: params.inputIdempotencyKey,
+        expectedGraphRevision: params.expectedGraphRevision,
+        retentionPolicy: 'auto_release'
+      })
+      db.blockCoordinatorHandoff({
+        requestId: params.requestId,
+        phase: 'blocked',
+        code: 'launch_profile_drift'
+      })
+      const callerAuthority = {
+        hostScope: { kind: 'local', hostId: 'local' },
+        terminalHandle: 'term_coord',
+        paneKey: coordinatorPaneKey,
+        processIncarnation: 'runtime_test:term_coord:1',
+        launchTokenHash: 'authenticated-launch-token-hash'
+      } as const
+      vi.spyOn(runtime, 'verifyOrchestrationCompatibilityCaller').mockReturnValue(callerAuthority)
+      vi.spyOn(runtime, 'showManagedTerminalWorkspace').mockResolvedValue({
+        id: 'folder:one',
+        hostId: 'local'
+      } as never)
+      vi.spyOn(runtime, 'getClientSettings').mockReturnValue({} as never)
+      const showTerminal = vi.spyOn(runtime, 'showTerminal')
+      ctx = { runtime, orchestrationCompatibilityCallerAuthority: callerAuthority }
+
+      const replayed = (await call('orchestration.coordinatorHandoff', params)) as {
+        handoff: { phase: string; successorLeaseId: string }
+      }
+
+      expect(replayed.handoff).toMatchObject({
+        phase: 'blocked',
+        successorLeaseId: reserved.successorLeaseId
+      })
+      expect(showTerminal).not.toHaveBeenCalled()
+      expect(db.getMaestroTerminalLease(reserved.successorLeaseId)).toMatchObject({
+        terminalHandle: null,
+        ptyIncarnation: null
+      })
     })
 
     it('requires an explicit binding before task mutation', async () => {

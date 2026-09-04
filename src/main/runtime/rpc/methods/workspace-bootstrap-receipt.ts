@@ -53,7 +53,8 @@ export function requireWorkspaceBootstrapCoordinator(
     context.legacyCoordinatorAuthority ??
     context.orchestrationCompatibilityCallerAuthority ??
     context.runtime.verifyOrchestrationCompatibilityCaller(
-      context.orchestrationCompatibilityEvidence
+      context.orchestrationCompatibilityEvidence,
+      { currentRuntimeLaunchSufficient: true }
     )
   if (!caller) {
     throw new OrchestrationError(
@@ -61,7 +62,28 @@ export function requireWorkspaceBootstrapCoordinator(
       'Workspace bootstrap receipts require an authenticated coordinator.'
     )
   }
-  const run = resolveRunScope(context.runtime, {
+  const database = context.runtime.getOrchestrationDb()
+  const run = database.getRun(runId)
+  const lease = database.getMaestroTerminalLeaseByHandle(caller.terminalHandle)
+  const handoffRequestId = lease?.requestId.startsWith('handoff:')
+    ? lease.requestId.slice('handoff:'.length)
+    : null
+  const handoff = handoffRequestId ? database.getCoordinatorHandoff(handoffRequestId) : undefined
+  if (
+    run &&
+    lease?.role === 'coordinator' &&
+    lease.runId === run.id &&
+    lease.coordinatorGeneration === run.consumer_generation &&
+    lease.paneKey === caller.paneKey &&
+    'processIncarnation' in caller &&
+    lease.ptyIncarnation === caller.processIncarnation &&
+    handoff?.successorLeaseId === lease.id &&
+    handoff.claimedGeneration === run.consumer_generation &&
+    ['spawned', 'capsule_delivery_acknowledged', 'coordinator_claimed'].includes(handoff.phase)
+  ) {
+    return caller
+  }
+  const currentRun = resolveRunScope(context.runtime, {
     runId,
     callerTerminalHandle: caller.terminalHandle,
     callerPaneKey: caller.paneKey,
@@ -70,9 +92,9 @@ export function requireWorkspaceBootstrapCoordinator(
     callerEvidence: context.orchestrationCompatibilityEvidence
   })
   if (
-    run.coordinator_handle !== caller.terminalHandle ||
-    run.coordinator_pane_key !== caller.paneKey ||
-    ('consumerGeneration' in caller && caller.consumerGeneration !== run.consumer_generation)
+    currentRun.coordinator_handle !== caller.terminalHandle ||
+    currentRun.coordinator_pane_key !== caller.paneKey ||
+    ('consumerGeneration' in caller && caller.consumerGeneration !== currentRun.consumer_generation)
   ) {
     throw new OrchestrationError('consumer_fenced', 'Coordinator authority is stale.')
   }
@@ -261,12 +283,7 @@ async function observeGitRevision(
       }`
     )
   }
-  if (!status.head) {
-    throw new OrchestrationError(
-      'invalid_argument',
-      'The execution workspace has no committed HEAD to issue a base_revision from.'
-    )
-  }
+  const baseRevision = status.head ?? '0'.repeat(40)
   const dirtyPathSet = new Set(status.entries.map((entry) => entry.path))
   const dirtyPathCount = dirtyPathSet.size
   const dirtyPaths = [...dirtyPathSet]
@@ -274,7 +291,7 @@ async function observeGitRevision(
     .slice(0, WORKSPACE_BOOTSTRAP_DIRTY_PATH_SAMPLE_LIMIT)
   return {
     base_revision_kind: 'git_head',
-    base_revision: status.head,
+    base_revision: baseRevision,
     dirty_state: dirtyPathCount === 0 ? 'clean' : 'dirty',
     dirty_path_count: dirtyPathCount,
     dirty_paths: dirtyPaths,

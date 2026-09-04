@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   MaestroRunProgress,
@@ -70,6 +70,74 @@ const activeProgress: MaestroRunProgressV2 = {
       model: 'Codex',
       state: 'running',
       activity_summary: 'Checking focus and screen-reader names'
+    }
+  ],
+  resources: [
+    {
+      kind: 'coordinator',
+      reference: 'coordinator_technical_id',
+      title: 'Coordinator',
+      detail: 'Recovered from the current authenticated Run generation.',
+      state: 'recovered'
+    },
+    {
+      kind: 'task',
+      reference: 'task_current_id',
+      title: 'Desktop progress',
+      detail: 'Work is active.',
+      state: 'active'
+    },
+    {
+      kind: 'attempt',
+      reference: 'attempt_technical_id',
+      parent_reference: 'dispatch_technical_id',
+      title: 'Attempt 1 · Desktop progress',
+      detail: 'Starting the provider execution.',
+      state: 'loading'
+    },
+    {
+      kind: 'dispatch',
+      reference: 'dispatch_technical_id',
+      parent_reference: 'task_current_id',
+      title: 'Dispatch 1 · Desktop progress',
+      detail: 'Worker dispatch is active.',
+      state: 'active'
+    },
+    {
+      kind: 'provider',
+      reference: 'provider_technical_id',
+      parent_reference: 'dispatch_technical_id',
+      title: 'Codex provider execution',
+      detail: 'Executing Desktop progress.',
+      state: 'active'
+    },
+    {
+      kind: 'terminal',
+      reference: 'terminal_technical_id',
+      parent_reference: 'attempt_technical_id',
+      title: 'Desktop progress terminal',
+      detail: 'Worker terminal is live.',
+      state: 'active',
+      surface_key: '["local","folder:workspace","tab-secret"]',
+      terminal_handle: 'term_secret',
+      liveness: 'live'
+    },
+    {
+      kind: 'browser',
+      reference: 'browser_technical_id',
+      parent_reference: 'attempt_technical_id',
+      title: 'Validation Browser',
+      detail: 'https://example.test · visible',
+      state: 'active',
+      surface_key: '["local","folder:workspace","browser-secret"]'
+    },
+    {
+      kind: 'cleanup',
+      reference: 'cleanup_technical_id',
+      parent_reference: 'terminal_technical_id',
+      title: 'Desktop progress cleanup',
+      detail: 'Terminal cleanup is unverifiable.',
+      state: 'unverifiable'
     }
   ],
   technical: {
@@ -157,12 +225,58 @@ describe('MaestroWorkspaceHarnessOverlay', () => {
     const activate = vi.fn((reference: string) => reference === 'task_current_id')
     renderOverlay({ onActivateReference: activate })
 
-    fireEvent.click(screen.getByRole('button', { name: /Desktop progress/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Desktop progress Frontend specialist/ }))
     fireEvent.click(screen.getByRole('button', { name: /Integration evidence/ }))
 
     expect(activate).toHaveBeenNthCalledWith(1, 'task_current_id')
     expect(activate).toHaveBeenNthCalledWith(2, 'task_next_id')
     expect(screen.getByText('task_next_id').closest('details')?.hasAttribute('open')).toBe(true)
+  })
+
+  it('shows first-class Run resources with truthful states while keeping raw identities technical', () => {
+    const activate = vi.fn(() => true)
+    renderOverlay({ onActivateReference: activate })
+
+    const resources = screen.getByRole('region', { name: 'Run resources' })
+    for (const label of [
+      'Coordinator',
+      'Task',
+      'Attempt',
+      'Dispatch',
+      'Provider',
+      'Terminal',
+      'Browser',
+      'Cleanup'
+    ]) {
+      expect(within(resources).getAllByText(label).length).toBeGreaterThan(0)
+    }
+    expect(within(resources).getByText('Recovered')).not.toBeNull()
+    expect(within(resources).getByText('Loading')).not.toBeNull()
+    expect(within(resources).getByText('Unverifiable')).not.toBeNull()
+    expect(screen.queryByText('term_secret')).toBeNull()
+    expect(screen.queryByText('browser_technical_id')).toBeNull()
+
+    const resourceButtons = within(resources).getAllByRole('button')
+    const labels = resourceButtons.map((button) => button.textContent ?? '')
+    expect(
+      labels.findIndex((label) => label.includes('Dispatch 1 · Desktop progress'))
+    ).toBeLessThan(labels.findIndex((label) => label.includes('Attempt 1 · Desktop progress')))
+    expect(
+      labels.findIndex((label) => label.includes('Attempt 1 · Desktop progress'))
+    ).toBeLessThan(labels.findIndex((label) => label.includes('Desktop progress terminal')))
+    expect(
+      within(resources)
+        .getByRole('button', { name: /Desktop progress terminal/ })
+        .getAttribute('data-run-progress-depth')
+    ).toBe('3')
+    expect(
+      within(resources)
+        .getByRole('button', { name: /Codex provider execution/ })
+        .getAttribute('data-run-progress-depth')
+    ).toBe('2')
+
+    fireEvent.click(within(resources).getByRole('button', { name: /Desktop progress terminal/ }))
+    expect(activate).toHaveBeenCalledWith('["local","folder:workspace","tab-secret"]')
   })
 
   it('shows truthful completion beside an orthogonal cleanup warning', () => {
@@ -194,7 +308,7 @@ describe('MaestroWorkspaceHarnessOverlay', () => {
 
     expect(screen.getByText('Completed')).not.toBeNull()
     expect(screen.getByText('100%')).not.toBeNull()
-    expect(screen.getByText('Cleanup')).not.toBeNull()
+    expect(screen.getAllByText('Cleanup').length).toBeGreaterThan(0)
     expect(screen.getByText(/Cleanup is unverifiable/)).not.toBeNull()
   })
 

@@ -15,37 +15,41 @@ import { boundedRedactedDiagnostic } from './orchestration-worker-start-receipt'
 
 describe('orchestration worker launch preferences', () => {
   it('passes an opaque Claude model and portable effort through the shared catalog', () => {
-    expect(
-      resolveWorkerLaunchPreferences({
+    const resolved = resolveWorkerLaunchPreferences({
+      agent: 'claude',
+      model: 'aws-bedrock-opus-5',
+      effort: 'high'
+    })
+
+    expect(resolved.preferences).toMatchObject({ model: 'aws-bedrock-opus-5', effort: 'high' })
+    expect(resolved.receipt).toMatchObject({
+      requested: {
         agent: 'claude',
         model: 'aws-bedrock-opus-5',
-        effort: 'high'
-      })
-    ).toEqual({
-      preferences: { model: 'aws-bedrock-opus-5', effort: 'high' },
-      receipt: {
-        requested: {
-          agent: 'claude',
-          model: 'aws-bedrock-opus-5',
-          effort: 'high',
-          permissionMode: 'yolo',
-          executable: null
-        },
-        effective: {
-          agent: 'claude',
-          model: 'aws-bedrock-opus-5',
-          effort: 'high',
-          permissionMode: 'yolo',
-          executable: null
-        }
+        effort: 'high',
+        permissionMode: 'yolo',
+        executable: null,
+        serviceTier: null
+      },
+      effective: {
+        agent: 'claude',
+        model: 'aws-bedrock-opus-5',
+        effort: 'high',
+        permissionMode: 'yolo',
+        executable: null,
+        serviceTier: null
       }
     })
+    expect(resolved.receipt.effective?.environmentPolicy).toMatch(/^sha256:[a-f0-9]{64}$/)
   })
 
   it('does not invent an effort when only a model is requested', () => {
-    expect(
-      resolveWorkerLaunchPreferences({ agent: 'codex', model: 'gpt-5.6-sol' }).preferences
-    ).toEqual({ model: 'gpt-5.6-sol' })
+    const preferences = resolveWorkerLaunchPreferences({
+      agent: 'codex',
+      model: 'gpt-5.6-sol'
+    }).preferences
+    expect(preferences).toMatchObject({ model: 'gpt-5.6-sol', serviceTier: 'default' })
+    expect(preferences).not.toHaveProperty('effort')
   })
 
   it.each([
@@ -110,7 +114,7 @@ describe('orchestration worker launch preferences', () => {
     for (const effortValue of accepted) {
       expect(
         resolveWorkerLaunchPreferences({ agent: 'codex', model, effort: effortValue }).preferences
-      ).toEqual({ model, effort: effortValue })
+      ).toMatchObject({ model, effort: effortValue })
     }
     for (const effortValue of rejected) {
       expect(() =>
@@ -169,17 +173,14 @@ describe('orchestration worker launch preferences', () => {
     ).not.toThrow()
   })
 
-  it('uses the requested launch receipt when an older worker omits it', () => {
+  it('leaves the effective profile unknown when an older worker omits it', () => {
     const requested = createPendingWorkerLaunchReceipt({
       agent: 'codex',
       model: 'gpt-5.6-sol',
       effort: 'high'
     })
 
-    expect(resolveFederatedWorkerLaunchReceipt(undefined, requested, true)).toEqual({
-      requested: requested.requested,
-      effective: requested.requested
-    })
+    expect(resolveFederatedWorkerLaunchReceipt(undefined, requested, true)).toBe(requested)
     expect(resolveFederatedWorkerLaunchReceipt(undefined, requested, false)).toBe(requested)
   })
 

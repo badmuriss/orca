@@ -18,6 +18,7 @@ export { editorSession, linkedSession, parentChildSession, scope, session }
 
 type CanvasRuntimeTestDouble = MaestroWorkspaceCanvasRuntime & {
   listMobileSessionTabs: MockedFunction<MaestroWorkspaceCanvasRuntime['listMobileSessionTabs']>
+  listTerminals: MockedFunction<MaestroWorkspaceCanvasRuntime['listTerminals']>
   browserTabCreate: MockedFunction<MaestroWorkspaceCanvasRuntime['browserTabCreate']>
   commandMaestroWorkspaceTab: MockedFunction<
     MaestroWorkspaceCanvasRuntime['commandMaestroWorkspaceTab']
@@ -262,6 +263,7 @@ export function harness(): MaestroWorkspaceCanvasHarness {
   const listMobileSessionTabs = vi.fn().mockResolvedValue(session())
   const runtime = {
     listMobileSessionTabs,
+    listTerminals: vi.fn().mockResolvedValue({ terminals: [], totalCount: 0, truncated: false }),
     activateMobileSessionTab: vi.fn().mockResolvedValue(session()),
     closeMobileSessionTab: vi.fn().mockResolvedValue({ closed: true }),
     createMobileSessionTerminal: vi.fn().mockResolvedValue({

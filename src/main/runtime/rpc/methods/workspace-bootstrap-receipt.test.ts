@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { WORKSPACE_BOOTSTRAP_DIRTY_PATH_SAMPLE_LIMIT } from '../../../../shared/workspace-bootstrap-receipt'
 import { OrcaRuntimeService } from '../../orca-runtime'
+import { OrchestrationDb } from '../../orchestration/db'
+import type { RpcContext } from '../core'
 import {
   issueWorkspaceBootstrapReceipt,
-  requireCoordinatorWorkspace
+  requireCoordinatorWorkspace,
+  requireWorkspaceBootstrapCoordinator
 } from './workspace-bootstrap-receipt'
 
 const HEAD = 'a'.repeat(40)
@@ -49,6 +52,87 @@ function request(overrides: Partial<Parameters<typeof issueWorkspaceBootstrapRec
 }
 
 describe('issueWorkspaceBootstrapReceipt', () => {
+  it('accepts the reserved successor before Run authority is committed', () => {
+    const runtime = new OrcaRuntimeService()
+    const database = new OrchestrationDb(':memory:')
+    runtime.setOrchestrationDb(database)
+    const run = database.createRun({
+      objective: 'bootstrap current coordinator',
+      coordinatorHandle: 'coordinator-1',
+      coordinatorPaneKey: 'tab-1:leaf-1'
+    })
+    const handoff = database.reserveCoordinatorHandoff({
+      requestId: 'handoff-bootstrap',
+      runId: run.id,
+      executionHostId: 'local',
+      workspaceKey: 'folder:home-1',
+      title: 'Harness · coordinator g2 · Codex',
+      launchProfile: {
+        agent: 'codex',
+        model: null,
+        effort: null,
+        permissionMode: 'yolo',
+        routeRef: null
+      },
+      spawnedBy: 'coordinator:g1',
+      ownerPrincipal: 'coordinator:g2',
+      capsuleDigest: `sha256:${'a'.repeat(64)}`,
+      inputIdempotencyKey: 'handoff-bootstrap:input',
+      expectedGraphRevision: 0,
+      retentionPolicy: 'retain'
+    })
+    database.attachMaestroTerminalLease({
+      leaseId: handoff.successorLeaseId,
+      terminalHandle: 'coordinator-2',
+      tabId: 'tab-2',
+      paneKey: 'tab-2:leaf-2',
+      ptyIncarnation: 'pty-2:incarnation-1',
+      processRootId: 'pty-2'
+    })
+    database.transitionMaestroTerminalLease({
+      leaseId: handoff.successorLeaseId,
+      state: 'ready'
+    })
+    database.advanceCoordinatorHandoff({
+      requestId: handoff.requestId,
+      phase: 'spawned',
+      terminalHandle: 'coordinator-2',
+      tabId: 'tab-2',
+      ptyIncarnation: 'pty-2:incarnation-1'
+    })
+    const evidence = {
+      terminalHandle: 'coordinator-2',
+      paneKey: 'tab-2:leaf-2',
+      launchToken: 'launch-token'
+    }
+    const verify = vi.spyOn(runtime, 'verifyOrchestrationCompatibilityCaller').mockReturnValue({
+      hostScope: { kind: 'local', hostId: 'local' },
+      terminalHandle: 'coordinator-2',
+      paneKey: 'tab-2:leaf-2',
+      processIncarnation: 'pty-2:incarnation-1',
+      launchTokenHash: 'hash-1'
+    })
+
+    const coordinator = requireWorkspaceBootstrapCoordinator(
+      { runtime, orchestrationCompatibilityEvidence: evidence } as RpcContext,
+      run.id
+    )
+
+    expect(coordinator).toMatchObject({
+      terminalHandle: 'coordinator-2',
+      paneKey: 'tab-2:leaf-2'
+    })
+    expect(database.getRun(run.id)).toMatchObject({
+      coordinator_handle: null,
+      coordinator_pane_key: null,
+      consumer_generation: run.consumer_generation + 1
+    })
+    expect(verify).toHaveBeenCalledExactlyOnceWith(evidence, {
+      currentRuntimeLaunchSufficient: true
+    })
+    database.close()
+  })
+
   it('canonicalizes a raw Git terminal ID when checking coordinator workspace authority', () => {
     const runtime = new OrcaRuntimeService()
     vi.spyOn(runtime, 'getOrchestrationDispatchAuthority').mockReturnValue({
@@ -200,7 +284,7 @@ describe('issueWorkspaceBootstrapReceipt', () => {
     expect(runtime.getRuntimeGitStatus).not.toHaveBeenCalled()
   })
 
-  it('fails typed when Git evidence is unavailable or has no committed HEAD', async () => {
+  it('fails typed when Git evidence is unavailable and snapshots an unborn repository', async () => {
     const gitWorkspace = {
       id: 'repo-1::/workspace/repo',
       repoId: 'repo-1',
@@ -223,6 +307,11 @@ describe('issueWorkspaceBootstrapReceipt', () => {
     )
     await expect(
       issueWorkspaceBootstrapReceipt(unborn, request({ executionWorkspaceSelector: 'id:work' }))
-    ).rejects.toThrow('no committed HEAD')
+    ).resolves.toMatchObject({
+      schema_version: 2,
+      base_revision_kind: 'git_head',
+      base_revision: '0'.repeat(40),
+      dirty_state: 'clean'
+    })
   })
 })

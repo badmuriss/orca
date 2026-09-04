@@ -94,6 +94,19 @@ export function reserveCoordinatorHandoff(
         claimedGeneration,
         params.expectedGraphRevision
       )
+    if (predecessor) {
+      this.retainMaestroTerminalLease(predecessor.id)
+    }
+    if (run.coordinator_handle) {
+      this.routeAllUnreadDirectMessagesToRunMailbox(params.runId, run.coordinator_handle)
+    }
+    this.db
+      .prepare(
+        `UPDATE runs SET coordinator_handle = NULL, coordinator_pane_key = NULL,
+         consumer_generation = ?, updated_at = datetime('now') WHERE id = ?`
+      )
+      .run(claimedGeneration, params.runId)
+    this.migrateOutstandingDelivery(params.runId, claimedGeneration)
     this.db.exec('COMMIT')
   } catch (error) {
     this.db.exec('ROLLBACK')
@@ -183,7 +196,12 @@ export function commitCoordinatorHandoffAuthority(
       )
     }
     const run = this.getRunRaw(handoff.runId)
-    if (!run || run.consumer_generation + 1 !== handoff.claimedGeneration) {
+    if (
+      !run ||
+      run.consumer_generation !== handoff.claimedGeneration ||
+      (run.coordinator_handle !== null &&
+        run.coordinator_handle !== handoff.successorTerminalHandle)
+    ) {
       throw new OrchestrationError('consumer_fenced', 'Run authority changed during handoff.')
     }
     if (!handoff.successorTerminalHandle || !handoff.successorPtyIncarnation) {
@@ -191,14 +209,6 @@ export function commitCoordinatorHandoffAuthority(
         'handoff_incomplete',
         'Successor terminal identity is incomplete.'
       )
-    }
-    if (handoff.predecessorLeaseId) {
-      this.db
-        .prepare(
-          `UPDATE maestro_terminal_leases SET lifecycle_state = 'retained',
-           retention_policy = 'retain', updated_at = datetime('now') WHERE id = ?`
-        )
-        .run(handoff.predecessorLeaseId)
     }
     const successor = this.db
       .prepare(
@@ -212,6 +222,7 @@ export function commitCoordinatorHandoffAuthority(
         'Successor lease was not durably ready for authority commit.'
       )
     }
+    this.unbindOtherRunsForPane(params.coordinatorPaneKey, handoff.runId)
     this.rememberRunCoordinatorHandle(handoff.runId, handoff.successorTerminalHandle)
     this.db
       .prepare(
@@ -224,7 +235,6 @@ export function commitCoordinatorHandoffAuthority(
         handoff.claimedGeneration,
         handoff.runId
       )
-    this.fenceOutstandingDelivery(handoff.runId)
     this.db
       .prepare(
         `UPDATE maestro_coordinator_handoff_receipts

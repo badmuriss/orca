@@ -1,6 +1,8 @@
 import { z } from 'zod'
+import type { MaestroBrowserSurfaceReceipt } from '../../../../shared/maestro-browser-surface'
 import { MaestroDocumentReadScopeSchema } from '../../../../shared/maestro-contract'
 import type { MaestroTerminalLease } from '../../../../shared/maestro-terminal-lease'
+import { workspaceSurfaceKey } from '../../../../shared/maestro-workspace-canvas'
 import type {
   MaestroRunProgress,
   MaestroRunProgressV2
@@ -15,11 +17,17 @@ import {
   deserializeMaestroTerminalLease,
   type MaestroTerminalLeaseRow
 } from '../../orchestration/db/maestro-terminal-lease/maestro-terminal-lease-row'
-import type { DispatchContextRow } from '../../orchestration/types'
+import {
+  parseBrowserSurfaceRow,
+  type BrowserSurfaceRow
+} from '../../orchestration/db/maestro-browser-surface/maestro-browser-surface-record'
+import type { DispatchContextRow, WorkerDispatchRow } from '../../orchestration/types'
 import { projectNestedAgentActivities } from '../../orchestration/worker-provider-session'
 import { exposeUtcTimestamp } from '../../orchestration/db/utc-timestamp'
 import { defineMethod, type RpcContext, type RpcMethod } from '../core'
 import { resolveMaestroDocumentReadScope } from '../maestro-principal'
+import { workspaceCanvasSelector } from '../../services/maestro-workspace-canvas/maestro-workspace-surface-projection'
+import { resolveRunProgressAuthority } from './maestro-run-progress-authority'
 
 const params = z
   .object({ scope: MaestroDocumentReadScopeSchema, runId: z.string().min(1).optional() })
@@ -29,7 +37,10 @@ type MaestroProjectionReadLabels = {
   documentRevision: number | null
   selectedRunId: string | null
   projectionRevisions: { runId: string; revision: number; updatedAt: string }[]
-  projectionHealth: { state: 'healthy' | 'empty'; revision: number | null }
+  projectionHealth: {
+    state: 'healthy' | 'recovered' | 'stale' | 'empty'
+    revision: number | null
+  }
 }
 
 export type MaestroRunProgressResponse =
@@ -48,24 +59,20 @@ export async function readMaestroRunProgress(
     context.clientCapabilities === undefined ||
     context.clientCapabilities.includes(MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY)
   const projection = getMaestroProjection.call(database, scope, requestedRunId)
-  if (!projection) {
-    if (!supportsV2) {
-      return { schemaVersion: null, progress: null }
-    }
+  if (!supportsV2) {
+    return projection
+      ? { schemaVersion: 1, progress: projection.runProgress }
+      : { schemaVersion: null, progress: null }
+  }
+  const authority = resolveRunProgressAuthority(database, scope, projection, requestedRunId)
+  if (!authority) {
     return {
       schemaVersion: null,
       progress: null,
-      ...projectionReadLabels(database, scope, null)
+      ...projectionReadLabels(database, scope, null, null, 'empty')
     }
   }
-  if (!supportsV2) {
-    return { schemaVersion: 1, progress: projection.runProgress }
-  }
-
-  const run = database.getRun(projection.runId)
-  if (!run) {
-    return { schemaVersion: null, progress: null }
-  }
+  const { run } = authority
   const tasks = database.listTasks({ runId: run.id })
   const dispatches = database.db
     .prepare('SELECT * FROM dispatch_contexts WHERE run_id = ? ORDER BY created_at, id')
@@ -79,6 +86,25 @@ export async function readMaestroRunProgress(
       )
       .all(run.id) as MaestroTerminalLeaseRow[]
   ).map(deserializeMaestroTerminalLease)
+  const workerDispatches = database.db
+    .prepare(
+      `SELECT worker.* FROM worker_dispatches worker
+       JOIN dispatch_contexts dispatch ON dispatch.id = worker.dispatch_id
+       WHERE dispatch.run_id = ? ORDER BY worker.created_at, worker.dispatch_id`
+    )
+    .all(run.id) as WorkerDispatchRow[]
+  const browserSurfaces = (
+    database.db
+      .prepare(
+        `SELECT * FROM maestro_browser_surfaces
+         WHERE run_id = ? ORDER BY created_at, surface_id`
+      )
+      .all(run.id) as BrowserSurfaceRow[]
+  ).map((row) => parseBrowserSurfaceRow(row).receipt)
+  const providerExecutions: {
+    dispatchId: string
+    session: NonNullable<ReturnType<RpcContext['runtime']['getExactWorkerProviderSession']>>
+  }[] = []
   const nestedActivity = dispatches.flatMap((dispatch) => {
     if (!dispatch.assignee_handle) {
       return []
@@ -90,44 +116,111 @@ export async function readMaestroRunProgress(
       dispatch.assignee_handle,
       Number.isFinite(observedAfter) ? observedAfter : 0
     )
+    if (session) {
+      providerExecutions.push({ dispatchId: dispatch.id, session })
+    }
     return session ? projectNestedAgentActivities({ dispatchId: dispatch.id, session }) : []
   })
+  const browserSurfaceKeys = await readBrowserSurfaceKeys(context, scope, browserSurfaces)
+  const projectionRevision = authority.projection?.revision ?? run.consumer_generation
 
   return {
     schemaVersion: 2,
-    ...projectionReadLabels(database, scope, projection),
+    ...projectionReadLabels(
+      database,
+      scope,
+      authority.projection,
+      run.id,
+      authority.recovered ? (authority.health.state === 'stale' ? 'stale' : 'recovered') : 'healthy'
+    ),
     progress: projectMaestroRunProgress({
       run,
       tasks,
       dispatches,
       messages: database.getRunMailboxHistory(run.id, 512),
       terminalLeases,
+      workerDispatches,
+      browserSurfaces,
+      providerExecutions,
       nestedActivity,
       executionHostId: scope.execution_host_id,
       workspaceKey: scope.workspace_key,
-      revision: projection.revision,
-      projectionHealth: { state: 'healthy', revision: projection.revision },
-      cleanupHealth: projectCleanupHealth(terminalLeases)
+      revision: projectionRevision,
+      projectionHealth: authority.health,
+      cleanupHealth: projectCleanupHealth(terminalLeases),
+      recoveredAuthority: authority.recovered,
+      browserSurfaceKeys
     })
   }
+}
+
+async function readBrowserSurfaceKeys(
+  context: RpcContext,
+  scope: z.infer<typeof MaestroDocumentReadScopeSchema>,
+  browserSurfaces: readonly MaestroBrowserSurfaceReceipt[]
+): Promise<Map<string, string>> {
+  const scopes = new Map(
+    [
+      scope,
+      ...browserSurfaces
+        .filter((surface) => surface.execution_host_id === scope.execution_host_id)
+        .map((surface) => ({
+          execution_host_id: surface.execution_host_id,
+          workspace_key: surface.workspace_key
+        }))
+    ].map((candidate) => [`${candidate.execution_host_id}\0${candidate.workspace_key}`, candidate])
+  )
+  const tabs = await Promise.all(
+    [...scopes.values()].map(async (candidate) => {
+      try {
+        return {
+          scope: candidate,
+          tabs: (await context.runtime.listMobileSessionTabs(workspaceCanvasSelector(candidate)))
+            .tabs
+        }
+      } catch {
+        return { scope: candidate, tabs: [] }
+      }
+    })
+  )
+  return new Map(
+    tabs.flatMap((entry) =>
+      entry.tabs.flatMap((tab) =>
+        tab.type === 'browser' && tab.browserPageId
+          ? [
+              [
+                tab.browserPageId,
+                workspaceSurfaceKey({
+                  execution_host_id: entry.scope.execution_host_id,
+                  workspace_key: entry.scope.workspace_key,
+                  unified_tab_id: tab.id
+                })
+              ] as const
+            ]
+          : []
+      )
+    )
+  )
 }
 
 function projectionReadLabels(
   database: ReturnType<RpcContext['runtime']['getOrchestrationDb']>,
   scope: z.infer<typeof MaestroDocumentReadScopeSchema>,
-  selected: ReturnType<typeof getMaestroProjection>
+  selected: ReturnType<typeof getMaestroProjection>,
+  selectedRunId: string | null = selected?.runId ?? null,
+  state: MaestroProjectionReadLabels['projectionHealth']['state'] = selected ? 'healthy' : 'empty'
 ): MaestroProjectionReadLabels {
   const document = database.getMaestroDocument(scope)
   return {
     documentRevision: document.state === 'empty' ? null : document.revision,
-    selectedRunId: selected?.runId ?? null,
+    selectedRunId,
     projectionRevisions: listMaestroProjectionIndexForScope.call(database, scope).map((entry) => ({
       runId: entry.runId,
       revision: entry.revision,
       updatedAt: entry.updatedAt
     })),
     projectionHealth: {
-      state: selected ? 'healthy' : 'empty',
+      state,
       revision: selected?.revision ?? null
     }
   }

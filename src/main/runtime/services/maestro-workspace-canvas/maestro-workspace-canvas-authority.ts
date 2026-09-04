@@ -1,7 +1,3 @@
-import {
-  WORKSPACE_SURFACE_SNAPSHOT_PROTOCOL,
-  WorkspaceSurfaceSnapshotSchema
-} from '../../../../shared/maestro-workspace-canvas'
 import type {
   RuntimeMaestroWorkspaceCanvasMutation,
   RuntimeMaestroWorkspaceCanvasMutationResult,
@@ -12,21 +8,13 @@ import type {
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import {
   migrateMaestroWorkspaceCanvasStore,
-  readWorkspaceCanvasDocument,
   readWorkspaceCanvasMutationReceipt,
-  reconcileStoredWorkspaceCanvas,
   writeWorkspaceCanvasMutationReceipt
 } from '../../orchestration/db/maestro-workspace-canvas/maestro-workspace-canvas-store'
-import {
-  markWorkspaceSnapshotUnavailable,
-  projectWorkspaceSurfaces,
-  workspaceCanvasSelector
-} from './maestro-workspace-surface-projection'
+import { workspaceCanvasSelector } from './maestro-workspace-surface-projection'
 import { createMaestroWorkspaceSurface } from './maestro-workspace-surface-create'
 import { mutateMaestroWorkspaceDocument } from './maestro-workspace-document-mutation'
 import { readMaestroWorkspaceContent } from './maestro-workspace-content-read'
-import { projectMaestroWorkspaceLinks } from './maestro-workspace-link-projection'
-import { applyMaestroWorkspaceE2EQueryControl } from './maestro-workspace-e2e-query-control'
 import { mutateExistingMaestroWorkspaceSurface } from './maestro-workspace-existing-surface-mutation'
 import {
   createdSurfaceMutationResult,
@@ -38,6 +26,7 @@ import {
   type MaestroWorkspaceSnapshotState
 } from './maestro-workspace-snapshot-state'
 import type { MaestroWorkspaceCanvasRuntime } from './maestro-workspace-canvas-runtime'
+import { queryMaestroWorkspaceCanvas } from './maestro-workspace-canvas-query'
 
 export type { MaestroWorkspaceCanvasRuntime } from './maestro-workspace-canvas-runtime'
 
@@ -55,83 +44,20 @@ export class MaestroWorkspaceCanvasAuthority {
   ): Promise<RuntimeMaestroWorkspaceCanvasQueryResult> {
     const key = maestroWorkspaceScopeKey(scope)
     const previous = this.snapshots.get(key)
-    try {
-      await applyMaestroWorkspaceE2EQueryControl()
-      const session = await this.runtime.listMobileSessionTabs(workspaceCanvasSelector(scope))
-      const sourceCursor = `${session.publicationEpoch}:${session.snapshotVersion}`
-      const database = this.runtime.getOrchestrationDb()
-      migrateMaestroWorkspaceCanvasStore(database)
-      let canvas = readWorkspaceCanvasDocument(database, scope)
-      const authorityRevision = previous
-        ? previous.sourceCursor === sourceCursor
-          ? previous.authorityRevision
-          : Math.max(previous.authorityRevision, canvas.document.last_surface_revision) + 1
-        : Math.max(1, canvas.document.last_surface_revision)
-      const projection = projectWorkspaceSurfaces(
-        scope,
-        session,
-        authorityRevision,
-        (terminalHandle) => this.runtime.getTerminalProcessIncarnation(terminalHandle),
-        canvas.document.annotations
-      )
-      const links = projectMaestroWorkspaceLinks({
-        database,
-        scope,
-        session,
-        surfaces: projection.surfaces
+    const result = await queryMaestroWorkspaceCanvas({
+      runtime: this.runtime,
+      scope,
+      actorId,
+      ...(previous ? { previous } : {})
+    })
+    if (result.status === 'available') {
+      this.snapshots.set(key, {
+        authorityRevision: result.snapshot.authority_revision,
+        sourceCursor: result.snapshot.authority_cursor,
+        snapshot: result
       })
-      const snapshot = WorkspaceSurfaceSnapshotSchema.parse({
-        schema_version: 1,
-        protocol: WORKSPACE_SURFACE_SNAPSHOT_PROTOCOL,
-        execution_host_id: scope.execution_host_id,
-        workspace_key: scope.workspace_key,
-        authority_revision: authorityRevision,
-        authority_cursor: sourceCursor,
-        state: 'ready',
-        surfaces: projection.surfaces,
-        unsupported:
-          projection.unsupportedBrowserCount > 0
-            ? [
-                {
-                  content_type: 'browser-without-page-identity',
-                  count: projection.unsupportedBrowserCount
-                }
-              ]
-            : [],
-        ...links,
-        capability: { available: true, reason: null },
-        harness_overlay: null
-      })
-      const hasUnplacedSurface = Object.keys(snapshot.surfaces).some(
-        (surfaceKey) => !canvas.document.placements[surfaceKey]
-      )
-      if (canvas.document.last_surface_revision !== authorityRevision || hasUnplacedSurface) {
-        reconcileStoredWorkspaceCanvas(database, {
-          scope,
-          expected_revision: canvas.revision,
-          idempotency_key: `snapshot-${authorityRevision}-${sourceCursor}`,
-          snapshot
-        })
-        canvas = readWorkspaceCanvasDocument(database, scope)
-      }
-      const result = { status: 'available' as const, actor_id: actorId, snapshot, canvas }
-      this.snapshots.set(key, { authorityRevision, sourceCursor, snapshot: result })
-      return result
-    } catch {
-      return {
-        status: 'unavailable',
-        reason: 'authority-unreachable',
-        liveness: 'unverifiable',
-        ...(previous
-          ? {
-              last_known_snapshot: markWorkspaceSnapshotUnavailable(
-                previous.snapshot.snapshot,
-                'Authority unreachable.'
-              )
-            }
-          : {})
-      }
     }
+    return result
   }
 
   async readContent(

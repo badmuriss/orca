@@ -9,6 +9,8 @@ import {
   resolveRunScope
 } from './orchestration-run-scope'
 import { ORCHESTRATION_COORDINATOR_HANDOFF_METHODS } from './orchestration-coordinator-handoff'
+import { adoptCurrentCoordinatorLease } from '../../orchestration/maestro-terminal-lease-reconciliation'
+import { isEquivalentPaneKey } from '../../orchestration/db/pane-key-match'
 
 const RunCreateParams = z.object({
   objective: requiredString('Missing --objective'),
@@ -60,7 +62,7 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'orchestration.runUse',
     params: RunUseParams,
-    handler: (
+    handler: async (
       params,
       {
         runtime,
@@ -89,6 +91,12 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
       assertCallerHandleMatchesEvidence(runtime, params.from, orchestrationCompatibilityEvidence)
       const db = runtime.getOrchestrationDb()
       const priorRun = db.getCurrentRunForPane(paneKey)
+      const persistedRun = db.getRun(params.id)
+      const reusesPersistedAuthority = Boolean(
+        persistedRun?.coordinator_handle === params.from &&
+        persistedRun.coordinator_pane_key &&
+        isEquivalentPaneKey(persistedRun.coordinator_pane_key, paneKey)
+      )
       const run = db.bindRun({
         runId: params.id,
         coordinatorHandle: params.from,
@@ -101,6 +109,21 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
           'run_not_found',
           `Run ${params.id} was not found or is inspect-only.`
         )
+      }
+      if (
+        reusesPersistedAuthority &&
+        callerAuthority?.terminalHandle === params.from &&
+        callerAuthority.paneKey === paneKey
+      ) {
+        await adoptCurrentCoordinatorLease({
+          runtime,
+          runId: run.id,
+          generation: run.consumer_generation,
+          terminalHandle: params.from,
+          paneKey,
+          spawnedBy: 'authenticated-run-use',
+          callerAuthority
+        })
       }
       runtime.cancelMessageWaiters(params.from)
       runtime.cancelMessageWaiters(`run:${params.id}`)

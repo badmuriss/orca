@@ -41,7 +41,11 @@ export class RuntimeTerminalIdlePolls {
           return
         }
         const title = leaf.paneTitle ?? this.deps.getTabTitle(leaf.tabId)
-        if (title && detectExplicitIdleStatusFromTitle(title) === 'idle') {
+        if (
+          leaf.lastAgentStatus === null &&
+          title &&
+          detectExplicitIdleStatusFromTitle(title) === 'idle'
+        ) {
           this.stop(waiter)
           this.deps.resolve(waiter, buildTerminalWaitResult(waiter.handle, 'tui-idle', leaf))
           return
@@ -56,7 +60,7 @@ export class RuntimeTerminalIdlePolls {
           )
           return
         }
-        if (isKnownReadyPromptPreview(waitText)) {
+        if (leaf.lastAgentStatus === null && isKnownReadyPromptPreview(waitText)) {
           this.stop(waiter)
           this.deps.resolve(waiter, buildTerminalWaitResult(waiter.handle, 'tui-idle', leaf))
           return
@@ -112,8 +116,8 @@ export class RuntimeTerminalIdlePolls {
           return
         }
         if (
-          this.deps.getAdoptedPtyIdleStatus(pty) === 'idle' ||
-          isKnownReadyPromptPreview(waitText)
+          pty.lastAgentStatus === null &&
+          (this.deps.getAdoptedPtyIdleStatus(pty) === 'idle' || isKnownReadyPromptPreview(waitText))
         ) {
           this.stop(waiter)
           this.deps.resolve(waiter, buildPtyTerminalWaitResult(waiter.handle, 'tui-idle', pty))

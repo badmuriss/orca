@@ -6,6 +6,7 @@ import type {
   MaestroRunProgressV2
 } from '../../../../shared/maestro-run-progress'
 import { legacyMaestroTaskProgress } from '../../../../shared/maestro-run-progress'
+import type { MaestroRunResource } from '../../../../shared/maestro-run-resource'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { translate } from '@/i18n/i18n'
@@ -154,6 +155,89 @@ export function humanProgressRows(progress: MaestroRunProgressV2): {
       meta: entry.model
     }))
   }
+}
+
+const RESOURCE_KIND_LABELS: Record<
+  NonNullable<MaestroRunProgressV2['resources']>[number]['kind'],
+  string
+> = {
+  coordinator: 'Coordinator',
+  task: 'Task',
+  attempt: 'Attempt',
+  dispatch: 'Dispatch',
+  provider: 'Provider',
+  terminal: 'Terminal',
+  browser: 'Browser',
+  cleanup: 'Cleanup'
+}
+
+const RESOURCE_STATE_LABELS: Record<
+  NonNullable<MaestroRunProgressV2['resources']>[number]['state'],
+  string
+> = {
+  loading: 'Loading',
+  active: 'Active',
+  input_required: 'Input required',
+  blocked: 'Blocked',
+  recovered: 'Recovered',
+  unverifiable: 'Unverifiable',
+  completed: 'Completed',
+  error: 'Error'
+}
+
+export function humanResourceDetail(resource: MaestroRunResource): string {
+  if (resource.kind === 'browser' && resource.detail === 'Browser is unavailable.') {
+    return translate(
+      'auto.components.maestro.MaestroWorkspaceHarnessOverlay.browserUnavailableAction',
+      'The owning host cannot verify this managed Browser page. Open a new Browser page from the Canvas to continue.'
+    )
+  }
+  return resource.detail
+}
+
+export function humanResourceRows(progress: MaestroRunProgressV2): MaestroRunProgressRow[] {
+  const resources = progress.resources ?? []
+  const byReference = new Map(resources.map((resource) => [resource.reference, resource] as const))
+  const children = new Map<string, typeof resources>()
+  for (const resource of resources) {
+    if (!resource.parent_reference || !byReference.has(resource.parent_reference)) {
+      continue
+    }
+    children.set(resource.parent_reference, [
+      ...(children.get(resource.parent_reference) ?? []),
+      resource
+    ])
+  }
+  const rows: MaestroRunProgressRow[] = []
+  const visited = new Set<string>()
+  const append = (resource: (typeof resources)[number], depth: number): void => {
+    if (visited.has(resource.reference)) {
+      return
+    }
+    visited.add(resource.reference)
+    rows.push({
+      key: `resource:${resource.kind}:${resource.reference}`,
+      reference: resource.surface_key ?? resource.activation_reference ?? resource.reference,
+      title: resource.title,
+      workerLabel: RESOURCE_KIND_LABELS[resource.kind],
+      detail: humanResourceDetail(resource),
+      state: resource.state,
+      meta: RESOURCE_STATE_LABELS[resource.state],
+      depth
+    })
+    for (const child of children.get(resource.reference) ?? []) {
+      append(child, depth + 1)
+    }
+  }
+  for (const resource of resources) {
+    if (!resource.parent_reference || !byReference.has(resource.parent_reference)) {
+      append(resource, 0)
+    }
+  }
+  for (const resource of resources) {
+    append(resource, 0)
+  }
+  return rows
 }
 
 export function RunPanelControl({

@@ -173,7 +173,7 @@ function issueActorAttestation(
     origin !== 'hook' ||
     payload.isReplay === true ||
     payload.providerSessionOnly === true ||
-    (payload.source !== 'claude' && payload.source !== 'codex') ||
+    (payload.source !== 'claude' && payload.source !== 'codex' && payload.source !== 'opencode') ||
     !payload.hookEventName
   ) {
     return undefined

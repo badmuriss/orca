@@ -9,6 +9,8 @@ export function buildWorkerTerminalLaunchProfile(
     model?: string | null
     effort?: string | null
     permissionMode?: string | null
+    serviceTier?: MaestroTerminalLaunchProfile['serviceTier']
+    environmentPolicy?: string | null
   } | null
 ): MaestroTerminalLaunchProfile {
   return {
@@ -16,7 +18,9 @@ export function buildWorkerTerminalLaunchProfile(
     model: effective?.model ?? null,
     effort: effective?.effort ?? null,
     permissionMode: effective?.permissionMode ?? 'default',
-    routeRef: null
+    routeRef: null,
+    serviceTier: effective?.serviceTier ?? null,
+    environmentPolicy: effective?.environmentPolicy ?? null
   }
 }
 

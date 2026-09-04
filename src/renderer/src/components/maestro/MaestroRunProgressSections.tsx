@@ -1,4 +1,4 @@
-import { Check, Copy } from 'lucide-react'
+import { Check, ChevronDown, Copy } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { translate } from '@/i18n/i18n'
@@ -13,6 +13,68 @@ export type MaestroRunProgressRow = {
   detail: string
   state: string
   meta?: string
+  depth?: number
+}
+
+const ROW_DEPTH_PADDING = ['pl-1.5', 'pl-4', 'pl-7', 'pl-10', 'pl-13'] as const
+
+function RunProgressRowButton({
+  row,
+  depth,
+  onActivate
+}: {
+  row: MaestroRunProgressRow
+  depth: number
+  onActivate: (reference: string) => void
+}): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <button
+      type="button"
+      className={`group flex w-full items-start gap-2 rounded-md border-l py-1 pr-1.5 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring ${ROW_DEPTH_PADDING[depth]} ${depth > 0 ? 'border-border/70' : 'border-transparent'}`}
+      data-run-progress-depth={depth}
+      data-run-progress-row-expanded={expanded ? 'true' : 'false'}
+      aria-expanded={expanded}
+      onClick={(event) => {
+        event.stopPropagation()
+        setExpanded((current) => !current)
+        onActivate(row.reference)
+      }}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <span className="pt-1.5">
+        <MaestroStatePip tone={maestroStateTone(row.state)} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-baseline gap-1.5">
+          <span
+            className={`${expanded ? 'break-words' : 'truncate'} min-w-0 text-xs font-medium text-foreground`}
+          >
+            {row.title}
+          </span>
+          {row.workerLabel ? (
+            <span
+              className={`${expanded ? 'break-words' : 'truncate'} text-[10px] text-muted-foreground`}
+            >
+              {row.workerLabel}
+            </span>
+          ) : null}
+          {row.meta ? (
+            <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{row.meta}</span>
+          ) : null}
+          <ChevronDown
+            className={`size-3 shrink-0 self-center text-muted-foreground transition-transform motion-reduce:transition-none ${expanded ? 'rotate-180' : ''}`}
+            aria-hidden="true"
+          />
+        </span>
+        <span
+          className={`block text-[11px] leading-4 text-muted-foreground ${expanded ? 'whitespace-pre-wrap break-words' : 'overflow-hidden text-ellipsis [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]'}`}
+        >
+          {row.detail}
+        </span>
+      </span>
+    </button>
+  )
 }
 
 export function SectionHeading({ children }: { children: ReactNode }): React.JSX.Element {
@@ -77,40 +139,12 @@ export function RunProgressSection({
     <section className="space-y-1.5" aria-label={label}>
       <SectionHeading>{label}</SectionHeading>
       <div className="space-y-1">
-        {rows.map((row) => (
-          <button
-            key={row.key}
-            type="button"
-            className="group flex w-full items-start gap-2 rounded-md px-1.5 py-1 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
-            onClick={(event) => {
-              event.stopPropagation()
-              onActivate(row.reference)
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
-          >
-            <span className="pt-1.5">
-              <MaestroStatePip tone={maestroStateTone(row.state)} />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="flex min-w-0 items-baseline gap-1.5">
-                <span className="truncate text-xs font-medium text-foreground">{row.title}</span>
-                {row.workerLabel ? (
-                  <span className="truncate text-[10px] text-muted-foreground">
-                    {row.workerLabel}
-                  </span>
-                ) : null}
-                {row.meta ? (
-                  <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
-                    {row.meta}
-                  </span>
-                ) : null}
-              </span>
-              <span className="block overflow-hidden text-ellipsis text-[11px] leading-4 text-muted-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
-                {row.detail}
-              </span>
-            </span>
-          </button>
-        ))}
+        {rows.map((row) => {
+          const depth = Math.min(row.depth ?? 0, ROW_DEPTH_PADDING.length - 1)
+          return (
+            <RunProgressRowButton key={row.key} row={row} depth={depth} onActivate={onActivate} />
+          )
+        })}
       </div>
     </section>
   )

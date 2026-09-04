@@ -151,6 +151,7 @@ export function MaestroWorkspaceSurfacePreview({
       <MaestroWorkspaceBrowserPreview
         target={runtimeTarget}
         pageId={binding.browser_page_id}
+        browserWorkspaceId={binding.browser_workspace_id}
         receiptRevision={receiptRevision}
         selected={selected}
         previewMode={previewMode}

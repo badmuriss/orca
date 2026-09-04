@@ -9,6 +9,7 @@ import { generateId } from '../generated-id'
 import type { OrchestrationDb } from '../orchestration-db'
 import {
   attachMaestroTerminalLease,
+  rebindCurrentCoordinatorLease,
   retainMaestroTerminalLease,
   transitionMaestroTerminalLease
 } from './maestro-terminal-lease-lifecycle-store'
@@ -25,6 +26,7 @@ import { transferMaestroWorkerTerminalLease } from './maestro-terminal-lease-tra
 
 export {
   attachMaestroTerminalLease,
+  rebindCurrentCoordinatorLease,
   retainMaestroTerminalLease,
   transitionMaestroTerminalLease
 } from './maestro-terminal-lease-lifecycle-store'
@@ -81,6 +83,26 @@ export function getMaestroTerminalLeaseByHandle(
        ORDER BY updated_at DESC LIMIT 1`
     )
     .get(terminalHandle) as MaestroTerminalLeaseRow | undefined
+  return row ? deserializeMaestroTerminalLease(row) : undefined
+}
+
+export function getMaestroTerminalLeaseByTab(
+  this: OrchestrationDb,
+  executionHostId: string,
+  workspaceKey: string,
+  tabId: string,
+  ptyIncarnation: string
+): MaestroTerminalLease | undefined {
+  const row = this.db
+    .prepare(
+      `SELECT * FROM maestro_terminal_leases
+       WHERE execution_host_id = ? AND workspace_key = ? AND tab_id = ? AND pty_incarnation = ?
+         AND lifecycle_state NOT IN ('released', 'superseded', 'archived')
+       ORDER BY updated_at DESC LIMIT 1`
+    )
+    .get(executionHostId, workspaceKey, tabId, ptyIncarnation) as
+    | MaestroTerminalLeaseRow
+    | undefined
   return row ? deserializeMaestroTerminalLease(row) : undefined
 }
 
@@ -173,12 +195,14 @@ export type MaestroTerminalLeaseStoreMethods = {
   getMaestroTerminalLease: typeof getMaestroTerminalLease
   getMaestroTerminalLeaseByRequest: typeof getMaestroTerminalLeaseByRequest
   getMaestroTerminalLeaseByHandle: typeof getMaestroTerminalLeaseByHandle
+  getMaestroTerminalLeaseByTab: typeof getMaestroTerminalLeaseByTab
   getCoordinatorLease: typeof getCoordinatorLease
   getMaestroTerminalLeaseByWorkerResource: typeof getMaestroTerminalLeaseByWorkerResource
   getMaestroWorkerLeaseTransferReceipt: typeof getMaestroWorkerLeaseTransferReceipt
   getMaestroWorkerLeaseTransferReceiptByMutationRequest: typeof getMaestroWorkerLeaseTransferReceiptByMutationRequest
   reserveMaestroTerminalLease: typeof reserveMaestroTerminalLease
   attachMaestroTerminalLease: typeof attachMaestroTerminalLease
+  rebindCurrentCoordinatorLease: typeof rebindCurrentCoordinatorLease
   transitionMaestroTerminalLease: typeof transitionMaestroTerminalLease
   retainMaestroTerminalLease: typeof retainMaestroTerminalLease
   transferMaestroWorkerTerminalLease: typeof transferMaestroWorkerTerminalLease
@@ -189,12 +213,14 @@ export function attachMaestroTerminalLeaseStore(ctor: { prototype: object }): vo
     getMaestroTerminalLease,
     getMaestroTerminalLeaseByRequest,
     getMaestroTerminalLeaseByHandle,
+    getMaestroTerminalLeaseByTab,
     getCoordinatorLease,
     getMaestroTerminalLeaseByWorkerResource,
     getMaestroWorkerLeaseTransferReceipt,
     getMaestroWorkerLeaseTransferReceiptByMutationRequest,
     reserveMaestroTerminalLease,
     attachMaestroTerminalLease,
+    rebindCurrentCoordinatorLease,
     transitionMaestroTerminalLease,
     retainMaestroTerminalLease,
     transferMaestroWorkerTerminalLease

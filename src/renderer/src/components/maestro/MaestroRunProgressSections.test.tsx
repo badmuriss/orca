@@ -52,6 +52,34 @@ describe('MaestroRunProgressSections', () => {
     expect(screen.getByText('Validating compact and hidden states')).not.toBeNull()
   })
 
+  it('expands a row to reveal its full title and detail', () => {
+    render(
+      <RunProgressSection
+        label="Run resources"
+        rows={[
+          {
+            key: 'resource:task-1',
+            reference: 'task-1',
+            title: 'A long task title that needs more than the compact row width',
+            detail: 'A detailed explanation that remains readable after the row is expanded.',
+            state: 'running'
+          }
+        ]}
+        onActivate={vi.fn()}
+      />
+    )
+
+    const row = screen.getByRole('button', { name: /A long task title/ })
+    const title = screen.getByText(/A long task title/)
+    expect(row.getAttribute('aria-expanded')).toBe('false')
+    expect(title.className).toContain('truncate')
+
+    fireEvent.click(row)
+
+    expect(row.getAttribute('aria-expanded')).toBe('true')
+    expect(title.className).not.toContain('truncate')
+  })
+
   it('keeps identifiers inside technical disclosure', () => {
     render(<TechnicalDisclosure entries={[{ label: 'Run', value: 'run_technical_identifier' }]} />)
 

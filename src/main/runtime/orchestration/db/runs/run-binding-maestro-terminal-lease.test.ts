@@ -45,6 +45,16 @@ describe('Run binding Maestro terminal lease transaction', () => {
     })
     db.transitionMaestroTerminalLease({ leaseId: predecessor.id, state: 'ready' })
     db.transitionMaestroTerminalLease({ leaseId: predecessor.id, state: 'active' })
+    db.insertMessage({
+      runId: run.id,
+      from: 'worker',
+      to: `run:${run.id}`,
+      subject: 'survives handoff'
+    })
+    const delivery = db.getOrCreateRunDelivery({
+      runId: run.id,
+      consumerGeneration: run.consumer_generation
+    })!
     let handoff = db.reserveCoordinatorHandoff({
       requestId: 'handoff:1',
       runId: run.id,
@@ -59,6 +69,15 @@ describe('Run binding Maestro terminal lease transaction', () => {
       expectedGraphRevision: 12,
       retentionPolicy: 'auto_release'
     })
+    expect(db.getRun(run.id)).toMatchObject({
+      coordinator_handle: null,
+      coordinator_pane_key: null,
+      consumer_generation: handoff.claimedGeneration
+    })
+    expect(db.getMaestroTerminalLease(predecessor.id)?.lifecycleState).toBe('retained')
+    expect(db.getDeliveryRaw(delivery.delivery.id)?.consumer_generation).toBe(
+      handoff.claimedGeneration
+    )
     db.attachMaestroTerminalLease({
       leaseId: handoff.successorLeaseId,
       terminalHandle: 'term_new',
@@ -84,7 +103,7 @@ describe('Run binding Maestro terminal lease transaction', () => {
         principalId: 'coordinator:g1',
         authority: 'coordinator',
         runId: run.id,
-        coordinatorGeneration: run.consumer_generation
+        coordinatorGeneration: handoff.claimedGeneration
       },
       leaseId: handoff.successorLeaseId,
       executionHostId: 'local',
@@ -131,5 +150,36 @@ describe('Run binding Maestro terminal lease transaction', () => {
     })
     expect(db.getMaestroTerminalLease(predecessor.id)?.lifecycleState).toBe('retained')
     expect(db.getMaestroTerminalLease(handoff.successorLeaseId)?.lifecycleState).toBe('active')
+    expect(
+      db.acknowledgeRunDelivery({
+        runId: run.id,
+        consumerGeneration: handoff.claimedGeneration,
+        deliveryId: delivery.delivery.id
+      }).delivery.status
+    ).toBe('acknowledged')
+  })
+
+  it('preserves a surviving pane generation and advances a new successor', () => {
+    db = new OrchestrationDb(':memory:')
+    const run = db.createRun({
+      objective: 'rebind coordinator',
+      coordinatorHandle: 'term_old',
+      coordinatorPaneKey: 'tab_old:11111111-1111-4111-8111-111111111111'
+    })
+
+    expect(
+      db.bindRun({
+        runId: run.id,
+        coordinatorHandle: 'term_reminted',
+        coordinatorPaneKey: 'tab_reminted:11111111-1111-4111-8111-111111111111'
+      })
+    ).toMatchObject({ coordinator_handle: 'term_reminted', consumer_generation: 1 })
+    expect(
+      db.bindRun({
+        runId: run.id,
+        coordinatorHandle: 'term_successor',
+        coordinatorPaneKey: 'tab_new:22222222-2222-4222-9222-222222222222'
+      })
+    ).toMatchObject({ coordinator_handle: 'term_successor', consumer_generation: 2 })
   })
 })

@@ -6,6 +6,7 @@ import {
   type MaestroTerminalLeaseState
 } from '../../../../../shared/maestro-terminal-lease'
 import { OrchestrationError } from '../../orchestration-error'
+import { isEquivalentPaneKey } from '../pane-key-match'
 import type { OrchestrationDb } from '../orchestration-db'
 import { findLiveTerminalLeaseOwner } from './maestro-terminal-lease-row'
 
@@ -142,4 +143,69 @@ export function retainMaestroTerminalLease(
     throw new OrchestrationError('lease_not_found', `Terminal lease ${leaseId} was not found.`)
   }
   return lease
+}
+
+export function rebindCurrentCoordinatorLease(
+  this: OrchestrationDb,
+  params: {
+    leaseId: string
+    executionHostId: string
+    workspaceKey: string
+    terminalHandle: string
+    tabId: string | null
+    paneKey: string
+    ptyIncarnation: string
+    processRootId: string | null
+  }
+): MaestroTerminalLease {
+  const lease = this.getMaestroTerminalLease(params.leaseId)
+  const run = lease ? this.getRun(lease.runId) : undefined
+  if (
+    !lease ||
+    lease.role !== 'coordinator' ||
+    lease.coordinatorGeneration === null ||
+    !run ||
+    run.consumer_generation !== lease.coordinatorGeneration ||
+    run.coordinator_handle !== params.terminalHandle ||
+    !run.coordinator_pane_key ||
+    !isEquivalentPaneKey(run.coordinator_pane_key, params.paneKey)
+  ) {
+    throw new OrchestrationError(
+      'consumer_fenced',
+      'Only the current Run coordinator may rebind its terminal lease.'
+    )
+  }
+  const conflictingOwner = findLiveTerminalLeaseOwner(this, {
+    leaseId: lease.id,
+    executionHostId: params.executionHostId,
+    workspaceKey: params.workspaceKey,
+    terminalHandle: params.terminalHandle,
+    ptyIncarnation: params.ptyIncarnation
+  })
+  if (conflictingOwner) {
+    throw new OrchestrationError(
+      'lease_identity_conflict',
+      `Terminal incarnation is already owned by lease ${conflictingOwner.id}.`
+    )
+  }
+  this.db
+    .prepare(
+      `UPDATE maestro_terminal_leases
+       SET execution_host_id = ?, workspace_key = ?, terminal_handle = ?, tab_id = ?,
+           pane_key = ?, pty_incarnation = ?, process_root_id = ?,
+           retention_policy = 'retain', lifecycle_state = 'retained', observation = NULL,
+           cleanup_receipt_json = NULL, updated_at = datetime('now')
+       WHERE id = ?`
+    )
+    .run(
+      params.executionHostId,
+      params.workspaceKey,
+      params.terminalHandle,
+      params.tabId,
+      params.paneKey,
+      params.ptyIncarnation,
+      params.processRootId,
+      params.leaseId
+    )
+  return this.getMaestroTerminalLease(params.leaseId) as MaestroTerminalLease
 }

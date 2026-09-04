@@ -15,6 +15,7 @@ import type { MaestroHumanReviewResource } from './useMaestroHumanReview'
 import type { MaestroRunPanelVisibility } from './maestro-run-panel-visibility'
 import {
   availableLegacyRunProgress,
+  humanResourceRows,
   humanProgressRows,
   isMaestroRunProgressV2,
   legacyStateLabel,
@@ -86,7 +87,7 @@ export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.E
   if (!humanProgress && !legacyProgress) {
     return (
       <aside
-        className={`absolute left-3 z-40 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground shadow-xs ${props.authorityUnavailable ? 'top-24' : 'top-14'}`}
+        className={`absolute left-3 z-40 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground shadow-xs ${props.authorityUnavailable ? 'top-24' : 'top-3'}`}
         data-maestro-workspace-harness-overlay=""
         aria-label={translate(
           'auto.components.maestro.MaestroWorkspaceHarnessOverlay.runProgress',
@@ -112,6 +113,7 @@ export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.E
     ? humanProgress.execution.progress_percent
     : legacyTaskProgress?.percent
   const rows = humanProgress ? humanProgressRows(humanProgress) : null
+  const resourceRows = humanProgress ? humanResourceRows(humanProgress) : []
   const compactDetail =
     rows?.blocked[0]?.detail ??
     rows?.current[0]?.detail ??
@@ -126,7 +128,7 @@ export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.E
   if (props.visibility === 'compact') {
     return (
       <aside
-        className={`absolute left-3 z-40 flex w-[min(30rem,calc(100%-6rem))] items-center gap-2 rounded-lg border border-border bg-card/95 px-2.5 py-2 shadow-xs backdrop-blur-md ${props.authorityUnavailable ? 'top-24' : 'top-14'}`}
+        className={`absolute left-3 z-40 flex w-[min(30rem,calc(100%-6rem))] items-center gap-2 rounded-lg border border-border bg-card/95 px-2.5 py-2 shadow-xs backdrop-blur-md ${props.authorityUnavailable ? 'top-24' : 'top-3'}`}
         data-maestro-workspace-harness-overlay=""
         data-maestro-run-panel-visibility="compact"
         aria-label={translate(
@@ -182,7 +184,7 @@ export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.E
         { label: 'Host', value: humanProgress.technical.execution_host_id },
         { label: 'Workspace', value: humanProgress.technical.workspace_key },
         { label: 'Revision', value: String(humanProgress.technical.revision) },
-        ...(inspectedReference ? [{ label: 'Task', value: inspectedReference }] : [])
+        ...(inspectedReference ? [{ label: 'Reference', value: inspectedReference }] : [])
       ]
     : legacyProgress
       ? [
@@ -196,7 +198,7 @@ export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.E
 
   return (
     <aside
-      className={`scrollbar-sleek absolute left-3 z-40 max-h-[min(72%,42rem)] w-[min(27rem,calc(100%-6rem))] overflow-auto rounded-lg border border-border bg-card/95 p-3 shadow-xs backdrop-blur-md ${props.authorityUnavailable ? 'top-24' : 'top-14'}`}
+      className={`scrollbar-sleek absolute left-3 z-40 max-h-[min(72%,42rem)] w-[min(27rem,calc(100%-6rem))] overflow-auto rounded-lg border border-border bg-card/95 p-3 shadow-xs backdrop-blur-md ${props.authorityUnavailable ? 'top-24' : 'top-3'}`}
       data-maestro-workspace-harness-overlay=""
       data-maestro-run-panel-visibility="expanded"
       aria-label={translate(
@@ -268,6 +270,14 @@ export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.E
       <div className="mt-3 space-y-3">
         {humanProgress && rows ? (
           <>
+            <RunProgressSection
+              label={translate(
+                'auto.components.maestro.MaestroWorkspaceHarnessOverlay.runResources',
+                'Run resources'
+              )}
+              rows={resourceRows}
+              onActivate={activate}
+            />
             <RunProgressSection
               label={translate(
                 'auto.components.maestro.MaestroWorkspaceHarnessOverlay.currentWork',

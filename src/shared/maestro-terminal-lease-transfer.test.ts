@@ -24,7 +24,9 @@ describe('Maestro terminal lease transfer contract', () => {
       model: 'gpt-5.6-terra',
       effort: 'high',
       permissionMode: 'yolo',
-      routeRef: 'route_1'
+      routeRef: 'route_1',
+      serviceTier: 'default' as const,
+      environmentPolicy: 'sha256:environment'
     },
     retentionPolicy: 'auto_release' as const
   }
@@ -51,7 +53,9 @@ describe('Maestro terminal lease transfer contract', () => {
       routeRef: identity.launchProfile.routeRef,
       effort: identity.launchProfile.effort,
       model: identity.launchProfile.model,
-      agent: identity.launchProfile.agent
+      agent: identity.launchProfile.agent,
+      serviceTier: identity.launchProfile.serviceTier,
+      environmentPolicy: identity.launchProfile.environmentPolicy
     }
 
     expect(matchesMaestroTerminalLaunchProfile(identity.launchProfile, reordered)).toBe(true)
@@ -59,6 +63,12 @@ describe('Maestro terminal lease transfer contract', () => {
       matchesMaestroTerminalLaunchProfile(identity.launchProfile, {
         ...reordered,
         permissionMode: 'default'
+      })
+    ).toBe(false)
+    expect(
+      matchesMaestroTerminalLaunchProfile(identity.launchProfile, {
+        ...reordered,
+        serviceTier: 'fast'
       })
     ).toBe(false)
   })

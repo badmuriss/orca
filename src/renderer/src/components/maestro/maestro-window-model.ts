@@ -30,6 +30,7 @@ const SETTLED_STATES = new Set([
   'released',
   'ready_to_release',
   'reclaimable',
+  'recovered',
   'passed',
   'succeeded'
 ])

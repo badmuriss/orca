@@ -13722,7 +13722,12 @@
           "791294b80c": "Exact page capture unavailable",
           "3e7cc4bc3a": "Capturing the exact existing page…",
           "0b65d32766": "Exact Browser page {{value0}}",
-          "reconnecting": "Reconnecting the exact page preview…"
+          "reconnecting": "Reconnecting the exact page preview…",
+          "address": "Browser address",
+          "controlsChecking": "Checking this exact Browser page…",
+          "controlsUnavailable": "Browser controls are temporarily unavailable. The last confirmed frame remains visible.",
+          "controlsUpdateRequired": "Browser controls require a newer peer.",
+          "pageUnavailable": "This Browser page is no longer available."
         },
         "MaestroWorkspaceCanvas": {
           "1605610d90": "Right-click the board to add a Terminal, Browser, or annotation. A Harness Run is optional.",
@@ -13776,6 +13781,8 @@
           "stateInProgress": "In progress",
           "stateFailed": "Failed",
           "nativeChildActivity": "Native child activity",
+          "browserUnavailableAction": "The owning host cannot verify this managed Browser page. Open a new Browser page from the Canvas to continue.",
+          "legacyBlockedTask": "Blocked task",
           "legacyRunTitle": "Run progress",
           "restoreRunPanel": "Restore Run progress panel",
           "runProgress": "Run progress",
@@ -13796,7 +13803,8 @@
           "legacyTaskDetail": "Detailed activity is unavailable from this peer.",
           "legacyBlockedItem": "Blocked item {{value0}}",
           "legacyBlockedDetail": "The older peer did not provide a human blocker summary.",
-          "legacyProgress": "Legacy progress"
+          "legacyProgress": "Legacy progress",
+          "runResources": "Run resources"
         },
         "MaestroWorkspaceInspector": {
           "f1039bab27": "No links touch this surface.",

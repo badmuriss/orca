@@ -16,7 +16,7 @@ type WorkspaceCanvasClientTab = Exclude<RuntimeMobileSessionClientTab, { type: '
 export function workspaceCanvasSelector(scope: RuntimeMaestroWorkspaceCanvasScope): string {
   const parsed = parseWorkspaceKey(scope.workspace_key)
   if (parsed?.type === 'folder') {
-    return `id:${parsed.folderWorkspaceId}`
+    return `id:${scope.workspace_key}`
   }
   if (parsed?.type === 'worktree') {
     return `id:${parsed.worktreeId}`

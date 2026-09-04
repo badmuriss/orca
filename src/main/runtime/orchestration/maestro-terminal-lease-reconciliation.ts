@@ -14,13 +14,11 @@ export async function adoptCurrentCoordinatorLease(args: {
   generation: number
   terminalHandle: string
   paneKey: string
-  agent: TuiAgent
+  agent?: TuiAgent
   spawnedBy: string
+  callerAuthority?: OrchestrationCompatibilityCallerAuthority
 }): Promise<void> {
   const db = args.runtime.getOrchestrationDb()
-  if (db.getCoordinatorLease(args.runId, args.generation)) {
-    return
-  }
   const terminal = await args.runtime.showTerminal(args.terminalHandle)
   const incarnation = args.runtime.getTerminalProcessIncarnation(args.terminalHandle)
   const context = args.runtime.buildTerminalManagedCliContext(args.terminalHandle)
@@ -30,6 +28,44 @@ export async function adoptCurrentCoordinatorLease(args: {
       'Current coordinator terminal incarnation is unavailable.'
     )
   }
+  if (
+    args.callerAuthority &&
+    (args.callerAuthority.terminalHandle !== args.terminalHandle ||
+      args.callerAuthority.paneKey !== args.paneKey ||
+      args.callerAuthority.processIncarnation !== incarnation)
+  ) {
+    throw new OrchestrationError(
+      'consumer_fenced',
+      'Coordinator lease adoption does not match the authenticated caller incarnation.'
+    )
+  }
+  const tabId = terminal.tabId ?? args.paneKey.slice(0, args.paneKey.indexOf(':'))
+  const currentLease = db.getCoordinatorLease(args.runId, args.generation)
+  if (currentLease) {
+    if (
+      !args.callerAuthority ||
+      args.callerAuthority.terminalHandle !== args.terminalHandle ||
+      args.callerAuthority.paneKey !== args.paneKey ||
+      args.callerAuthority.processIncarnation !== incarnation
+    ) {
+      throw new OrchestrationError(
+        'consumer_fenced',
+        'Existing coordinator lease adoption requires the authenticated caller incarnation.'
+      )
+    }
+    db.rebindCurrentCoordinatorLease({
+      leaseId: currentLease.id,
+      executionHostId: context.executionHostId,
+      workspaceKey: context.workspaceKey,
+      terminalHandle: args.terminalHandle,
+      tabId,
+      paneKey: args.paneKey,
+      ptyIncarnation: incarnation,
+      processRootId: terminal.ptyId ?? null
+    })
+    return
+  }
+  const agent = args.agent ?? terminal.agentIdentity ?? null
   const lease = db.reserveMaestroTerminalLease({
     requestId: `coordinator:${args.runId}:g${args.generation}`,
     executionHostId: context.executionHostId,
@@ -42,10 +78,10 @@ export async function adoptCurrentCoordinatorLease(args: {
       role: 'coordinator',
       runId: args.runId,
       coordinatorGeneration: args.generation,
-      agent: args.agent
+      agent
     }),
     launchProfile: {
-      agent: args.agent,
+      agent,
       model: null,
       effort: null,
       permissionMode: 'unknown',
@@ -58,7 +94,7 @@ export async function adoptCurrentCoordinatorLease(args: {
   db.attachMaestroTerminalLease({
     leaseId: lease.id,
     terminalHandle: args.terminalHandle,
-    tabId: terminal.tabId ?? args.paneKey.slice(0, args.paneKey.indexOf(':')),
+    tabId,
     paneKey: args.paneKey,
     ptyIncarnation: incarnation,
     processRootId: terminal.ptyId ?? null

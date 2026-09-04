@@ -185,6 +185,153 @@ describe('Maestro terminal lease reconciliation', () => {
     expect(close).not.toHaveBeenCalled()
   })
 
+  it('rebinds one current-generation lease to the authenticated restart incarnation', async () => {
+    db = new OrchestrationDb(':memory:')
+    const runtime = new OrcaRuntimeService()
+    runtime.setOrchestrationDb(db)
+    const run = db.createRun({
+      objective: 'Recover after restart',
+      coordinatorHandle: 'term_current',
+      coordinatorPaneKey: 'tab_current:leaf_current'
+    })
+    const lease = db.reserveMaestroTerminalLease({
+      requestId: `coordinator:${run.id}:g1`,
+      executionHostId: 'local',
+      workspaceKey: 'folder:one',
+      runId: run.id,
+      coordinatorGeneration: 1,
+      role: 'coordinator',
+      coordinatorRunId: run.id,
+      title: 'Coordinator before restart',
+      launchProfile: {
+        agent: 'codex',
+        model: null,
+        effort: null,
+        permissionMode: 'unknown',
+        routeRef: 'adopted-external-coordinator'
+      },
+      spawnedBy: 'authenticated-before-restart',
+      ownerPrincipal: `external-coordinator:${run.id}:g1`,
+      retentionPolicy: 'retain'
+    })
+    db.attachMaestroTerminalLease({
+      leaseId: lease.id,
+      terminalHandle: 'term_before_restart',
+      tabId: 'tab_before_restart',
+      paneKey: 'tab_before_restart:leaf_before_restart',
+      ptyIncarnation: 'pty_before_restart:1',
+      processRootId: 'pty_before_restart'
+    })
+    db.retainMaestroTerminalLease(lease.id)
+    vi.spyOn(runtime, 'showTerminal').mockResolvedValue({
+      handle: 'term_current',
+      tabId: 'tab_current',
+      ptyId: 'pty_current',
+      agentIdentity: 'codex'
+    } as never)
+    vi.spyOn(runtime, 'getTerminalProcessIncarnation').mockReturnValue('pty_current:2')
+    vi.spyOn(runtime, 'buildTerminalManagedCliContext').mockReturnValue({
+      executionHostId: 'local',
+      workspaceKey: 'folder:one'
+    } as never)
+
+    await adoptCurrentCoordinatorLease({
+      runtime,
+      runId: run.id,
+      generation: 1,
+      terminalHandle: 'term_current',
+      paneKey: 'tab_current:leaf_current',
+      spawnedBy: 'authenticated-after-restart',
+      callerAuthority: {
+        hostScope: { kind: 'local', hostId: 'local' },
+        terminalHandle: 'term_current',
+        paneKey: 'tab_current:leaf_current',
+        processIncarnation: 'pty_current:2',
+        launchTokenHash: 'launch-token-after-restart'
+      }
+    })
+
+    expect(db.getCoordinatorLease(run.id, 1)).toMatchObject({
+      id: lease.id,
+      terminalHandle: 'term_current',
+      tabId: 'tab_current',
+      paneKey: 'tab_current:leaf_current',
+      ptyIncarnation: 'pty_current:2',
+      lifecycleState: 'retained'
+    })
+    expect(
+      db.db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM maestro_terminal_leases WHERE run_id = ? AND role = 'coordinator'"
+        )
+        .get(run.id)
+    ).toEqual({ count: 1 })
+  })
+
+  it('refuses to rebind an existing coordinator lease without caller authority', async () => {
+    db = new OrchestrationDb(':memory:')
+    const runtime = new OrcaRuntimeService()
+    runtime.setOrchestrationDb(db)
+    const run = db.createRun({
+      objective: 'Reject unauthenticated restart',
+      coordinatorHandle: 'term_current',
+      coordinatorPaneKey: 'tab_current:leaf_current'
+    })
+    const lease = db.reserveMaestroTerminalLease({
+      requestId: `coordinator:${run.id}:g1`,
+      executionHostId: 'local',
+      workspaceKey: 'folder:one',
+      runId: run.id,
+      coordinatorGeneration: 1,
+      role: 'coordinator',
+      coordinatorRunId: run.id,
+      title: 'Coordinator before restart',
+      launchProfile: {
+        agent: 'codex',
+        model: null,
+        effort: null,
+        permissionMode: 'unknown',
+        routeRef: 'adopted-external-coordinator'
+      },
+      spawnedBy: 'authenticated-before-restart',
+      ownerPrincipal: `external-coordinator:${run.id}:g1`,
+      retentionPolicy: 'retain'
+    })
+    db.attachMaestroTerminalLease({
+      leaseId: lease.id,
+      terminalHandle: 'term_before_restart',
+      tabId: 'tab_before_restart',
+      paneKey: 'tab_before_restart:leaf_before_restart',
+      ptyIncarnation: 'pty_before_restart:1',
+      processRootId: 'pty_before_restart'
+    })
+    vi.spyOn(runtime, 'showTerminal').mockResolvedValue({
+      handle: 'term_current',
+      tabId: 'tab_current',
+      ptyId: 'pty_current'
+    } as never)
+    vi.spyOn(runtime, 'getTerminalProcessIncarnation').mockReturnValue('pty_current:2')
+    vi.spyOn(runtime, 'buildTerminalManagedCliContext').mockReturnValue({
+      executionHostId: 'local',
+      workspaceKey: 'folder:one'
+    } as never)
+
+    await expect(
+      adoptCurrentCoordinatorLease({
+        runtime,
+        runId: run.id,
+        generation: 1,
+        terminalHandle: 'term_current',
+        paneKey: 'tab_current:leaf_current',
+        spawnedBy: 'unauthenticated-after-restart'
+      })
+    ).rejects.toMatchObject({ code: 'consumer_fenced' })
+    expect(db.getCoordinatorLease(run.id, 1)).toMatchObject({
+      terminalHandle: 'term_before_restart',
+      ptyIncarnation: 'pty_before_restart:1'
+    })
+  })
+
   it('records controlled provider rollover without resuming or killing the current process', () => {
     const { runtime, lease } = setup()
     const close = vi.spyOn(runtime, 'closeTerminal')

@@ -10,6 +10,7 @@ export type MaestroWorkspaceCanvasRuntime = Pick<
   | 'commandMaestroWorkspaceTab'
   | 'getTerminalProcessIncarnation'
   | 'getOrchestrationDb'
+  | 'listTerminals'
   | 'listMobileSessionTabs'
   | 'readMobileFile'
   | 'readMobileMarkdownTab'

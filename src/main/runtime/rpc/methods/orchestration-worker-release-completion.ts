@@ -1,8 +1,7 @@
 import type { OrchestrationDb } from '../../orchestration/db'
 import type {
   WorkerTerminalArchiveStatus,
-  WorkerTerminalResourceRow,
-  WorkerTerminalRetainedReason
+  WorkerTerminalResourceRow
 } from '../../orchestration/worker-terminal-ownership'
 import { captureWorkerOutputArchive } from '../../orchestration/worker-output-archive'
 import {
@@ -10,34 +9,21 @@ import {
   workerTerminalWorkspaceIsCurrent
 } from '../../orchestration/worker-terminal-exited-release-reconciliation'
 import type { OrcaRuntimeService } from '../../orca-runtime'
-import { describeUnconfirmedAgentStop } from '../../../../shared/pty-liveness-verdict'
 import { inspectWorkerTerminal } from './orchestration-worker-observation'
 import { orchestrationTimestampToMs } from './orchestration-worker-output'
-import { settleWorkerTerminalTabNotFoundCloseRace } from '../../orchestration/db/worker-terminal/worker-terminal-close-race'
 import {
   retainedWorkerTerminalReason,
   summarizeWorkerTerminalArchive,
   workerTerminalLeaseIsCurrent
 } from '../../orchestration/db/worker-terminal/worker-terminal-release-identity'
 import { identityMismatchReceipt, releaseUnknown } from './orchestration-worker-release-receipts'
+import {
+  closeWorkerTerminalOnOwningHost,
+  reconcileMissingWorkerTerminalRelease,
+  type WorkerReleaseReceipt
+} from './orchestration-worker-release-owning-host'
 
-export type WorkerReleaseReceipt = {
-  dispatchId: string
-  state:
-    | 'released'
-    | 'already_absent'
-    | 'already_released'
-    | 'retained'
-    | 'release_pending'
-    | 'release_unknown'
-  reason?: WorkerTerminalRetainedReason
-  processAction: 'closed_agent_terminal' | 'closed_exited_terminal' | 'none'
-  archive: { source: string | null; status: string | null } | null
-  recovery?: string
-  lastError?: string
-  closeResponse?: { error: 'tab_not_found'; message: string }
-  inventoryResponse?: { state: 'absent' | 'still_present' | 'unverifiable' }
-}
+export type { WorkerReleaseReceipt } from './orchestration-worker-release-owning-host'
 
 type WorkerTerminalReleaseArgs = {
   runtime: OrcaRuntimeService
@@ -102,12 +88,18 @@ async function completeWorkerTerminalReleaseOnce(
     )
   }
   if (observation.status === 'unverifiable') {
-    return releaseUnknown(
-      db,
-      dispatchId,
-      resource,
-      `The exact worker process is unverifiable: ${observation.reason ?? 'the owning host did not return a liveness verdict'}.`
-    )
+    return {
+      ...releaseUnknown(
+        db,
+        dispatchId,
+        resource,
+        `The exact worker process is unverifiable: ${observation.reason ?? 'the owning host did not return a liveness verdict'}.`
+      ),
+      processVerdict: 'unverifiable'
+    }
+  }
+  if (observation.status === 'missing' || observation.status === 'unattached') {
+    return reconcileMissingWorkerTerminalRelease(args)
   }
   if (!workerTerminalLeaseIsCurrent(runtime, db, dispatchId, resource, observation)) {
     return identityMismatchReceipt(
@@ -115,14 +107,6 @@ async function completeWorkerTerminalReleaseOnce(
       dispatchId,
       resource,
       'The recorded worker lease no longer matches its exact terminal identity; worker release remains unknown.'
-    )
-  }
-  if (observation.status === 'missing' || observation.status === 'unattached') {
-    return releaseUnknown(
-      db,
-      dispatchId,
-      resource,
-      'The recorded terminal is missing; its process state is unverifiable.'
     )
   }
   if (!workerTerminalWorkspaceIsCurrent(resource, observation)) {
@@ -249,56 +233,13 @@ async function completeWorkerTerminalReleaseOnce(
       archive: archiveSummary(exited.resource)
     }
   }
-  try {
-    const close = await runtime.closeTerminal(resource.terminal_handle)
-    if (!close.ptyKilled) {
-      const reason = describeUnconfirmedAgentStop(close)
-      const unknown = db.markWorkerTerminalReleaseUnknown(resource.id, reason)
-      return {
-        dispatchId,
-        state: 'release_unknown',
-        processAction: 'closed_agent_terminal',
-        archive: { source: archiveSource, status: archiveStatus },
-        lastError: unknown.release_error ?? reason,
-        recovery: `Inspect with: orca orchestration worker-show --dispatch ${dispatchId} --json — then repeat worker-release with the same --retry-request. Never substitute a broad terminal close.`
-      }
-    }
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error)
-    if (/(?:session_)?tab_not_found/.test(reason)) {
-      return settleWorkerTerminalTabNotFoundCloseRace({
-        runtime,
-        db,
-        dispatchId,
-        resource,
-        archive: { source: archiveSource, status: archiveStatus },
-        closeResponse: { error: 'tab_not_found', message: reason }
-      })
-    }
-    if (/disposed|not connected|unavailable/i.test(reason)) {
-      return releaseUnknown(
-        db,
-        dispatchId,
-        releasing,
-        `The owning endpoint is unavailable, so the exact worker process is unverifiable: ${reason}`
-      )
-    }
-    const unknown = db.markWorkerTerminalReleaseUnknown(resource.id, reason)
-    return {
-      dispatchId,
-      state: 'release_unknown',
-      processAction: 'none',
-      archive: { source: archiveSource, status: archiveStatus },
-      lastError: unknown.release_error ?? reason,
-      recovery: `Inspect with: orca orchestration worker-show --dispatch ${dispatchId} --json — then repeat worker-release with the same --retry-request. Never substitute a broad terminal close.`
-    }
-  }
-  const released = db.settleWorkerTerminalRelease(resource.id)
-  runtime.notifyMessageArrived(`dispatch:${dispatchId}`, 'status')
-  return {
+  return closeWorkerTerminalOnOwningHost({
+    runtime,
+    db,
     dispatchId,
-    state: 'released',
-    processAction: 'closed_agent_terminal',
-    archive: archiveSummary(released)
-  }
+    resource,
+    releasing,
+    archiveSource,
+    archiveStatus
+  })
 }

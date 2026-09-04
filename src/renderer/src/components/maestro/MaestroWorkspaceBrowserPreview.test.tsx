@@ -1,10 +1,13 @@
 // @vitest-environment happy-dom
 
-import { act, cleanup, fireEvent, render } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { callRuntimeRpc } = vi.hoisted(() => ({ callRuntimeRpc: vi.fn() }))
-vi.mock('@/runtime/runtime-rpc-client', () => ({ callRuntimeRpc }))
+vi.mock('@/runtime/runtime-rpc-client', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  callRuntimeRpc
+}))
 
 import { MaestroWorkspaceBrowserPreview } from './MaestroWorkspaceBrowserPreview'
 
@@ -14,10 +17,27 @@ function previewImage(): Element | null {
   return document.querySelector('[data-browser-page-id="page-1"]')
 }
 
+function callsFor(method: string): unknown[][] {
+  return callRuntimeRpc.mock.calls.filter((call) => call[1] === method)
+}
+
 describe('MaestroWorkspaceBrowserPreview', () => {
   afterEach(cleanup)
   beforeEach(() => {
-    callRuntimeRpc.mockReset().mockResolvedValue(SCREENSHOT)
+    callRuntimeRpc.mockReset().mockImplementation((_target, method) => {
+      if (method === 'browser.screenshot') {
+        return Promise.resolve(SCREENSHOT)
+      }
+      if (method === 'browser.tabShow') {
+        return Promise.resolve({
+          tab: { browserPageId: 'page-1', url: 'https://example.test', title: 'Example' }
+        })
+      }
+      return Promise.resolve({
+        url: 'https://example.test',
+        title: 'Example'
+      })
+    })
   })
 
   it('captures the exact page through the browser screenshot authority', async () => {
@@ -25,13 +45,17 @@ describe('MaestroWorkspaceBrowserPreview', () => {
       <MaestroWorkspaceBrowserPreview
         target={{ kind: 'local' }}
         pageId="page-1"
+        browserWorkspaceId="workspace-1"
         receiptRevision={1}
       />
     )
     await vi.waitFor(() => expect(previewImage()).not.toBeNull())
-    expect(callRuntimeRpc).toHaveBeenCalledTimes(1)
-    expect(callRuntimeRpc.mock.calls[0][1]).toBe('browser.screenshot')
-    expect(callRuntimeRpc.mock.calls[0][2]).toEqual({ page: 'page-1', format: 'png' })
+    expect(callsFor('browser.screenshot')).toHaveLength(1)
+    expect(callsFor('browser.screenshot')[0]?.[2]).toEqual({
+      page: 'page-1',
+      format: 'png'
+    })
+    expect(callsFor('browser.tabShow')[0]?.[2]).toEqual({ page: 'page-1' })
   })
 
   it('keeps the resolved capture when a layout mutation rebuilds equivalent props', async () => {
@@ -39,6 +63,7 @@ describe('MaestroWorkspaceBrowserPreview', () => {
       <MaestroWorkspaceBrowserPreview
         target={{ kind: 'local' }}
         pageId="page-1"
+        browserWorkspaceId="workspace-1"
         receiptRevision={1}
       />
     )
@@ -48,6 +73,7 @@ describe('MaestroWorkspaceBrowserPreview', () => {
       <MaestroWorkspaceBrowserPreview
         target={{ kind: 'local' }}
         pageId="page-1"
+        browserWorkspaceId="workspace-1"
         receiptRevision={1}
       />
     )
@@ -60,6 +86,7 @@ describe('MaestroWorkspaceBrowserPreview', () => {
       <MaestroWorkspaceBrowserPreview
         target={{ kind: 'local' }}
         pageId="page-1"
+        browserWorkspaceId="workspace-1"
         receiptRevision={1}
       />
     )
@@ -68,25 +95,36 @@ describe('MaestroWorkspaceBrowserPreview', () => {
       <MaestroWorkspaceBrowserPreview
         target={{ kind: 'local' }}
         pageId="page-1"
+        browserWorkspaceId="workspace-1"
         receiptRevision={2}
       />
     )
-    await vi.waitFor(() => expect(callRuntimeRpc).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(callsFor('browser.screenshot')).toHaveLength(2))
     await vi.waitFor(() => expect(previewImage()).not.toBeNull())
   })
 
   it('keeps the previous image in place while a revision recapture is pending', async () => {
     let resolveSecondCapture!: (value: typeof SCREENSHOT) => void
-    callRuntimeRpc.mockResolvedValueOnce(SCREENSHOT).mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          resolveSecondCapture = resolve
+    let screenshotCalls = 0
+    callRuntimeRpc.mockImplementation((_target, method) => {
+      if (method !== 'browser.screenshot') {
+        return Promise.resolve({
+          tab: { browserPageId: 'page-1', url: 'https://example.test', title: 'Example' }
         })
-    )
+      }
+      screenshotCalls += 1
+      if (screenshotCalls === 1) {
+        return Promise.resolve(SCREENSHOT)
+      }
+      return new Promise((resolve) => {
+        resolveSecondCapture = resolve
+      })
+    })
     const view = render(
       <MaestroWorkspaceBrowserPreview
         target={{ kind: 'local' }}
         pageId="page-1"
+        browserWorkspaceId="workspace-1"
         receiptRevision={1}
       />
     )
@@ -96,10 +134,11 @@ describe('MaestroWorkspaceBrowserPreview', () => {
       <MaestroWorkspaceBrowserPreview
         target={{ kind: 'local' }}
         pageId="page-1"
+        browserWorkspaceId="workspace-1"
         receiptRevision={2}
       />
     )
-    expect(callRuntimeRpc).toHaveBeenCalledTimes(2)
+    expect(callsFor('browser.screenshot')).toHaveLength(2)
     // The stale-but-valid frame stays mounted until the newer capture resolves.
     expect(previewImage()).not.toBeNull()
     expect(previewImage()?.getAttribute('src')).toBe('data:image/png;base64,abc123')
@@ -115,6 +154,7 @@ describe('MaestroWorkspaceBrowserPreview', () => {
       <MaestroWorkspaceBrowserPreview
         target={{ kind: 'local' }}
         pageId="page-1"
+        browserWorkspaceId="workspace-1"
         receiptRevision={1}
         selected
         onInteract={onInteract}
@@ -148,5 +188,74 @@ describe('MaestroWorkspaceBrowserPreview', () => {
     )
     expect(onInteract).toHaveBeenCalledOnce()
     expect(callRuntimeRpc.mock.calls.some((call) => call[1] === 'browser.tabSwitch')).toBe(false)
+  })
+
+  it('drives exact-page navigation while sanitizing addresses and runtime failures', async () => {
+    callRuntimeRpc.mockImplementation((_target, method) => {
+      if (method === 'browser.screenshot') {
+        return Promise.resolve(SCREENSHOT)
+      }
+      if (method === 'browser.tabShow') {
+        return Promise.resolve({
+          tab: {
+            browserPageId: 'page-1',
+            url: 'https://kagi.com/search?token=private&q=orca',
+            title: 'Search'
+          }
+        })
+      }
+      if (method === 'browser.reload') {
+        return Promise.reject(new Error('rpc secret: bearer-token'))
+      }
+      return Promise.resolve({ url: 'https://example.test/next', title: 'Next' })
+    })
+    render(
+      <MaestroWorkspaceBrowserPreview
+        target={{ kind: 'local' }}
+        pageId="page-1"
+        browserWorkspaceId="workspace-1"
+        receiptRevision={1}
+        selected
+      />
+    )
+
+    const address = await screen.findByRole<HTMLInputElement>('textbox', {
+      name: 'Browser address'
+    })
+    await vi.waitFor(() => expect(address.disabled).toBe(false))
+    expect(address.value).toBe('https://kagi.com/search?q=orca')
+
+    fireEvent.change(address, { target: { value: 'example.test/next' } })
+    fireEvent.submit(address.closest('form') as HTMLFormElement)
+    await vi.waitFor(() => expect(callsFor('browser.goto')).toHaveLength(1))
+    expect(callsFor('browser.goto')[0]?.[2]).toEqual({
+      page: 'page-1',
+      url: 'https://example.test/next'
+    })
+
+    await vi.waitFor(() =>
+      expect((screen.getByRole('button', { name: 'Back' }) as HTMLButtonElement).disabled).toBe(
+        false
+      )
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    await vi.waitFor(() => expect(callsFor('browser.back')).toHaveLength(1))
+    await vi.waitFor(() =>
+      expect((screen.getByRole('button', { name: 'Forward' }) as HTMLButtonElement).disabled).toBe(
+        false
+      )
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Forward' }))
+    await vi.waitFor(() => expect(callsFor('browser.forward')).toHaveLength(1))
+    await vi.waitFor(() =>
+      expect((screen.getByRole('button', { name: 'Reload' }) as HTMLButtonElement).disabled).toBe(
+        false
+      )
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
+    await vi.waitFor(() =>
+      expect(screen.getByText(/Browser controls are temporarily unavailable/)).not.toBeNull()
+    )
+    expect(screen.queryByText(/bearer-token/)).toBeNull()
   })
 })

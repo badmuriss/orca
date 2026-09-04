@@ -125,7 +125,7 @@ function isAgentActorAttestation(value: unknown): value is AgentActorAttestation
     'observedAt' in value &&
     typeof value.observedAt === 'number' &&
     'provider' in value &&
-    (value.provider === 'claude' || value.provider === 'codex') &&
+    (value.provider === 'claude' || value.provider === 'codex' || value.provider === 'opencode') &&
     'role' in value &&
     (value.role === 'lead' || value.role === 'child') &&
     'eventName' in value &&

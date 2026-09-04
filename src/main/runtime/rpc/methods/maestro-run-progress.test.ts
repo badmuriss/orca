@@ -92,7 +92,7 @@ function seed() {
     progress: undefined
   }
   applyMaestroProjection.call(database, workspace, view)
-  return { database, run, task }
+  return { database, run, task, view }
 }
 
 function context(
@@ -135,7 +135,13 @@ describe('Maestro Run progress RPC', () => {
         schema_version: 2,
         run: { id: run.id, title: 'Project human Run progress' },
         execution: { total: 1, completed: 0, progress_percent: 0 },
-        projection_health: { state: 'healthy', revision: 4 }
+        projection_health: { state: 'healthy', revision: 4 },
+        resources: expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'coordinator',
+            state: 'unverifiable'
+          })
+        ])
       }
     })
     database.close()
@@ -176,12 +182,13 @@ describe('Maestro Run progress RPC', () => {
   })
 
   it('reports cleanup uncertainty from a worker execution workspace', async () => {
-    const { database, run } = seed()
+    const { database, run, task } = seed()
     const lease = database.reserveMaestroTerminalLease({
       requestId: 'request-remote',
       executionHostId: 'ssh:worker-host',
       workspaceKey: 'worktree:remote-worker',
       runId: run.id,
+      taskId: task.id,
       attemptId: 'attempt-remote',
       role: 'worker',
       title: 'Remote worker',
@@ -211,6 +218,99 @@ describe('Maestro Run progress RPC', () => {
       throw new Error(`Expected v2 progress, received ${response.schemaVersion ?? 'none'}.`)
     }
     expect(response.progress.cleanup_health).toMatchObject({ state: 'unverifiable', count: 1 })
+    expect(response.progress.resources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'terminal',
+          reference: lease.id,
+          parent_reference: 'attempt-remote',
+          activation_reference: task.id,
+          state: 'unverifiable'
+        })
+      ])
+    )
+    database.close()
+  })
+
+  it('recovers an exact folder Run through the authenticated current-generation lease', async () => {
+    const { database, run } = seed()
+    database.db
+      .prepare(
+        `UPDATE runs SET coordinator_handle = ?, coordinator_pane_key = ?,
+         consumer_generation = 2 WHERE id = ?`
+      )
+      .run('coordinator-2', 'tab-2:leaf-2', run.id)
+    const lease = database.reserveMaestroTerminalLease({
+      requestId: 'coordinator-current-generation',
+      executionHostId: 'local',
+      workspaceKey: 'worktree:execution-one',
+      runId: run.id,
+      coordinatorGeneration: 2,
+      role: 'coordinator',
+      coordinatorRunId: run.id,
+      title: 'Current coordinator',
+      launchProfile: {
+        agent: 'codex',
+        model: 'gpt-5.6-sol',
+        effort: 'high',
+        permissionMode: 'default',
+        routeRef: null
+      },
+      spawnedBy: 'handoff',
+      ownerPrincipal: 'coordinator:g2',
+      retentionPolicy: 'retain'
+    })
+    database.attachMaestroTerminalLease({
+      leaseId: lease.id,
+      terminalHandle: 'coordinator-2',
+      tabId: 'tab-2',
+      paneKey: 'tab-2:leaf-2',
+      ptyIncarnation: 'pty-2:1',
+      processRootId: 'pty-2'
+    })
+    database.retainMaestroTerminalLease(lease.id)
+    const rpcContext = context(database, [MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY])
+
+    const stale = await readMaestroRunProgress(rpcContext, {
+      execution_host_id: 'local',
+      workspace_key: 'folder:home-1'
+    })
+    expect(stale).toMatchObject({
+      schemaVersion: 2,
+      selectedRunId: run.id,
+      projectionHealth: { state: 'stale', revision: 4 },
+      progress: {
+        projection_health: { state: 'stale', revision: 4 },
+        resources: expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'coordinator',
+            state: 'recovered',
+            terminal_handle: 'coordinator-2',
+            liveness: 'live'
+          })
+        ])
+      }
+    })
+
+    database.db
+      .prepare('UPDATE maestro_terminal_leases SET workspace_key = ? WHERE id = ?')
+      .run('folder:home-1', lease.id)
+    database.db.prepare('DELETE FROM maestro_run_projections WHERE run_id = ?').run(run.id)
+    const projectionFree = await readMaestroRunProgress(rpcContext, {
+      execution_host_id: 'local',
+      workspace_key: 'folder:home-1'
+    })
+    expect(projectionFree).toMatchObject({
+      schemaVersion: 2,
+      selectedRunId: run.id,
+      projectionHealth: { state: 'recovered', revision: null },
+      progress: {
+        projection_health: {
+          state: 'partial',
+          warning: expect.stringContaining('authenticated managed workspace binding')
+        }
+      }
+    })
     database.close()
   })
 })

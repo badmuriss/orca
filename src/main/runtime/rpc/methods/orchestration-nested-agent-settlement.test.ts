@@ -227,4 +227,30 @@ describe('orchestration nested-agent settlement', () => {
       code: 'dispatch_capability_invalid'
     })
   })
+
+  it('settles a recognized OpenCode lead from its live busy-session attestation', async () => {
+    const { task, dependent, dispatch } = setup()
+    observeProvider({
+      agentType: 'opencode',
+      providerSession: { key: 'session_id', id: 'opencode-session' },
+      actorAttestation: {
+        authorityId: 'agent-hook-main:test',
+        incarnation: 1,
+        revision: 2,
+        observedAt: Date.now(),
+        provider: 'opencode',
+        role: 'lead',
+        eventName: 'SessionBusy',
+        providerSessionId: 'opencode-session'
+      }
+    })
+
+    const result = (await reportDone(task.id, dispatch.id)) as {
+      lifecycle: { action: string }
+    }
+
+    expect(result.lifecycle.action).toBe('completed')
+    expect(db.getTask(task.id)?.status).toBe('completed')
+    expect(db.getTask(dependent.id)?.status).toBe('ready')
+  })
 })

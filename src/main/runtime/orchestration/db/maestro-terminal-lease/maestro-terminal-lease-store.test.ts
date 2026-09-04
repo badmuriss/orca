@@ -112,6 +112,55 @@ describe('Maestro terminal lease store', () => {
     )
   })
 
+  it('resolves a tab fallback only for the exact terminal incarnation', () => {
+    db = new OrchestrationDb(':memory:')
+    const reserve = (requestId: string, attemptId: string) =>
+      db!.reserveMaestroTerminalLease({
+        requestId,
+        executionHostId: 'local',
+        workspaceKey: 'folder:one',
+        runId: 'run_1',
+        attemptId,
+        role: 'worker',
+        title: attemptId,
+        launchProfile,
+        spawnedBy: 'coordinator:g1',
+        ownerPrincipal: attemptId,
+        retentionPolicy: 'retain'
+      })
+    const first = reserve('attempt:tab:first', 'attempt-tab-first')
+    const second = reserve('attempt:tab:second', 'attempt-tab-second')
+    db.attachMaestroTerminalLease({
+      leaseId: first.id,
+      terminalHandle: 'term_first',
+      tabId: 'tab_shared',
+      paneKey: 'tab_shared:leaf_first',
+      ptyIncarnation: 'pty_first:inc_first',
+      processRootId: 'pty_first'
+    })
+    db.attachMaestroTerminalLease({
+      leaseId: second.id,
+      terminalHandle: 'term_second',
+      tabId: 'tab_shared',
+      paneKey: 'tab_shared:leaf_second',
+      ptyIncarnation: 'pty_second:inc_second',
+      processRootId: 'pty_second'
+    })
+
+    expect(
+      db.getMaestroTerminalLeaseByTab('local', 'folder:one', 'tab_shared', 'pty_first:inc_first')
+        ?.id
+    ).toBe(first.id)
+    expect(
+      db.getMaestroTerminalLeaseByTab(
+        'local',
+        'folder:one',
+        'tab_shared',
+        'pty_missing:inc_missing'
+      )
+    ).toBeUndefined()
+  })
+
   it('reports an input replay without minting another receipt', () => {
     db = new OrchestrationDb(':memory:')
     const lease = db.reserveMaestroTerminalLease({

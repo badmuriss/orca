@@ -1,4 +1,5 @@
 import type { MaestroTerminalLease } from '../../../shared/maestro-terminal-lease'
+import type { MaestroBrowserSurfaceReceipt } from '../../../shared/maestro-browser-surface'
 import {
   MAESTRO_RUN_PROGRESS_LIST_LIMIT,
   MAESTRO_RUN_PROGRESS_TEXT_MAX_LENGTH,
@@ -6,7 +7,10 @@ import {
   type MaestroRunProgressV2
 } from '../../../shared/maestro-run-progress'
 import type { OrchestrationNestedAgentActivity } from '../../../shared/orchestration-nested-agent-activity'
-import type { DispatchContextRow, MessageRow, RunRow, TaskRow } from './types'
+import type { ExactWorkerProviderSession } from '../../../shared/orchestration-worker-output'
+import { projectMaestroRunResources } from './maestro-run-resource-projection'
+import { latestAcceptedDispatchMessage, parseProgressPayload } from './maestro-run-progress-message'
+import type { DispatchContextRow, MessageRow, RunRow, TaskRow, WorkerDispatchRow } from './types'
 import {
   projectOperationalTaskOutcome,
   projectTaskProgressOutcome,
@@ -22,12 +26,17 @@ export type MaestroRunProgressProjectionInput = {
   dispatches: readonly DispatchContextRow[]
   messages: readonly MessageRow[]
   terminalLeases: readonly MaestroTerminalLease[]
+  workerDispatches: readonly WorkerDispatchRow[]
+  browserSurfaces: readonly MaestroBrowserSurfaceReceipt[]
+  providerExecutions: readonly { dispatchId: string; session: ExactWorkerProviderSession }[]
   nestedActivity: readonly OrchestrationNestedAgentActivity[]
   executionHostId: string
   workspaceKey: string
   revision: number
   projectionHealth: MaestroRunProgressV2['projection_health']
   cleanupHealth: MaestroRunProgressV2['cleanup_health']
+  recoveredAuthority: boolean
+  browserSurfaceKeys: ReadonlyMap<string, string>
 }
 
 type TaskProjection = {
@@ -191,6 +200,20 @@ export function projectMaestroRunProgress(
         state: activity.state,
         activity_summary: boundedText(activity.description, activity.type)
       })),
+    resources: projectMaestroRunResources({
+      run: input.run,
+      tasks,
+      dispatches: input.dispatches,
+      workerDispatches: input.workerDispatches,
+      terminalLeases: input.terminalLeases,
+      browserSurfaces: input.browserSurfaces,
+      providerExecutions: input.providerExecutions,
+      nestedActivity: input.nestedActivity,
+      executionHostId: input.executionHostId,
+      workspaceKey: input.workspaceKey,
+      recoveredAuthority: input.recoveredAuthority,
+      browserSurfaceKeys: input.browserSurfaceKeys
+    }),
     technical: {
       execution_host_id: input.executionHostId,
       workspace_key: input.workspaceKey,
@@ -203,7 +226,7 @@ export function projectMaestroRunProgress(
 function currentActivity(task: TaskProjection, messages: readonly MessageRow[]): string {
   const message = latestAcceptedDispatchMessage(task.dispatch, messages, ['heartbeat', 'status'])
   if (message) {
-    const payload = parsePayload(message.payload)
+    const payload = parseProgressPayload(message.payload)
     const phase = ['progressSubject', 'progress_subject', 'phase']
       .map((key) => payload?.[key])
       .find((value): value is string => typeof value === 'string' && Boolean(value.trim()))
@@ -243,7 +266,7 @@ function acceptedTaskResult(result: string | null): string | undefined {
   if (!result) {
     return undefined
   }
-  const payload = parsePayload(result)
+  const payload = parseProgressPayload(result)
   if (payload?.provenance !== 'worker_report') {
     return result
   }
@@ -253,36 +276,6 @@ function acceptedTaskResult(result: string | null): string | undefined {
     }
   }
   return undefined
-}
-
-function latestAcceptedDispatchMessage(
-  dispatch: DispatchContextRow | undefined,
-  messages: readonly MessageRow[],
-  types: readonly MessageRow['type'][]
-): MessageRow | undefined {
-  if (!dispatch) {
-    return undefined
-  }
-  return messages
-    .filter((message) => {
-      if (!types.includes(message.type) || message.run_id !== dispatch.run_id) {
-        return false
-      }
-      const payload = parsePayload(message.payload)
-      return payload?.dispatchId === dispatch.id && !payload._orcaLifecycleRejection
-    })
-    .sort((left, right) => right.sequence - left.sequence)[0]
-}
-
-function parsePayload(payload: string | null): Record<string, unknown> | undefined {
-  try {
-    const parsed: unknown = JSON.parse(payload ?? '')
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : undefined
-  } catch {
-    return undefined
-  }
 }
 
 function compareCreatedRows(left: CreatedRow, right: CreatedRow): number {

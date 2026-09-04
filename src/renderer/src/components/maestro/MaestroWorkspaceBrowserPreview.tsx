@@ -1,14 +1,36 @@
-import { Loader2 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
-import type { BrowserScreenshotResult } from '../../../../shared/runtime-types'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { keybindingMatchesAction } from '../../../../shared/keybindings'
+import type {
+  BrowserBackResult,
+  BrowserGotoResult,
+  BrowserReloadResult,
+  BrowserScreenshotResult,
+  BrowserTabShowResult
+} from '../../../../shared/runtime-types'
+import { resolveBrowserAddressBarSubmission } from '@/components/browser-pane/navigate/browser-address-bar-navigation'
 import {
   getRemoteBrowserKeyboardShortcut,
   getRemoteBrowserKeypressKey
 } from '@/components/browser-pane/stream-remote/remote-browser-keyboard'
 import { getRemoteBrowserMouseButton } from '@/components/browser-pane/stream-remote/remote-browser-page-input-model'
+import { getShortcutPlatform } from '@/hooks/useShortcutLabel'
 import { translate } from '@/i18n/i18n'
 import type { RuntimeClientTarget } from '@/runtime/runtime-client-target'
 import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
+import { useAppStore } from '@/store'
+import {
+  maestroBrowserHistoryMethods,
+  maestroBrowserAddressValue,
+  maestroBrowserControlError,
+  maestroBrowserNavigationAction,
+  MaestroWorkspaceBrowserControls,
+  MaestroWorkspaceBrowserViewport,
+  type MaestroBrowserNavigationMethod
+} from './MaestroWorkspaceBrowserControls'
+import {
+  maestroBrowserPreviewPoint,
+  type MaestroBrowserPreviewPoint
+} from './maestro-browser-preview-pointer'
 import type { MaestroWorkspacePreviewMode } from './maestro-workspace-visibility'
 
 const MAX_BROWSER_PREVIEW_CACHE_ENTRIES = 24
@@ -18,8 +40,7 @@ const IDENTITY_CAPTURE_INTERVAL_MS = 2_400
 const browserPreviewCache = new Map<string, string>()
 const ignoreBrowserInteraction = (): void => {}
 
-type BrowserPoint = { x: number; y: number }
-
+type BrowserControlState = 'checking' | 'available' | 'unavailable'
 function rememberBrowserPreview(key: string, preview: string): void {
   browserPreviewCache.delete(key)
   browserPreviewCache.set(key, preview)
@@ -28,31 +49,10 @@ function rememberBrowserPreview(key: string, preview: string): void {
   }
 }
 
-function browserPoint(
-  image: HTMLImageElement,
-  event: Pick<MouseEvent, 'clientX' | 'clientY'>
-): BrowserPoint | null {
-  const bounds = image.getBoundingClientRect()
-  const width = image.naturalWidth || bounds.width
-  const height = image.naturalHeight || bounds.height
-  if (bounds.width <= 0 || bounds.height <= 0 || width <= 0 || height <= 0) {
-    return null
-  }
-  return {
-    x: Math.max(
-      0,
-      Math.min(width - 1, Math.round(((event.clientX - bounds.left) / bounds.width) * width))
-    ),
-    y: Math.max(
-      0,
-      Math.min(height - 1, Math.round(((event.clientY - bounds.top) / bounds.height) * height))
-    )
-  }
-}
-
 export function MaestroWorkspaceBrowserPreview({
   target,
   pageId,
+  browserWorkspaceId,
   receiptRevision,
   selected = false,
   previewMode = 'full',
@@ -60,24 +60,36 @@ export function MaestroWorkspaceBrowserPreview({
 }: {
   target: RuntimeClientTarget
   pageId: string
+  browserWorkspaceId: string
   receiptRevision: number
   selected?: boolean
   previewMode?: MaestroWorkspacePreviewMode
   onInteract?: () => void
 }): React.JSX.Element {
   const targetKey = target.kind === 'environment' ? `environment:${target.environmentId}` : 'local'
-  const captureKey = `${targetKey}:${pageId}`
+  const captureKey = `${targetKey}:${browserWorkspaceId}:${pageId}`
   const cachedPreview = browserPreviewCache.get(captureKey) ?? null
   const [preview, setPreview] = useState<string | null>(cachedPreview)
   const [state, setState] = useState<'loading' | 'ready' | 'reconnecting'>(
     cachedPreview ? 'ready' : 'loading'
   )
+  const [controlState, setControlState] = useState<BrowserControlState>('checking')
+  const [controlReason, setControlReason] = useState<string | null>(null)
+  const [addressBarValue, setAddressBarValue] = useState('about:blank')
+  const [navigationPending, setNavigationPending] = useState(false)
+  const [navigationNotice, setNavigationNotice] = useState<string | null>(null)
+  const [captureRevision, setCaptureRevision] = useState(0)
   const imageRef = useRef<HTMLImageElement | null>(null)
+  const addressBarRef = useRef<HTMLInputElement | null>(null)
   const latestTarget = useRef(target)
+  const addressEditing = useRef(false)
   const inputQueue = useRef<Promise<unknown>>(Promise.resolve())
-  const pendingWheel = useRef<(BrowserPoint & { dx: number; dy: number }) | null>(null)
+  const pendingWheel = useRef<(MaestroBrowserPreviewPoint & { dx: number; dy: number }) | null>(
+    null
+  )
   const wheelFrame = useRef<number | null>(null)
   const resolvedCaptureKey = useRef<string | null>(null)
+  const keybindings = useAppStore((store) => store.keybindings)
   latestTarget.current = target
 
   const captureInterval = selected
@@ -118,9 +130,11 @@ export function MaestroWorkspaceBrowserPreview({
         setPreview(nextPreview)
         setState('ready')
         resolvedCaptureKey.current = captureKey
-      } catch {
+      } catch (error) {
         if (active) {
           setState(browserPreviewCache.has(captureKey) ? 'ready' : 'reconnecting')
+          setControlState('unavailable')
+          setControlReason(maestroBrowserControlError(error))
         }
       } finally {
         capturing = false
@@ -132,7 +146,38 @@ export function MaestroWorkspaceBrowserPreview({
       active = false
       clearInterval(interval)
     }
-  }, [captureInterval, captureKey, pageId, receiptRevision])
+  }, [browserWorkspaceId, captureInterval, captureKey, captureRevision, pageId, receiptRevision])
+
+  useEffect(() => {
+    let active = true
+    setControlState('checking')
+    setControlReason(null)
+    void callRuntimeRpc<BrowserTabShowResult>(
+      latestTarget.current,
+      'browser.tabShow',
+      { page: pageId },
+      { timeoutMs: 15_000, suppressFeatureInteraction: true }
+    )
+      .then(({ tab }) => {
+        if (!active) {
+          return
+        }
+        if (!addressEditing.current) {
+          setAddressBarValue(maestroBrowserAddressValue(tab.url))
+        }
+        setControlState('available')
+      })
+      .catch((error: unknown) => {
+        if (!active) {
+          return
+        }
+        setControlState('unavailable')
+        setControlReason(maestroBrowserControlError(error))
+      })
+    return () => {
+      active = false
+    }
+  }, [browserWorkspaceId, pageId, receiptRevision, targetKey])
 
   useEffect(
     () => () => {
@@ -147,16 +192,21 @@ export function MaestroWorkspaceBrowserPreview({
     const next = inputQueue.current.catch(() => {}).then(operation)
     inputQueue.current = next.catch(() => {})
   }
-  const callBrowser = (method: string, params: Record<string, unknown>): Promise<unknown> =>
-    callRuntimeRpc(
-      latestTarget.current,
-      method,
-      { page: pageId, ...params },
-      { timeoutMs: 15_000, suppressFeatureInteraction: true }
-    )
-  const pointFor = (event: Pick<MouseEvent, 'clientX' | 'clientY'>): BrowserPoint | null => {
+  const callBrowser = useCallback(
+    <Result,>(method: string, params: Record<string, unknown>): Promise<Result> =>
+      callRuntimeRpc<Result>(
+        latestTarget.current,
+        method,
+        { page: pageId, ...params },
+        { timeoutMs: 15_000, suppressFeatureInteraction: true }
+      ),
+    [pageId]
+  )
+  const pointFor = (
+    event: Pick<MouseEvent, 'clientX' | 'clientY'>
+  ): MaestroBrowserPreviewPoint | null => {
     const image = imageRef.current
-    return image ? browserPoint(image, event) : null
+    return image ? maestroBrowserPreviewPoint(image, event) : null
   }
 
   const handlePointer = (
@@ -220,42 +270,127 @@ export function MaestroWorkspaceBrowserPreview({
     enqueueInput(() => callBrowser('browser.keypress', { key }))
   }
 
-  if (state === 'ready' && preview) {
-    return (
-      <img
-        ref={imageRef}
-        src={preview}
-        alt={translate(
-          'auto.components.maestro.MaestroWorkspaceBrowserPreview.0b65d32766',
-          'Interactive Browser page {{value0}}',
-          { value0: pageId }
-        )}
-        className="size-full cursor-default bg-white object-fill outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-        data-browser-page-id={pageId}
-        data-maestro-browser-interactive=""
-        draggable={false}
-        tabIndex={0}
+  const runNavigation = useCallback(
+    async (method: MaestroBrowserNavigationMethod, url?: string): Promise<void> => {
+      if (controlState !== 'available' || navigationPending) {
+        return
+      }
+      onInteract()
+      setNavigationPending(true)
+      setNavigationNotice(null)
+      try {
+        const result = await callBrowser<
+          BrowserGotoResult | BrowserBackResult | BrowserReloadResult
+        >(method, method === 'browser.goto' ? { url: url ?? 'about:blank' } : {})
+        setAddressBarValue(maestroBrowserAddressValue(result.url))
+        addressEditing.current = false
+        setCaptureRevision((revision) => revision + 1)
+      } catch (error) {
+        const reason = maestroBrowserControlError(error)
+        setControlState('unavailable')
+        setControlReason(reason)
+        setNavigationNotice(reason)
+      } finally {
+        setNavigationPending(false)
+      }
+    },
+    [callBrowser, controlState, navigationPending, onInteract]
+  )
+
+  const submitAddressBar = useCallback((): void => {
+    const submission = resolveBrowserAddressBarSubmission(addressBarValue, { allowFileUrls: false })
+    if (submission.status === 'invalid') {
+      setNavigationNotice(submission.loadError.description)
+      return
+    }
+    void runNavigation('browser.goto', submission.url)
+  }, [addressBarValue, runNavigation])
+
+  useEffect(() => {
+    if (!selected) {
+      return
+    }
+    const platform = getShortcutPlatform()
+    const onWindowKeyDown = (event: KeyboardEvent): void => {
+      if (keybindingMatchesAction('browser.focusAddressBar', event, platform, keybindings)) {
+        event.preventDefault()
+        event.stopPropagation()
+        onInteract()
+        addressBarRef.current?.focus()
+        addressBarRef.current?.select()
+        return
+      }
+      const method = maestroBrowserHistoryMethods.find((candidate) =>
+        keybindingMatchesAction(
+          maestroBrowserNavigationAction(candidate),
+          event,
+          platform,
+          keybindings
+        )
+      )
+      if (!method) {
+        return
+      }
+      event.preventDefault()
+      event.stopPropagation()
+      void runNavigation(method)
+    }
+    window.addEventListener('keydown', onWindowKeyDown, true)
+    return () => window.removeEventListener('keydown', onWindowKeyDown, true)
+  }, [keybindings, onInteract, runNavigation, selected])
+
+  const controlsDisabled = controlState !== 'available' || navigationPending
+  const controlStatus =
+    controlState === 'checking'
+      ? translate(
+          'auto.components.maestro.MaestroWorkspaceBrowserPreview.controlsChecking',
+          'Checking this exact Browser page…'
+        )
+      : controlReason
+
+  const browserToolbar = (
+    <MaestroWorkspaceBrowserControls
+      pageId={pageId}
+      addressBarRef={addressBarRef}
+      addressBarValue={addressBarValue}
+      controlsDisabled={controlsDisabled}
+      controlStatus={controlStatus}
+      navigationNotice={navigationNotice}
+      unavailable={controlState === 'unavailable'}
+      navigationPending={navigationPending}
+      onAddressBarChange={(value) => {
+        addressEditing.current = true
+        setAddressBarValue(value)
+      }}
+      onAddressBarFocus={(input) => {
+        addressEditing.current = true
+        input.select()
+      }}
+      onAddressBarBlur={() => {
+        addressEditing.current = false
+      }}
+      onSubmitAddressBar={submitAddressBar}
+      onInteract={onInteract}
+      onNavigate={(method, url) => void runNavigation(method, url)}
+    />
+  )
+
+  return (
+    <div
+      className={`flex size-full min-h-0 flex-col ${state === 'ready' ? 'bg-background' : 'bg-editor-surface'}`}
+      data-maestro-browser-preview=""
+    >
+      {browserToolbar}
+      <MaestroWorkspaceBrowserViewport
+        pageId={pageId}
+        preview={preview}
+        state={state}
+        imageRef={imageRef}
         onPointerDown={(event) => handlePointer(event, 'down')}
         onPointerUp={(event) => handlePointer(event, 'up')}
         onWheel={handleWheel}
         onKeyDown={handleKeyDown}
       />
-    )
-  }
-  return (
-    <div className="flex size-full flex-col items-center justify-center bg-editor-surface p-4 text-center text-xs text-muted-foreground">
-      <Loader2 className="size-5 animate-spin" />
-      <p className="mt-2">
-        {state === 'loading'
-          ? translate(
-              'auto.components.maestro.MaestroWorkspaceBrowserPreview.3e7cc4bc3a',
-              'Attaching the interactive Browser page…'
-            )
-          : translate(
-              'auto.components.maestro.MaestroWorkspaceBrowserPreview.reconnecting',
-              'Reconnecting the interactive Browser page…'
-            )}
-      </p>
     </div>
   )
 }

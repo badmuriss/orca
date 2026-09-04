@@ -65,6 +65,7 @@ describe('Maestro workspace empty terminal creation', () => {
     })
     const runtime = {
       listMobileSessionTabs,
+      listTerminals: vi.fn().mockResolvedValue({ terminals: [], totalCount: 0, truncated: false }),
       activateMobileSessionTab: vi.fn(),
       closeMobileSessionTab: vi.fn(),
       createMobileSessionTerminal,
@@ -108,7 +109,7 @@ describe('Maestro workspace empty terminal creation', () => {
       status: 'applied',
       surface_id: { ...scope, unified_tab_id: createdTab.parentTabId }
     })
-    expect(createMobileSessionTerminal).toHaveBeenCalledWith('id:folder-1', {
+    expect(createMobileSessionTerminal).toHaveBeenCalledWith('id:folder:folder-1', {
       clientMutationId: 'terminal-create-empty-1',
       agent: 'opencode',
       activate: false,
@@ -148,6 +149,7 @@ describe('Maestro workspace empty terminal creation', () => {
     }
     const runtime = {
       listMobileSessionTabs: vi.fn().mockResolvedValue(emptySession()),
+      listTerminals: vi.fn().mockResolvedValue({ terminals: [], totalCount: 0, truncated: false }),
       activateMobileSessionTab: vi.fn(),
       closeMobileSessionTab: vi.fn(),
       createMobileSessionTerminal: vi.fn().mockResolvedValue({

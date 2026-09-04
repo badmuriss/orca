@@ -20,6 +20,18 @@ export function activateMaestroRunReference(args: {
   selectSurface: (surfaceKey: string | null) => void
   mutate: MaestroWorkspaceCanvasResource['mutate']
 }): boolean {
+  const exactSurface = args.snapshot?.surfaces[args.reference]
+  const exactPlacement = exactSurface ? args.placements[args.reference] : undefined
+  if (exactSurface && exactPlacement) {
+    args.reveal(workspaceWindowBounds(exactPlacement), MAESTRO_REVEAL_INSETS)
+    args.selectSurface(args.reference)
+    void args.mutate({
+      action: 'focus',
+      surface_id: exactSurface.id,
+      idempotency_key: maestroWorkspaceMutationKey('focus', exactSurface.id.unified_tab_id)
+    })
+    return true
+  }
   const candidates = args.topology.nodes.filter((node) => node.taskId === args.reference)
   const surfaceKey = candidates.length === 1 ? candidates[0]!.surfaceId : null
   const placement = surfaceKey ? args.placements[surfaceKey] : undefined

@@ -13,6 +13,7 @@ import type {
   LegacySendParams
 } from './orchestration-legacy-operation'
 import { LegacyCoordinatorAuthority } from './orchestration-legacy-coordinator-authority'
+import { resolveCurrentRunUseAuthority } from './orchestration-current-run-use-authority'
 
 const COORDINATOR_PREFLIGHT_METHODS = new Set([
   'orchestration.taskCreate',
@@ -31,6 +32,7 @@ const COORDINATOR_PREFLIGHT_METHODS = new Set([
 const CURRENT_AUTHORITY_PREFLIGHT_METHODS = new Set([
   ...COORDINATOR_PREFLIGHT_METHODS,
   'orchestration.ask',
+  'orchestration.coordinatorHandoff',
   'orchestration.workspaceBootstrapReceipt'
 ])
 
@@ -134,12 +136,29 @@ export class OrchestrationLegacyCompatibility {
     request: RpcRequest,
     params: Record<string, unknown>
   ): OrchestrationCompatibilityCallerAuthority | undefined {
+    const evidence = request.orchestrationCompatibilityEvidence
+    if (request.method === 'orchestration.coordinatorHandoff' && params.operation === 'claim') {
+      const claimedHandle = currentCallerHandle(request.method, params)
+      if (
+        !evidence?.terminalHandle ||
+        !evidence.paneKey ||
+        (claimedHandle && claimedHandle !== evidence.terminalHandle)
+      ) {
+        return undefined
+      }
+      const caller = this.runtime.verifyOrchestrationCompatibilityCaller(evidence, {
+        currentRuntimeLaunchSufficient: true
+      })
+      return caller?.terminalHandle === evidence.terminalHandle ? caller : undefined
+    }
     const db = this.runtime.getOrchestrationDb()
+    if (request.method === 'orchestration.runUse') {
+      return resolveCurrentRunUseAuthority(this.runtime, request, params)
+    }
     const adoption = db.getLegacyAdoption()
-    if (!adoption || stringValue(params.run) || request.method === 'orchestration.runUse') {
+    if (!adoption || stringValue(params.run)) {
       return undefined
     }
-    const evidence = request.orchestrationCompatibilityEvidence
     if (!evidence?.terminalHandle || !evidence.paneKey) {
       return undefined
     }

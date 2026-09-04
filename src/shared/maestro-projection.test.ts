@@ -299,6 +299,14 @@ describe('Maestro projection contract', () => {
       destinationExecutionHostId: 'host-local',
       destinationWorkspaceKey: 'folder:folder-local-01'
     })
+    expect(home.runProgress).toMatchObject({
+      available: true,
+      authority: { workspace: { workspaceKey: 'folder:folder-local-01' } }
+    })
+    expect(remote.runProgress).toMatchObject({
+      available: true,
+      authority: { workspace: { workspaceKey: 'worktree:repository-1::remote-child' } }
+    })
   })
   it('applies bounded deltas without retaining removed nodes', () => {
     const previous = parseAgentGraphProjection(view())
