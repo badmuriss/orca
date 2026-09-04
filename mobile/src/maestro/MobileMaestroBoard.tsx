@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef } from 'react'
-import { PanResponder, StyleSheet, View, type LayoutChangeEvent } from 'react-native'
+import { useMemo, useRef } from 'react'
+import { StyleSheet, View, type LayoutChangeEvent } from 'react-native'
 import Svg, { Line } from 'react-native-svg'
 import {
   workspaceSurfaceKey,
@@ -8,13 +8,13 @@ import {
 import type { RpcClient } from '../transport/rpc-client'
 import { colors } from '../theme/mobile-theme'
 import {
-  panMobileMaestroViewport,
   projectMobileMaestroFrame,
   type MaestroCardFrame,
   type MaestroViewport
 } from './mobile-maestro-geometry'
 import { mobileMaestroScreenStyles as styles } from './mobile-maestro-screen-styles'
 import { MobileMaestroSurfaceCard } from './MobileMaestroSurfaceCard'
+import { useMobileMaestroGestures } from './use-mobile-maestro-gestures'
 
 type BoardLink = {
   id: string
@@ -25,7 +25,6 @@ type BoardLink = {
 
 const GRID_WORLD_SPACING = 40
 const MINIMUM_GRID_SCREEN_SPACING = 8
-const PAN_ACTIVATION_DISTANCE = 4
 
 function positiveModulo(value: number, divisor: number): number {
   return ((value % divisor) + divisor) % divisor
@@ -82,44 +81,6 @@ function MobileMaestroGrid({
   )
 }
 
-function useMobileMaestroPan(
-  viewport: MaestroViewport,
-  onViewportChange: (viewport: MaestroViewport) => void
-): ReturnType<typeof PanResponder.create> {
-  const viewportRef = useRef(viewport)
-  const gestureStartViewportRef = useRef(viewport)
-
-  useEffect(() => {
-    viewportRef.current = viewport
-  }, [viewport])
-
-  return useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
-        onMoveShouldSetPanResponder: (_event, gesture) =>
-          gesture.numberActiveTouches === 1 &&
-          Math.hypot(gesture.dx, gesture.dy) >= PAN_ACTIVATION_DISTANCE,
-        onMoveShouldSetPanResponderCapture: (_event, gesture) =>
-          gesture.numberActiveTouches === 1 &&
-          Math.hypot(gesture.dx, gesture.dy) >= PAN_ACTIVATION_DISTANCE,
-        onPanResponderGrant: () => {
-          gestureStartViewportRef.current = viewportRef.current
-        },
-        onPanResponderMove: (_event, gesture) => {
-          onViewportChange(
-            panMobileMaestroViewport(gestureStartViewportRef.current, {
-              x: gesture.dx,
-              y: gesture.dy
-            })
-          )
-        },
-        onPanResponderTerminationRequest: () => true
-      }),
-    [onViewportChange]
-  )
-}
-
 export function MobileMaestroBoard({
   surfaces,
   frames,
@@ -149,9 +110,18 @@ export function MobileMaestroBoard({
   onViewportLayout: (size: { width: number; height: number }) => void
   onViewportChange: (viewport: MaestroViewport) => void
 }) {
-  const panResponder = useMobileMaestroPan(viewport, onViewportChange)
-  const frameByKey = new Map(
-    surfaces.map((surface, index) => [workspaceSurfaceKey(surface.id), frames[index]!])
+  const boardRef = useRef<View>(null)
+  const viewportOriginRef = useRef({ x: 0, y: 0 })
+  const panResponder = useMobileMaestroGestures({
+    viewport,
+    viewportSize: { width: viewportWidth, height: viewportHeight },
+    viewportOriginRef,
+    onViewportChange
+  })
+  const frameByKey = useMemo(
+    () =>
+      new Map(surfaces.map((surface, index) => [workspaceSurfaceKey(surface.id), frames[index]!])),
+    [frames, surfaces]
   )
   const featuredSurfaceKey =
     selectedKey ??
@@ -161,9 +131,15 @@ export function MobileMaestroBoard({
     (surfaces[0] ? workspaceSurfaceKey(surfaces[0].id) : null)
   return (
     <View
+      ref={boardRef}
       testID="mobile-maestro-board"
       style={styles.board}
-      onLayout={(event: LayoutChangeEvent) => onViewportLayout(event.nativeEvent.layout)}
+      onLayout={(event: LayoutChangeEvent) => {
+        onViewportLayout(event.nativeEvent.layout)
+        boardRef.current?.measureInWindow((x, y) => {
+          viewportOriginRef.current = { x, y }
+        })
+      }}
       {...panResponder.panHandlers}
     >
       <MobileMaestroGrid viewport={viewport} width={viewportWidth} height={viewportHeight} />

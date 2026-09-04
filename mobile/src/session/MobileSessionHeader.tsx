@@ -149,7 +149,7 @@ export function MobileSessionHeader({ controller }: { controller: MobileSessionC
               accessibilityLabel="Maestro workspace Canvas"
               accessibilityRole="tab"
               accessibilityState={{ selected: false }}
-              style={styles.tab}
+              style={[styles.tab, styles.maestroTab]}
               onPress={() =>
                 router.push({
                   pathname: '/h/[hostId]/maestro/[workspaceKey]',

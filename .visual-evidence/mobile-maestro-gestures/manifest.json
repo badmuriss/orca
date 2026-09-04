@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "change": "mobile-maestro-gestures",
+  "capturedAt": "2026-09-04T18:07:16-03:00",
+  "platformScope": {
+    "androidPhone": "observed",
+    "androidTablet": "observed",
+    "ios": "unobserved: Linux host has no supported iOS simulator"
+  },
+  "verdict": "pass",
+  "evidence": [
+    {
+      "id": "phone-compact-maestro-tab",
+      "file": "phone-session.png",
+      "platform": "Android phone AVD",
+      "viewport": "390x664",
+      "state": "session tab strip",
+      "sha256": "9c239b24ddf2f2ee7c27d092d6e720279f4783e52485365783a755eee9a1479a",
+      "visionReview": "The icon-only Maestro tab occupies 44 logical pixels instead of a full terminal-tab slot; the adjacent terminal title and trailing actions remain aligned without overlap."
+    },
+    {
+      "id": "phone-live-terminal-fit",
+      "file": "phone-live-terminal-fit.png",
+      "platform": "Android phone AVD",
+      "viewport": "390x664",
+      "state": "live terminal preview at focused viewport",
+      "sha256": "40ac70a07750bb53e4e5af7eaf381dac0e56a470264b2788de90d2aa8b0d143d",
+      "visionReview": "The live terminal card stays inside x=16..373 with its header, output, status rows, and bottom edge visible; the reduced text scale fits complete lines without horizontal overflow."
+    },
+    {
+      "id": "phone-live-pinch-out",
+      "file": "phone-live-pinch-out.png",
+      "platform": "Android phone AVD",
+      "viewport": "390x664",
+      "state": "live terminal after physical two-contact pinch out",
+      "sha256": "9e986bd9c475de2a98499c0caeaf5c583eb3e9e6f04b7687e390a940b19b7d6b",
+      "visionReview": "The terminal shrinks around the stationary midpoint and remains centered at x≈195; the live output remains rendered and the surrounding grid has no clipping artifacts."
+    },
+    {
+      "id": "phone-live-pinch-in",
+      "file": "phone-live-pinch-in.png",
+      "platform": "Android phone AVD",
+      "viewport": "390x664",
+      "state": "live terminal after inverse physical pinch",
+      "sha256": "099bc0d23b3c7f472d97a0c604bdd524effceaffeeee80e5592d831202592e8e",
+      "visionReview": "The inverse gesture restores the card exactly to x=16..373, demonstrating stable board-relative anchoring without the previous lateral drift; the stream stays visible."
+    },
+    {
+      "id": "tablet-maestro",
+      "file": "tablet-maestro.png",
+      "platform": "Android tablet AVD",
+      "viewport": "810x1080",
+      "state": "Maestro canvas with workspace sidebar",
+      "sha256": "3bf1b7d95288ac0c105f5e46c6013dc41f71d97879e81a0240dafce5607d792f",
+      "visionReview": "The responsive tablet layout keeps the toolbar, sidebar, grid, and complete centered card separate, with no overlap, overflow, or clipped borders."
+    }
+  ],
+  "validation": {
+    "mobileTypecheck": "passed",
+    "focusedLint": "passed",
+    "focusedGestureAndGeometryTests": "12 passed",
+    "androidMultitouch": "pinch in and pinch out injected through two simultaneous EmulatorController contacts",
+    "liveTerminal": "stream remained rendered through both gestures"
+  }
+}

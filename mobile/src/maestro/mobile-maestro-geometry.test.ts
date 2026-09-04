@@ -4,6 +4,7 @@ import {
   fitMobileMaestroFrames,
   mobileMaestroInspectorInsets,
   panMobileMaestroViewport,
+  pinchMobileMaestroViewport,
   projectMobileMaestroFrame,
   revealMobileMaestroFrame
 } from './mobile-maestro-geometry'
@@ -19,6 +20,49 @@ describe('mobile Maestro geometry', () => {
     expect(
       panMobileMaestroViewport({ center: { x: 100, y: 200 }, zoom: 1 }, { x: 75, y: 0 })
     ).toEqual({ center: { x: 25, y: 200 }, zoom: 1 })
+  })
+
+  it('zooms around the two-finger focal point', () => {
+    const viewportSize = { width: 400, height: 800 }
+    const frame = { x: 80, y: 100, width: 120, height: 160 }
+    const before = projectMobileMaestroFrame(
+      { center: { x: 0, y: 0 }, zoom: 1 },
+      frame,
+      viewportSize
+    )
+    const next = pinchMobileMaestroViewport(
+      { center: { x: 0, y: 0 }, zoom: 1 },
+      { focalPoint: { x: before.x, y: before.y }, distance: 100 },
+      { focalPoint: { x: before.x, y: before.y }, distance: 200 },
+      viewportSize
+    )
+    const after = projectMobileMaestroFrame(next, frame, viewportSize)
+
+    expect(next.zoom).toBe(2)
+    expect(after.x).toBeCloseTo(before.x)
+    expect(after.y).toBeCloseTo(before.y)
+  })
+
+  it('zooms out around the two-finger focal point', () => {
+    const next = pinchMobileMaestroViewport(
+      { center: { x: 20, y: 40 }, zoom: 1 },
+      { focalPoint: { x: 200, y: 400 }, distance: 200 },
+      { focalPoint: { x: 200, y: 400 }, distance: 100 },
+      { width: 400, height: 800 }
+    )
+
+    expect(next).toEqual({ center: { x: 20, y: 40 }, zoom: 0.5 })
+  })
+
+  it('pans while pinching when the two-finger midpoint moves', () => {
+    const next = pinchMobileMaestroViewport(
+      { center: { x: 50, y: 80 }, zoom: 1 },
+      { focalPoint: { x: 200, y: 400 }, distance: 100 },
+      { focalPoint: { x: 240, y: 370 }, distance: 100 },
+      { width: 400, height: 800 }
+    )
+
+    expect(next).toEqual({ center: { x: 10, y: 110 }, zoom: 1 })
   })
 
   it('focuses a desktop-sized terminal inside the useful phone area', () => {

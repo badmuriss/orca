@@ -9,6 +9,8 @@ import { resolveMobileMaestroTerminalHandle } from './mobile-maestro-terminal-re
 
 type PreviewState = 'connecting' | 'live' | 'unavailable'
 
+const MAESTRO_TERMINAL_TEXT_SCALE = 0.8
+
 type MobileMaestroTerminalPreviewProps = {
   client: RpcClient | null
   terminalTabId: string
@@ -169,7 +171,7 @@ function ActiveMobileMaestroTerminalPreview({
       <TerminalWebView
         ref={terminalRef}
         style={styles.webView}
-        textScale={0.92}
+        textScale={MAESTRO_TERMINAL_TEXT_SCALE}
         onWebReady={() => setWebReady(true)}
         onEngineError={() => setPreviewState('unavailable')}
       />

@@ -7,6 +7,9 @@ import {
 export type MaestroViewport = { center: { x: number; y: number }; zoom: number }
 export type MaestroCardFrame = { x: number; y: number; width: number; height: number }
 
+export const MIN_MOBILE_MAESTRO_ZOOM = 0.08
+export const MAX_MOBILE_MAESTRO_ZOOM = 2.5
+
 export function panMobileMaestroViewport(
   viewport: MaestroViewport,
   translation: { x: number; y: number }
@@ -17,6 +20,33 @@ export function panMobileMaestroViewport(
       y: viewport.center.y - translation.y / viewport.zoom
     },
     zoom: viewport.zoom
+  }
+}
+
+export function pinchMobileMaestroViewport(
+  viewport: MaestroViewport,
+  start: { focalPoint: { x: number; y: number }; distance: number },
+  current: { focalPoint: { x: number; y: number }; distance: number },
+  viewportSize: { width: number; height: number }
+): MaestroViewport {
+  if (start.distance <= 0) {
+    return viewport
+  }
+  const zoom = Math.min(
+    MAX_MOBILE_MAESTRO_ZOOM,
+    Math.max(MIN_MOBILE_MAESTRO_ZOOM, (viewport.zoom * current.distance) / start.distance)
+  )
+  const screenCenter = { x: viewportSize.width / 2, y: viewportSize.height / 2 }
+  const focalWorld = {
+    x: viewport.center.x + (start.focalPoint.x - screenCenter.x) / viewport.zoom,
+    y: viewport.center.y + (start.focalPoint.y - screenCenter.y) / viewport.zoom
+  }
+  return {
+    center: {
+      x: focalWorld.x - (current.focalPoint.x - screenCenter.x) / zoom,
+      y: focalWorld.y - (current.focalPoint.y - screenCenter.y) / zoom
+    },
+    zoom
   }
 }
 
