@@ -280,6 +280,7 @@ export function MobileMaestroScreen() {
                   current.width === size.width && current.height === size.height ? current : size
                 )
               }
+              onViewportChange={setLocalViewport}
             />
           )}
           {selected ? (

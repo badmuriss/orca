@@ -3,11 +3,24 @@ import {
   focusMobileMaestroFrame,
   fitMobileMaestroFrames,
   mobileMaestroInspectorInsets,
+  panMobileMaestroViewport,
   projectMobileMaestroFrame,
   revealMobileMaestroFrame
 } from './mobile-maestro-geometry'
 
 describe('mobile Maestro geometry', () => {
+  it('pans both canvas axes from one diagonal gesture', () => {
+    expect(
+      panMobileMaestroViewport({ center: { x: 100, y: 200 }, zoom: 2 }, { x: -40, y: 60 })
+    ).toEqual({ center: { x: 120, y: 170 }, zoom: 2 })
+  })
+
+  it('pans toward content left of the current viewport', () => {
+    expect(
+      panMobileMaestroViewport({ center: { x: 100, y: 200 }, zoom: 1 }, { x: 75, y: 0 })
+    ).toEqual({ center: { x: 25, y: 200 }, zoom: 1 })
+  })
+
   it('focuses a desktop-sized terminal inside the useful phone area', () => {
     const frame = { x: 400, y: 200, width: 760, height: 530 }
     const usable = { width: 390, height: 664, insetTop: 104, insetBottom: 0 }

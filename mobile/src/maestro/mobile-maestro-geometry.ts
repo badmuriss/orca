@@ -7,6 +7,19 @@ import {
 export type MaestroViewport = { center: { x: number; y: number }; zoom: number }
 export type MaestroCardFrame = { x: number; y: number; width: number; height: number }
 
+export function panMobileMaestroViewport(
+  viewport: MaestroViewport,
+  translation: { x: number; y: number }
+): MaestroViewport {
+  return {
+    center: {
+      x: viewport.center.x - translation.x / viewport.zoom,
+      y: viewport.center.y - translation.y / viewport.zoom
+    },
+    zoom: viewport.zoom
+  }
+}
+
 export function mobileMaestroInspectorInsets(
   wide: boolean,
   selected: boolean

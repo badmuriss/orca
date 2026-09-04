@@ -1,4 +1,5 @@
-import { ScrollView, StyleSheet, View, type LayoutChangeEvent } from 'react-native'
+import { useEffect, useMemo, useRef } from 'react'
+import { PanResponder, StyleSheet, View, type LayoutChangeEvent } from 'react-native'
 import Svg, { Line } from 'react-native-svg'
 import {
   workspaceSurfaceKey,
@@ -7,6 +8,7 @@ import {
 import type { RpcClient } from '../transport/rpc-client'
 import { colors } from '../theme/mobile-theme'
 import {
+  panMobileMaestroViewport,
   projectMobileMaestroFrame,
   type MaestroCardFrame,
   type MaestroViewport
@@ -21,6 +23,103 @@ type BoardLink = {
   provenance: 'manual' | 'automatic' | 'suggested'
 }
 
+const GRID_WORLD_SPACING = 40
+const MINIMUM_GRID_SCREEN_SPACING = 8
+const PAN_ACTIVATION_DISTANCE = 4
+
+function positiveModulo(value: number, divisor: number): number {
+  return ((value % divisor) + divisor) % divisor
+}
+
+function MobileMaestroGrid({
+  viewport,
+  width,
+  height
+}: {
+  viewport: MaestroViewport
+  width: number
+  height: number
+}): React.JSX.Element {
+  const spacing = Math.max(MINIMUM_GRID_SCREEN_SPACING, GRID_WORLD_SPACING * viewport.zoom)
+  const offsetX = positiveModulo(width / 2 - viewport.center.x * viewport.zoom, spacing)
+  const offsetY = positiveModulo(height / 2 - viewport.center.y * viewport.zoom, spacing)
+  const verticalCount = Math.ceil(width / spacing) + 2
+  const horizontalCount = Math.ceil(height / spacing) + 2
+
+  return (
+    <Svg width={width} height={height} style={StyleSheet.absoluteFill} pointerEvents="none">
+      {Array.from({ length: verticalCount }, (_, index) => {
+        const x = offsetX + (index - 1) * spacing
+        return (
+          <Line
+            key={`grid-v-${index}`}
+            x1={x}
+            y1={0}
+            x2={x}
+            y2={height}
+            stroke={colors.borderSubtle}
+            strokeWidth={0.5}
+            opacity={0.45}
+          />
+        )
+      })}
+      {Array.from({ length: horizontalCount }, (_, index) => {
+        const y = offsetY + (index - 1) * spacing
+        return (
+          <Line
+            key={`grid-h-${index}`}
+            x1={0}
+            y1={y}
+            x2={width}
+            y2={y}
+            stroke={colors.borderSubtle}
+            strokeWidth={0.5}
+            opacity={0.45}
+          />
+        )
+      })}
+    </Svg>
+  )
+}
+
+function useMobileMaestroPan(
+  viewport: MaestroViewport,
+  onViewportChange: (viewport: MaestroViewport) => void
+): ReturnType<typeof PanResponder.create> {
+  const viewportRef = useRef(viewport)
+  const gestureStartViewportRef = useRef(viewport)
+
+  useEffect(() => {
+    viewportRef.current = viewport
+  }, [viewport])
+
+  return useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_event, gesture) =>
+          gesture.numberActiveTouches === 1 &&
+          Math.hypot(gesture.dx, gesture.dy) >= PAN_ACTIVATION_DISTANCE,
+        onMoveShouldSetPanResponderCapture: (_event, gesture) =>
+          gesture.numberActiveTouches === 1 &&
+          Math.hypot(gesture.dx, gesture.dy) >= PAN_ACTIVATION_DISTANCE,
+        onPanResponderGrant: () => {
+          gestureStartViewportRef.current = viewportRef.current
+        },
+        onPanResponderMove: (_event, gesture) => {
+          onViewportChange(
+            panMobileMaestroViewport(gestureStartViewportRef.current, {
+              x: gesture.dx,
+              y: gesture.dy
+            })
+          )
+        },
+        onPanResponderTerminationRequest: () => true
+      }),
+    [onViewportChange]
+  )
+}
+
 export function MobileMaestroBoard({
   surfaces,
   frames,
@@ -33,7 +132,8 @@ export function MobileMaestroBoard({
   client,
   worktreeId,
   onSelect,
-  onViewportLayout
+  onViewportLayout,
+  onViewportChange
 }: {
   surfaces: WorkspaceSurface[]
   frames: MaestroCardFrame[]
@@ -47,7 +147,9 @@ export function MobileMaestroBoard({
   worktreeId: string | null
   onSelect: (key: string) => void
   onViewportLayout: (size: { width: number; height: number }) => void
+  onViewportChange: (viewport: MaestroViewport) => void
 }) {
+  const panResponder = useMobileMaestroPan(viewport, onViewportChange)
   const frameByKey = new Map(
     surfaces.map((surface, index) => [workspaceSurfaceKey(surface.id), frames[index]!])
   )
@@ -58,109 +160,84 @@ export function MobileMaestroBoard({
       .map((surface) => workspaceSurfaceKey(surface.id))[0] ??
     (surfaces[0] ? workspaceSurfaceKey(surfaces[0].id) : null)
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.horizontalCanvas}
+    <View
+      testID="mobile-maestro-board"
+      style={styles.board}
       onLayout={(event: LayoutChangeEvent) => onViewportLayout(event.nativeEvent.layout)}
+      {...panResponder.panHandlers}
     >
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.verticalCanvas}
+      <MobileMaestroGrid viewport={viewport} width={viewportWidth} height={viewportHeight} />
+      <Svg
+        width={viewportWidth}
+        height={viewportHeight}
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
       >
-        <View style={styles.board}>
-          <Svg width={1800} height={1400} style={StyleSheet.absoluteFill} pointerEvents="none">
-            {Array.from({ length: 46 }, (_, index) => (
-              <Line
-                key={`grid-v-${index}`}
-                x1={index * 40}
-                y1={0}
-                x2={index * 40}
-                y2={1400}
-                stroke={colors.borderSubtle}
-                strokeWidth={0.5}
-                opacity={0.45}
-              />
-            ))}
-            {Array.from({ length: 36 }, (_, index) => (
-              <Line
-                key={`grid-h-${index}`}
-                x1={0}
-                y1={index * 40}
-                x2={1800}
-                y2={index * 40}
-                stroke={colors.borderSubtle}
-                strokeWidth={0.5}
-                opacity={0.45}
-              />
-            ))}
-            {links.map((link) => {
-              const source = frameByKey.get(link.source_surface_key)
-              const target = frameByKey.get(link.target_surface_key)
-              if (!source || !target) {
-                return null
+        {links.map((link) => {
+          const source = frameByKey.get(link.source_surface_key)
+          const target = frameByKey.get(link.target_surface_key)
+          if (!source || !target) {
+            return null
+          }
+          const projectedSource = projectMobileMaestroFrame(viewport, source, {
+            width: viewportWidth,
+            height: viewportHeight
+          })
+          const projectedTarget = projectMobileMaestroFrame(viewport, target, {
+            width: viewportWidth,
+            height: viewportHeight
+          })
+          return (
+            <Line
+              key={`${link.provenance}:${link.id}`}
+              x1={projectedSource.x + projectedSource.width / 2}
+              y1={projectedSource.y + projectedSource.height / 2}
+              x2={projectedTarget.x + projectedTarget.width / 2}
+              y2={projectedTarget.y + projectedTarget.height / 2}
+              stroke={
+                link.provenance === 'suggested'
+                  ? colors.statusAmber
+                  : link.provenance === 'automatic'
+                    ? colors.textMuted
+                    : colors.textSecondary
               }
-              const projectedSource = projectMobileMaestroFrame(viewport, source, {
-                width: viewportWidth,
-                height: viewportHeight
-              })
-              const projectedTarget = projectMobileMaestroFrame(viewport, target, {
-                width: viewportWidth,
-                height: viewportHeight
-              })
-              return (
-                <Line
-                  key={`${link.provenance}:${link.id}`}
-                  x1={projectedSource.x + projectedSource.width / 2}
-                  y1={projectedSource.y + projectedSource.height / 2}
-                  x2={projectedTarget.x + projectedTarget.width / 2}
-                  y2={projectedTarget.y + projectedTarget.height / 2}
-                  stroke={
-                    link.provenance === 'suggested'
-                      ? colors.statusAmber
-                      : link.provenance === 'automatic'
-                        ? colors.textMuted
-                        : colors.textSecondary
-                  }
-                  strokeWidth={link.provenance === 'manual' ? 2 : 1.5}
-                  strokeDasharray={link.provenance === 'suggested' ? '6 6' : undefined}
-                />
-              )
-            })}
-          </Svg>
-          {surfaces.map((surface, index) => {
-            const frame = frames[index]!
-            const key = workspaceSurfaceKey(surface.id)
-            const projected = projectMobileMaestroFrame(viewport, frame, {
-              width: viewportWidth,
-              height: viewportHeight
-            })
-            return (
-              <View
-                key={key}
-                style={{
-                  position: 'absolute',
-                  left: projected.x,
-                  top: projected.y,
-                  width: Math.max(104, projected.width),
-                  height: Math.max(72, projected.height),
-                  overflow: 'hidden'
-                }}
-              >
-                <MobileMaestroSurfaceCard
-                  surface={surface}
-                  selected={selectedKey === key}
-                  preview={previews[key]}
-                  client={client}
-                  worktreeId={worktreeId}
-                  livePreview={featuredSurfaceKey === key}
-                  onPress={() => onSelect(key)}
-                />
-              </View>
-            )
-          })}
-        </View>
-      </ScrollView>
-    </ScrollView>
+              strokeWidth={link.provenance === 'manual' ? 2 : 1.5}
+              strokeDasharray={link.provenance === 'suggested' ? '6 6' : undefined}
+            />
+          )
+        })}
+      </Svg>
+      {surfaces.map((surface, index) => {
+        const frame = frames[index]!
+        const key = workspaceSurfaceKey(surface.id)
+        const projected = projectMobileMaestroFrame(viewport, frame, {
+          width: viewportWidth,
+          height: viewportHeight
+        })
+        return (
+          <View
+            key={key}
+            style={{
+              position: 'absolute',
+              left: projected.x,
+              top: projected.y,
+              width: Math.max(104, projected.width),
+              height: Math.max(72, projected.height),
+              overflow: 'hidden'
+            }}
+          >
+            <MobileMaestroSurfaceCard
+              surface={surface}
+              selected={selectedKey === key}
+              preview={previews[key]}
+              client={client}
+              worktreeId={worktreeId}
+              livePreview={featuredSurfaceKey === key}
+              onPress={() => onSelect(key)}
+            />
+          </View>
+        )
+      })}
+    </View>
   )
 }
