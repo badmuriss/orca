@@ -13,6 +13,7 @@ import { registerDirectSshStateIpcBridge } from './direct-ssh-state-ipc-bridge'
 import { registerMobileAndTerminalCloseIpcBridge } from './mobile-terminal-close-ipc-bridge'
 import { registerMobileDriverIpcBridge } from './mobile-driver-ipc-bridge'
 import { registerMaestroWorkspaceIpcBridge } from './maestro-workspace-ipc-bridge'
+import { registerOrcaProfileAuthIpcBridge } from './orca-profile-auth-ipc-bridge'
 import { registerOsMarkdownFileOpenBridge } from './os-markdown-file-open-bridge'
 import { registerProjectCatalogIpcBridge } from './project-catalog-ipc-bridge'
 import { registerRateLimitIpcBridge } from './rate-limit-ipc-bridge'
@@ -79,6 +80,7 @@ export function installAppLifetimeIpcEvents(
     remountTerminalTabsAwaitingHostHydration
   )
   registerSettingsAndSidebarIpcBridge(unsubs)
+  registerOrcaProfileAuthIpcBridge(unsubs)
   registerWorkspaceShortcutIpcBridge(unsubs)
   registerOsMarkdownFileOpenBridge(unsubs)
   unsubs.push(

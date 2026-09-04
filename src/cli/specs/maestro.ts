@@ -34,7 +34,7 @@ export const MAESTRO_COMMAND_SPECS: CommandSpec[] = [
     path: ['maestro', 'index'],
     summary: 'List bounded Maestro document and projected Run states',
     usage: 'orca maestro index [--json]',
-    allowedFlags: GLOBAL_FLAGS,
+    allowedFlags: [...GLOBAL_FLAGS],
     notes: ['Entries label document state and projected Run state separately.']
   },
   {
