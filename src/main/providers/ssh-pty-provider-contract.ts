@@ -23,6 +23,7 @@ type SshPtyStopRequest = {
     keepHistory?: boolean
     deadlineMs?: number
     expectedIncarnationId?: string
+    expectedOwnerClientInstanceId?: string
   }
 }
 
@@ -81,7 +82,13 @@ async function requestSshPtyStop(args: SshPtyStopRequest): Promise<PtyStopReceip
       immediate: args.opts.immediate ?? false,
       keepHistory: args.opts.keepHistory ?? false,
       ...(capabilities.stopReceiptVersion === 1
-        ? { expectedIncarnationId: ptyIncarnation, executionHostId }
+        ? {
+            expectedIncarnationId: ptyIncarnation,
+            executionHostId,
+            ...(args.opts.expectedOwnerClientInstanceId
+              ? { expectedOwnerClientInstanceId: args.opts.expectedOwnerClientInstanceId }
+              : {})
+          }
         : {})
     },
     timeout

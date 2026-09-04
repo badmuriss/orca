@@ -127,7 +127,6 @@ describe('TerminalHost', () => {
     })
     host = new TerminalHost({ spawnSubprocess: spawnFn as MockSpawnFn })
   })
-
   afterEach(async () => {
     await host.dispose()
     if (platformDescriptor) {
@@ -528,27 +527,28 @@ describe('TerminalHost', () => {
       expect(host.listSessions()).toHaveLength(1)
     })
 
-    it('rejects reattach while teardown is pending', async () => {
+    it('defers a respawn until teardown releases the previous incarnation', async () => {
       queueExitedTreeObservation()
       const finishSweep = deferDescendantSweep()
       await createSession('agent-reattach')
+      const retiredSubprocess = lastSubprocess
 
       const killing = host.kill('agent-reattach', { immediate: true })
       await vi.waitFor(() => expect(killWithDescendantSweepMock).toHaveBeenCalledOnce())
-      await expect(
-        host.createOrAttach({
-          sessionId: 'agent-reattach',
-          cols: 80,
-          rows: 24,
-          launchAgent: 'claude',
-          streamClient: { onData: vi.fn(), onExit: vi.fn() }
-        })
-      ).rejects.toThrow('Session not found')
-      expect(lastSubprocess.forceKill).not.toHaveBeenCalled()
+      const respawn = host.createOrAttach({
+        sessionId: 'agent-reattach',
+        cols: 80,
+        rows: 24,
+        launchAgent: 'claude',
+        streamClient: { onData: vi.fn(), onExit: vi.fn() }
+      })
+      expect(spawnFn).toHaveBeenCalledOnce()
+      expect(retiredSubprocess.forceKill).not.toHaveBeenCalled()
 
       finishSweep()
       await expect(killing).resolves.toMatchObject({ verdict: 'exited' })
-      expect(lastSubprocess.forceKill).toHaveBeenCalledOnce()
+      await expect(respawn).resolves.toMatchObject({ isNew: true })
+      expect(retiredSubprocess.forceKill).toHaveBeenCalledOnce()
     })
 
     it('coalesces duplicate immediate kills while descendant capture is pending', async () => {
@@ -577,28 +577,19 @@ describe('TerminalHost', () => {
       const killing = host.kill('agent-natural-exit', { immediate: true })
       await vi.waitFor(() => expect(killWithDescendantSweepMock).toHaveBeenCalledOnce())
       retiredSubprocess._onExitCb?.(0)
-      await expect(
-        host.createOrAttach({
-          sessionId: 'agent-natural-exit',
-          cols: 80,
-          rows: 24,
-          launchAgent: 'claude',
-          streamClient: { onData: vi.fn(), onExit: vi.fn() }
-        })
-      ).rejects.toThrow('Session not found')
+      const respawn = host.createOrAttach({
+        sessionId: 'agent-natural-exit',
+        cols: 80,
+        rows: 24,
+        launchAgent: 'claude',
+        streamClient: { onData: vi.fn(), onExit: vi.fn() }
+      })
+      expect(spawnFn).toHaveBeenCalledOnce()
 
       finishSweep()
       await killing
       expect(retiredSubprocess.forceKill).not.toHaveBeenCalled()
-      await expect(
-        host.createOrAttach({
-          sessionId: 'agent-natural-exit',
-          cols: 80,
-          rows: 24,
-          launchAgent: 'claude',
-          streamClient: { onData: vi.fn(), onExit: vi.fn() }
-        })
-      ).resolves.toMatchObject({ isNew: true })
+      await expect(respawn).resolves.toMatchObject({ isNew: true })
       expect(spawnFn).toHaveBeenCalledTimes(2)
     })
 

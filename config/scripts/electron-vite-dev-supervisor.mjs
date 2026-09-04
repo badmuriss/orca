@@ -107,7 +107,7 @@ export function runElectronViteDevSupervisor({ nodePath, electronViteCli, args, 
   }
 
   function scheduleAttemptFinish(attempt) {
-    if (attempt !== activeAttempt || (!attempt.closed && !attempt.spawnError)) {
+    if (attempt !== activeAttempt || (!attempt.exited && !attempt.spawnError)) {
       return
     }
     if (attempt.decisionTimer) {
@@ -138,8 +138,8 @@ export function runElectronViteDevSupervisor({ nodePath, electronViteCli, args, 
     })
     const attempt = {
       child: nextChild,
-      closed: false,
       decisionTimer: null,
+      exited: false,
       exitCode: null,
       forcedKillTimer: null,
       gpuFallbackRetryRequested: false,
@@ -165,8 +165,8 @@ export function runElectronViteDevSupervisor({ nodePath, electronViteCli, args, 
       attempt.spawnError = error
       scheduleAttemptFinish(attempt)
     })
-    nextChild.on('close', (code, signal) => {
-      attempt.closed = true
+    nextChild.on('exit', (code, signal) => {
+      attempt.exited = true
       attempt.exitCode = code
       attempt.signal = signal
       scheduleAttemptFinish(attempt)

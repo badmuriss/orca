@@ -29,6 +29,7 @@ export function createSetActiveFolderWorkspace(
     const reconciliation = projectWorktreeTabModelReconciliation(
       get(),
       workspaceKey,
+      undefined,
       executionHostId
     )
     if (Object.keys(reconciliation.patch).length > 0) {

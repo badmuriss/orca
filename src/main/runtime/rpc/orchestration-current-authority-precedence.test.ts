@@ -223,7 +223,7 @@ describe('current orchestration authority precedence', () => {
             providerSessionId: 'current-worker-session',
             toolUseId: 'current-worker-tool'
           }
-        })
+        } as never)
       }
       const response = await harness.dispatcher.dispatch({
         ...request(

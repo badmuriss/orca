@@ -10,7 +10,8 @@ import type { ListDesktopLineageForHostArgs } from '../../../../shared/host-line
 import {
   buildDetectedGitWorktrees,
   createSshWorktreeMetaIndex,
-  listDisconnectedSshWorktrees
+  listDisconnectedSshWorktrees,
+  type SshWorktreeMetaIndex
 } from './ssh-worktree-fallback'
 import {
   buildDisconnectedDetectedWorktrees,
@@ -25,8 +26,7 @@ import {
   type DetectedWorktreeSideEffectToken
 } from './detected-worktree-scan-cache'
 import { loggedWorktreeListFailures, warnOnce } from './worktree-listing-diagnostics'
-import { readAllWorktreeMetaForHost } from '../../../persistence/host-qualified-worktree-meta'
-import { getRepoExecutionHostId } from '../../../../shared/execution-host'
+import { readAllWorktreeMetaForRepo } from '../../../persistence/host-qualified-worktree-meta'
 
 export async function listDetectedWorktreesForCapturedRepo(
   store: Store,
@@ -39,18 +39,19 @@ export async function listDetectedWorktreesForCapturedRepo(
     providerAbort?.signal.aborted
       ? ({ providerAbortStatus: providerAbort.status() } as const)
       : undefined
-  const allMeta = isFolderRepo(repo)
-    ? undefined
-    : readAllWorktreeMetaForHost(store, getRepoExecutionHostId(repo))
-  const sshWorktreeMetaIndex = repo.connectionId
-    ? createSshWorktreeMetaIndex(Object.entries(allMeta ?? {}))
-    : new Map()
+  const allMeta = isFolderRepo(repo) ? undefined : readAllWorktreeMetaForRepo(store, repo)
+  // Why: only the disconnected fallbacks read this, so keep parseWorktreeId over the whole host snapshot
+  // off the connected path entirely.
+  let cachedSshWorktreeMetaIndex: SshWorktreeMetaIndex | undefined
+  const sshWorktreeMetaIndex = (): SshWorktreeMetaIndex =>
+    (cachedSshWorktreeMetaIndex ??= createSshWorktreeMetaIndex(Object.entries(allMeta ?? {})))
 
   try {
     let gitWorktrees: GitWorktreeInfo[]
     let freshScan = true
     let sideEffectToken: DetectedWorktreeSideEffectToken | undefined
     let metadataPrune: DetectedWorktreeMetadataPrune | undefined
+    let hygieneDue: boolean | undefined
     if (isFolderRepo(repo)) {
       if (!isCurrent()) {
         return null
@@ -85,7 +86,7 @@ export async function listDetectedWorktreesForCapturedRepo(
         if (!isCurrent()) {
           return null
         }
-        const worktrees = listDisconnectedSshWorktrees(store, repo, sshWorktreeMetaIndex)
+        const worktrees = listDisconnectedSshWorktrees(store, repo, sshWorktreeMetaIndex())
         return {
           repoId: repo.id,
           authoritative: false,
@@ -102,6 +103,7 @@ export async function listDetectedWorktreesForCapturedRepo(
       freshScan = scan.fresh
       sideEffectToken = scan.sideEffectToken
       metadataPrune = scan.metadataPrune
+      hygieneDue = scan.hygieneDue
     }
     const aborted = abortedResult()
     if (aborted) {
@@ -123,7 +125,8 @@ export async function listDetectedWorktreesForCapturedRepo(
       await applyFreshDetectedWorktreeScanSideEffects(store, repo, gitWorktrees, metadataPrune, {
         isCurrent: () => isCurrent() && !providerAbort?.signal.aborted,
         sideEffectToken,
-        signal: providerAbort?.signal
+        signal: providerAbort?.signal,
+        ...(hygieneDue === undefined ? {} : { hygieneDue })
       })
       const aborted = abortedResult()
       if (aborted) {
@@ -155,7 +158,7 @@ export async function listDetectedWorktreesForCapturedRepo(
       err
     )
     if (repo.connectionId) {
-      const worktrees = listDisconnectedSshWorktrees(store, repo, sshWorktreeMetaIndex)
+      const worktrees = listDisconnectedSshWorktrees(store, repo, sshWorktreeMetaIndex())
       return {
         repoId: repo.id,
         authoritative: false,

@@ -6,6 +6,7 @@ import type {
   WorktreeLineage,
   WorktreeLineageWarning
 } from './worktree/lineage-types'
+import type { RuntimeListingHostScope } from './runtime-listing-host-scope'
 import type { GitWorktreeInfo, Worktree } from './worktree/types'
 import { parseExecutionHostId, type ExecutionHostId } from './execution-host'
 
@@ -205,6 +206,8 @@ export type RuntimeWorktreePsResult = {
   truncated: boolean
   /** Hosts covered by the live process inventory used for this snapshot. */
   queriedHostIds?: ExecutionHostId[]
+  /** Absent from hosts that predate the field; treat that scope as unverifiable. */
+  hostScope?: RuntimeListingHostScope
 }
 
 export type RuntimeWorktreePsSnapshotResult = RuntimeWorktreePsResult & { snapshotId: string }
@@ -230,4 +233,6 @@ export type RuntimeWorktreeListResult = {
   worktrees: RuntimeWorktreeRecord[]
   totalCount: number
   truncated: boolean
+  /** Absent from hosts that predate the field; treat that scope as unverifiable. */
+  hostScope?: RuntimeListingHostScope
 }

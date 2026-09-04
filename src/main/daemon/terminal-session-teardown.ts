@@ -26,6 +26,7 @@ type SessionTeardownOperation = {
 }
 
 type SettledSessionTeardown = { receipt: PtyStopReceipt; immediate: boolean }
+const WINDOWS_TREE_LIMIT_REASON = 'Windows tree verification is capability-limited.'
 
 export type PtyProcessTreeStopEvidence = {
   root: PtyStopProcessIdentity
@@ -44,11 +45,7 @@ export async function stopPtyProcessTree(
 ): Promise<PtyProcessTreeStopEvidence> {
   if ((deps.platform ?? process.platform) === 'win32') {
     await killWithDescendantSweep(rootPid, killRoot, deps)
-    return unresolvedTree(
-      rootPid,
-      'Windows tree verification is capability-limited.',
-      'capability_limited'
-    )
+    return unresolvedTree(rootPid, WINDOWS_TREE_LIMIT_REASON, 'capability_limited')
   }
   const readTable = deps.readTable ?? readProcessTable
   const timeoutMs = deps.timeoutMs ?? DESCENDANT_SNAPSHOT_TIMEOUT_MS
@@ -71,18 +68,20 @@ export async function stopPtyProcessTree(
     readTable: async () => capture,
     sendSignal
   })
-  await waitInterval(deps.graceMs ?? DESCENDANT_KILL_GRACE_MS)
+  const graceMs = deps.graceMs ?? DESCENDANT_KILL_GRACE_MS
+  if (graceMs > 0) {
+    await waitInterval(graceMs)
+  }
   const escalationCapture = await readProcessTableBeforeDeadline(readTable, timeoutMs)
   if (!escalationCapture) {
     return capturedTreeUnverifiable(root, descendants, 'The post-stop snapshot failed.')
   }
   const escalation = observeIdentities([root, ...descendants], escalationCapture.rows)
-  escalation.forEach(({ identity, status }) => {
-    if (status === 'live' && identity.pid !== rootPid && identity.pid !== null) {
-      sendSignal(identity.pid, 'SIGKILL')
-    }
-  })
-  if (escalation.some(({ status }) => status === 'live')) {
+  const liveDescendants = escalation.filter(
+    ({ identity, status }) => status === 'live' && identity.pid !== rootPid && identity.pid !== null
+  )
+  liveDescendants.forEach(({ identity }) => sendSignal(identity.pid!, 'SIGKILL'))
+  if (liveDescendants.length > 0 && graceMs > 0) {
     await waitInterval(50)
   }
   const finalCapture = await readProcessTableBeforeDeadline(readTable, timeoutMs)
@@ -120,6 +119,11 @@ export class TerminalSessionTeardown {
 
   get(sessionId: string): Promise<PtyStopReceipt> | undefined {
     return this.operations.get(sessionId)?.promise
+  }
+
+  /** Waits until the teardown for this id releases its exact process incarnation. */
+  async settle(sessionId: string): Promise<void> {
+    await this.operations.get(sessionId)?.promise.catch(() => undefined)
   }
 
   getReceipt(

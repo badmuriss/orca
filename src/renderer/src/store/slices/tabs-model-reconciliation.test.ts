@@ -143,7 +143,11 @@ describe('TabsSlice', () => {
       const result = store.getState().reconcileWorktreeTabModel(WT)
       const state = store.getState()
 
-      expect(result.renderableTabCount).toBe(1)
+      expect(result.renderableTabCount).toBe(2)
+      expect(state.unifiedTabsByWorktree[WT]?.[0]).toMatchObject({
+        contentType: 'maestro',
+        systemRole: 'workspace-maestro'
+      })
       expect(state.unifiedTabsByWorktree[WT]?.map((tab) => tab.entityId)).toContain(
         'host-lost-terminal'
       )
@@ -371,18 +375,20 @@ describe('TabsSlice', () => {
 
       const result = store.getState().reconcileWorktreeTabModel(WT)
       const state = store.getState()
+      const maestroId = state.unifiedTabsByWorktree[WT][0].id
 
       expect(result).toEqual({
-        renderableTabCount: 2,
+        renderableTabCount: 3,
         activeRenderableTabId: 'structured-session-1'
       })
       expect(state.unifiedTabsByWorktree[WT].map((tab) => tab.id)).toEqual([
+        maestroId,
         'terminal-1',
         'structured-session-1'
       ])
       expect(state.groupsByWorktree[WT][0]).toMatchObject({
         activeTabId: 'structured-session-1',
-        tabOrder: ['terminal-1', 'structured-session-1']
+        tabOrder: [maestroId, 'terminal-1', 'structured-session-1']
       })
     })
 

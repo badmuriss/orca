@@ -178,6 +178,8 @@
     "**/node_modules",
     "**/dist",
     "**/out",
+    "cloud/**",
+    ".github/actions/cloud-sql-rollout-lease/**",
     "tests/e2e/.cross-version-checkouts",
     ".visual-evidence"
   ]

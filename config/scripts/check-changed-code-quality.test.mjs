@@ -6,10 +6,10 @@ import {
   expectedNodeMajor,
   isMovedCode,
   main,
+  isRootCodeQualityPath,
   overlapsAddedLines,
   parseAddedLineRanges,
   parseOxlintOutput,
-  resolvePnpmCommand,
   runOxlintScan
 } from './check-changed-code-quality.mjs'
 
@@ -58,6 +58,11 @@ describe('changed-code quality line matching', () => {
     expect(scan.args).not.toContain('--config')
     expect(scan.args).not.toContain('--disable-nested-config')
   })
+
+  it('leaves Cloud source to the independent Cloud quality checks', () => {
+    expect(isRootCodeQualityPath('cloud/apps/relay/src/index.ts')).toBe(false)
+    expect(isRootCodeQualityPath('src/main/index.ts')).toBe(true)
+  })
 })
 
 describe('changed-code quality execution safety', () => {
@@ -86,7 +91,7 @@ describe('changed-code quality execution safety', () => {
     ).toThrow(/code quality output stage failed/)
   })
 
-  it('preserves diagnostics and the Windows pnpm command', () => {
+  it('preserves diagnostics through the resolved Oxlint invocation', () => {
     const file = 'config/scripts/check-changed-code-quality.test.mjs'
     const diagnostic = {
       filename: file,
@@ -95,21 +100,13 @@ describe('changed-code quality execution safety', () => {
       labels: [{ span: { line: 24 } }]
     }
     let invokedCommand
-    const diagnostics = runOxlintScan(
-      process.cwd(),
-      OXLINT_SCANS[0],
-      [file],
-      (command) => {
-        invokedCommand = command
-        return { status: 1, stdout: JSON.stringify({ diagnostics: [diagnostic] }), stderr: '' }
-      },
-      'win32'
-    )
+    const diagnostics = runOxlintScan(process.cwd(), OXLINT_SCANS[0], [file], (command) => {
+      invokedCommand = command
+      return { status: 1, stdout: JSON.stringify({ diagnostics: [diagnostic] }), stderr: '' }
+    })
 
-    expect(invokedCommand).toBe('pnpm.cmd')
+    expect(invokedCommand).toBe(process.execPath)
     expect(diagnostics).toEqual([diagnostic])
-    expect(resolvePnpmCommand('win32')).toBe('pnpm.cmd')
-    expect(resolvePnpmCommand('linux')).toBe('pnpm')
   })
 
   it('fails before scanning on an unsupported Node engine', () => {
