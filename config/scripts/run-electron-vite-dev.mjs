@@ -40,6 +40,7 @@ delete process.env.ELECTRON_RUN_AS_NODE
 const require = createRequire(import.meta.url)
 const repoRoot = path.resolve(import.meta.dirname, '../..')
 const STABLE_NAME_FLAG = '--stable-name'
+const LINUX_DEV_WINDOW_CLASS = 'orca-dev'
 const rawForwardedArgs = process.argv.slice(2)
 // Why: keep an escape hatch for tools that key off Electron's stock app name.
 // The flag is runner-only and must not leak into Chromium/electron-vite.
@@ -611,6 +612,14 @@ const userPassedPort = forwardedRaw.some(
 // Why: --help/--version exit immediately; binding a probe socket and printing
 // a debug-port line would be noise.
 const isHelpOrVersion = forwardedRaw.some((a) => a === '--help' || a === '-h' || a === '--version')
+const electronArgumentSeparatorIndex = forwardedRaw.indexOf('--')
+const forwardedElectronArgs =
+  electronArgumentSeparatorIndex === -1
+    ? []
+    : forwardedRaw.slice(electronArgumentSeparatorIndex + 1)
+const userPassedWindowClass = forwardedElectronArgs.some(
+  (arg) => arg === '--class' || arg.startsWith('--class=')
+)
 if (!isHelpOrVersion && process.env.ORCA_DEV_INSTANCE_LABEL) {
   console.error(`[orca-dev] Instance: ${process.env.ORCA_DEV_INSTANCE_LABEL}`)
 }
@@ -619,7 +628,10 @@ if (!isHelpOrVersion && process.env.ORCA_DEV_INSTANCE_LABEL) {
 if (!isHelpOrVersion && process.env.ORCA_BACKGROUND_LAUNCH === '1') {
   console.error('[orca-dev] Background launch: window shows without stealing focus')
 }
-let forwardedExtras = []
+let forwardedExtras =
+  process.platform === 'linux' && !isHelpOrVersion && !userPassedWindowClass
+    ? [`--class=${LINUX_DEV_WINDOW_CLASS}`]
+    : []
 if (!userPassedPort && !isHelpOrVersion) {
   const envPortRaw = process.env.REMOTE_DEBUGGING_PORT
   let port = null
@@ -635,7 +647,7 @@ if (!userPassedPort && !isHelpOrVersion) {
     port = await pickDebugPort()
   }
   if (port !== null) {
-    forwardedExtras = [`--remote-debugging-port=${port}`]
+    forwardedExtras.push(`--remote-debugging-port=${port}`)
     // Why: stderr keeps stdout clean for downstream parsing; log uses
     // 127.0.0.1 to match the interface we actually probed (localhost may
     // resolve to ::1 on IPv6-first hosts).
@@ -647,7 +659,12 @@ if (!userPassedPort && !isHelpOrVersion) {
   }
 }
 prepareDevWebClient()
-const forwardedArgs = ['dev', ...forwardedRaw, ...forwardedExtras]
+const forwardedArgs = [
+  'dev',
+  ...forwardedRaw,
+  ...(forwardedExtras.length > 0 && electronArgumentSeparatorIndex === -1 ? ['--'] : []),
+  ...forwardedExtras
+]
 runElectronViteDevSupervisor({
   nodePath: process.execPath,
   electronViteCli,
