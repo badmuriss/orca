@@ -614,5 +614,63 @@ test.describe('Maestro workspace Canvas in Electron', () => {
         await session.dispose()
       }
     })
+
+    // oxlint-disable-next-line no-empty-pattern -- This journey owns both Electron launches through createRestartSession.
+    test(`@mwc-terminal-preload restores every Canvas terminal at ${profile.id}`, async ({}, testInfo) => {
+      test.setTimeout(300_000)
+      prepareEvidence(FAULT_FILE)
+      const repoPath = existsSync(TEST_REPO_PATH_FILE)
+        ? readFileSync(TEST_REPO_PATH_FILE, 'utf8').trim()
+        : ''
+      test.skip(!repoPath || !existsSync(repoPath), 'Seeded E2E repo is unavailable')
+      const session = createRestartSession(testInfo)
+      let firstApp: ElectronApplication | null = null
+      let secondApp: ElectronApplication | null = null
+      const expectedTerminalCount = 6
+      try {
+        const first = await session.launch()
+        firstApp = first.app
+        await first.page.setViewportSize({ width: profile.width, height: profile.height })
+        await waitForSessionReady(first.page)
+        await attachRepoAndOpenTerminal(first.page, repoPath)
+        await openMaestro(first.page, true)
+        const firstTerminalSurfaces = first.page.locator(
+          '[data-maestro-workspace-content-type="terminal"]'
+        )
+        for (
+          let count = await firstTerminalSurfaces.count();
+          count < expectedTerminalCount;
+          count++
+        ) {
+          await createCanvasResource(first.page, 'terminal')
+          await expect(firstTerminalSurfaces).toHaveCount(count + 1, { timeout: 30_000 })
+        }
+        await session.close(firstApp)
+        firstApp = null
+
+        const second = await session.launch()
+        secondApp = second.app
+        await second.page.setViewportSize({ width: profile.width, height: profile.height })
+        await waitForSessionReady(second.page)
+        await waitForActiveWorktree(second.page)
+        await openMaestro(second.page, true)
+        await expect(
+          second.page.locator('[data-maestro-workspace-content-type="terminal"]')
+        ).toHaveCount(expectedTerminalCount, { timeout: 30_000 })
+        await second.page.getByLabel('Fit resources').click()
+        await expect(second.page.locator('[data-terminal-preview-mode="canvas"]')).toHaveCount(
+          expectedTerminalCount,
+          { timeout: 30_000 }
+        )
+        await capture(second.page, 'terminal-preload', profile)
+      } finally {
+        for (const app of [secondApp, firstApp]) {
+          if (app) {
+            await session.close(app).catch(() => {})
+          }
+        }
+        await session.dispose()
+      }
+    })
   }
 })

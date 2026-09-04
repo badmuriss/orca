@@ -100,7 +100,7 @@ export async function createCanvasResource(
   resource: 'terminal' | 'browser' | 'annotation'
 ): Promise<void> {
   const background = page.locator(
-    '[data-maestro-workspace-canvas] [data-slot="context-menu-trigger"]'
+    '[data-maestro-workspace-canvas] > [data-slot="context-menu-trigger"]'
   )
   await background.click({ button: 'right', position: { x: 16, y: 16 }, force: true })
   if (resource === 'terminal') {

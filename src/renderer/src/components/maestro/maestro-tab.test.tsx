@@ -5,12 +5,21 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { emptyWorkspaceCanvasDocument } from '../../../../shared/maestro-workspace-document-state'
 import type { Tab } from '../../../../shared/tab-types'
+import type * as MaestroTerminalPreloadModule from './maestro-terminal-preload'
 
-const { query } = vi.hoisted(() => ({ query: vi.fn() }))
+const { cancelTerminalPreload, query, scheduleTerminalPreload } = vi.hoisted(() => ({
+  cancelTerminalPreload: vi.fn(),
+  query: vi.fn(),
+  scheduleTerminalPreload: vi.fn()
+}))
 vi.mock('@/runtime/runtime-maestro-workspace-client', () => ({
   getRuntimeMaestroWorkspaceCanvas: query,
   mutateRuntimeMaestroWorkspaceCanvas: vi.fn()
 }))
+vi.mock('./maestro-terminal-preload', async (importOriginal) => {
+  const actual = await importOriginal<typeof MaestroTerminalPreloadModule>()
+  return { ...actual, scheduleMaestroTerminalPreload: scheduleTerminalPreload }
+})
 
 import { getPinnedRuntimeTarget, MaestroSurface } from './MaestroSurface'
 
@@ -66,6 +75,9 @@ async function renderSurface(tab = makeMaestroTab()): Promise<void> {
 
 beforeEach(() => {
   query.mockReset()
+  cancelTerminalPreload.mockReset()
+  scheduleTerminalPreload.mockReset()
+  scheduleTerminalPreload.mockReturnValue(cancelTerminalPreload)
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -88,6 +100,18 @@ describe('MaestroSurface', () => {
     )
     expect(container?.textContent).toContain('No workspace resources yet')
     expect(container?.textContent).toContain('A Harness Run is optional')
+  })
+
+  it('preloads restored terminals while the Canvas remains active', async () => {
+    query.mockResolvedValue(available())
+    await renderSurface()
+
+    expect(scheduleTerminalPreload).toHaveBeenCalledWith(
+      expect.objectContaining({ worktreeId: 'worktree-1' })
+    )
+    act(() => root?.unmount())
+    root = null
+    expect(cancelTerminalPreload).toHaveBeenCalledOnce()
   })
 
   it('renders an honest update-required state', async () => {
