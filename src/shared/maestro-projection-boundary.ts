@@ -34,12 +34,12 @@ const profileSchema = z
   .passthrough()
 const resourceSchema = z
   .object({
-    execution_host_id: z.string().min(1).optional(),
-    workspace_key: z.string().min(1).optional(),
-    attempt_id: z.string().min(1).optional(),
-    terminal_id: z.string().min(1).nullable().optional(),
-    terminal_status: z.string().min(1).optional(),
-    liveness: z.enum(['live', 'unverifiable', 'exited']).optional()
+    execution_host_id: z.string().min(1).optional().catch(undefined),
+    workspace_key: z.string().min(1).optional().catch(undefined),
+    attempt_id: z.string().min(1).optional().catch(undefined),
+    terminal_id: z.string().min(1).nullable().optional().catch(undefined),
+    terminal_status: z.string().min(1).optional().catch(undefined),
+    liveness: z.enum(['live', 'unverifiable', 'exited']).optional().catch(undefined)
   })
   .passthrough()
 
@@ -47,22 +47,35 @@ const STATUS_VERBS: Readonly<Record<string, string>> = {
   active: 'Running',
   approved: 'Archived',
   archived: 'Archived',
+  cancelled: 'Archived',
+  circuit_broken: 'Failed',
   blocked: 'Blocked',
   completed: 'Archived',
+  dispatched: 'Running',
   exited: 'Archived',
   failed: 'Failed',
   finished: 'Archived',
+  idle: 'Ready',
   input_required: 'Input required',
   'input-required': 'Input required',
+  live: 'Running',
   outcome_unknown: 'Outcome unknown',
   pending: 'Queued',
   queued: 'Queued',
+  ready: 'Ready',
   ready_to_release: 'Ready to release',
   'ready-to-release': 'Ready to release',
   reclaimable: 'Ready to release',
+  release_pending: 'Ready to release',
   released: 'Archived',
+  reserved: 'Queued',
+  retained: 'Retained',
   running: 'Running',
+  settled: 'Ready to release',
+  starting: 'Starting',
+  stopped: 'Archived',
   succeeded: 'Archived',
+  superseded: 'Archived',
   unverifiable: 'Outcome unknown'
 }
 
@@ -110,7 +123,9 @@ export function terminalReceiptIsLive(
   _status: string,
   resource: ParsedExecutionResource | undefined
 ): boolean {
-  return resource?.liveness === 'live'
+  return resource?.liveness !== undefined
+    ? resource.liveness === 'live'
+    : resource?.terminal_status?.toLowerCase() === 'live'
 }
 
 function cursorMatches(

@@ -348,6 +348,62 @@ describe('Maestro Run progress projection', () => {
     })
   })
 
+  it('replaces a failed historical attempt with the successful retry', () => {
+    const completedTask = task('task-1', 'completed')
+    const failedAttempt = dispatch('dispatch-1', completedTask.id, {
+      status: 'failed',
+      created_at: '2026-08-28T10:01:00.000Z',
+      completed_at: '2026-08-28T10:02:00.000Z'
+    })
+    const successfulRetry = dispatch('dispatch-2', completedTask.id, {
+      status: 'completed',
+      created_at: '2026-08-28T10:03:00.000Z',
+      completed_at: '2026-08-28T10:04:00.000Z'
+    })
+    const result = project({
+      tasks: [completedTask],
+      dispatches: [failedAttempt, successfulRetry]
+    })
+
+    expect(result.execution.counts).toMatchObject({ succeeded: 1, failed: 0 })
+    expect(
+      result.resources
+        ?.filter((resource) => resource.kind === 'dispatch' || resource.kind === 'attempt')
+        .map((resource) => ({ reference: resource.reference, title: resource.title }))
+    ).toEqual([
+      { reference: successfulRetry.id, title: 'Dispatch 2 · Implement progress' },
+      { reference: successfulRetry.id, title: 'Attempt 2 · Implement progress' }
+    ])
+  })
+
+  it('keeps the latest failure and unresolved resources visible after an earlier success', () => {
+    const failedTask = task('task-1', 'failed')
+    const result = project({
+      tasks: [failedTask],
+      dispatches: [
+        dispatch('dispatch-1', failedTask.id, {
+          status: 'completed',
+          created_at: '2026-08-28T10:01:00Z'
+        }),
+        dispatch('dispatch-2', failedTask.id, {
+          status: 'failed',
+          created_at: '2026-08-28T10:03:00Z'
+        })
+      ],
+      terminalLeases: [lease(failedTask.id, 'outcome_unknown')]
+    })
+    expect(result.resources?.filter((resource) => resource.kind === 'dispatch')).toEqual([
+      expect.objectContaining({ reference: 'dispatch-2', state: 'error' })
+    ])
+    expect(result.resources).toContainEqual(
+      expect.objectContaining({
+        kind: 'terminal',
+        reference: 'lease-task-1',
+        liveness: 'unverifiable'
+      })
+    )
+  })
+
   it('omits percentage for zero-Task Runs', () => {
     expect(project().execution).toEqual({
       state: 'active',
@@ -383,15 +439,10 @@ describe('Maestro Run progress projection', () => {
       superseded: 1,
       unverifiable: 0
     })
-    expect(result.recently_completed).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          reference: superseded.id,
-          purpose: 'operational',
-          operational_outcome: 'superseded',
-          successor_reference: successor.id
-        })
-      ])
-    )
+    expect(result.recently_completed.map((entry) => entry.reference)).toEqual([deliverable.id])
+    expect(result.execution).toMatchObject({ total: 2, counts: { failed: 0 } })
+    expect(
+      result.resources?.some((entry) => entry.kind === 'task' && entry.reference === superseded.id)
+    ).toBe(false)
   })
 })

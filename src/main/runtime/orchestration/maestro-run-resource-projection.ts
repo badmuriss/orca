@@ -6,6 +6,7 @@ import type { OrchestrationNestedAgentActivity } from '../../../shared/orchestra
 import type { ExactWorkerProviderSession } from '../../../shared/orchestration-worker-output'
 import { workspaceSurfaceKey } from '../../../shared/maestro-workspace-canvas'
 import type { DispatchContextRow, RunRow, TaskRow, WorkerDispatchRow } from './types'
+import { selectCurrentTaskDispatches } from './maestro-current-task-dispatch'
 import type { TaskProgressOutcome } from './db/tasks/task-progress-outcome'
 import {
   attemptResourceDetail,
@@ -46,8 +47,13 @@ export type MaestroRunResourceProjectionInput = {
 export function projectMaestroRunResources(
   input: MaestroRunResourceProjectionInput
 ): MaestroRunResource[] {
+  const currentDispatches = selectCurrentTaskDispatches(
+    input.tasks.map(({ task }) => task),
+    input.dispatches
+  )
+  const currentDispatchIds = new Set(currentDispatches.map((dispatch) => dispatch.id))
   const taskById = new Map(input.tasks.map((entry) => [entry.task.id, entry] as const))
-  const dispatchById = new Map(input.dispatches.map((entry) => [entry.id, entry] as const))
+  const dispatchById = new Map(currentDispatches.map((entry) => [entry.id, entry] as const))
   const workerByDispatch = new Map(
     input.workerDispatches.map((worker) => [worker.dispatch_id, worker] as const)
   )
@@ -57,6 +63,12 @@ export function projectMaestroRunResources(
         ? [[lease.ownerPrincipal.slice('dispatch:'.length), lease] as const]
         : []
     )
+  )
+  const currentAttemptIds = new Set(
+    currentDispatches.flatMap((dispatch) => {
+      const attemptId = leaseByDispatch.get(dispatch.id)?.attemptId
+      return attemptId ? [dispatch.id, attemptId] : [dispatch.id]
+    })
   )
   const resources: MaestroRunResource[] = [coordinatorResource(input)]
 
@@ -72,10 +84,15 @@ export function projectMaestroRunResources(
   }
 
   const dispatchOrdinals = new Map<string, number>()
+  const ordinalByDispatch = new Map<string, number>()
   for (const dispatch of input.dispatches) {
-    const task = taskById.get(dispatch.task_id)
     const ordinal = (dispatchOrdinals.get(dispatch.task_id) ?? 0) + 1
     dispatchOrdinals.set(dispatch.task_id, ordinal)
+    ordinalByDispatch.set(dispatch.id, ordinal)
+  }
+  for (const dispatch of currentDispatches) {
+    const task = taskById.get(dispatch.task_id)
+    const ordinal = ordinalByDispatch.get(dispatch.id) ?? 1
     const worker = input.workerDispatches.find((candidate) => candidate.dispatch_id === dispatch.id)
     const attemptReference = leaseByDispatch.get(dispatch.id)?.attemptId ?? dispatch.id
     const taskTitle = task?.title ?? 'Untitled task'
@@ -102,6 +119,9 @@ export function projectMaestroRunResources(
   }
 
   for (const execution of input.providerExecutions) {
+    if (!currentDispatchIds.has(execution.dispatchId)) {
+      continue
+    }
     const dispatch = dispatchById.get(execution.dispatchId)
     const worker = workerByDispatch.get(execution.dispatchId)
     const task = dispatch ? taskById.get(dispatch.task_id) : undefined
@@ -117,6 +137,9 @@ export function projectMaestroRunResources(
   }
 
   for (const activity of input.nestedActivity) {
+    if (!currentDispatchIds.has(activity.parent_dispatch_id)) {
+      continue
+    }
     const dispatch = dispatchById.get(activity.parent_dispatch_id)
     resources.push({
       kind: 'provider',
@@ -131,6 +154,14 @@ export function projectMaestroRunResources(
   }
 
   for (const lease of input.terminalLeases) {
+    if (
+      lease.role === 'worker' &&
+      ['released', 'archived', 'superseded'].includes(lease.lifecycleState) &&
+      lease.ownerPrincipal.startsWith('dispatch:') &&
+      !currentDispatchIds.has(lease.ownerPrincipal.slice('dispatch:'.length))
+    ) {
+      continue
+    }
     const task = lease.taskId ? taskById.get(lease.taskId) : undefined
     const surfaceKey = terminalSurfaceKey(input, lease)
     resources.push({
@@ -154,6 +185,9 @@ export function projectMaestroRunResources(
   }
 
   for (const browser of input.browserSurfaces) {
+    if (!currentAttemptIds.has(browser.attempt_id) && browser.state === 'released') {
+      continue
+    }
     const task = taskById.get(browser.task_id)
     const surfaceKey = browser.browser_page_id
       ? input.browserSurfaceKeys.get(browser.browser_page_id)

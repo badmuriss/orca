@@ -113,6 +113,23 @@ function view(kind: 'snapshot' | 'delta' = 'snapshot') {
   }
 }
 describe('Maestro projection contract', () => {
+  it('preserves an explicit unverifiable verdict over a stale live terminal status', () => {
+    const input = view()
+    const result = projectAgentGraphView(
+      parseAgentGraphProjection({
+        ...input,
+        nodes: input.nodes.map((node) =>
+          node.type === 'terminal-receipt'
+            ? {
+                ...node,
+                resource: { ...node.resource, terminal_status: 'live', liveness: 'unverifiable' }
+              }
+            : node
+        )
+      })
+    )
+    expect(result.nodes.find((node) => node.id === 'attempt-1')?.live).toBe(false)
+  })
   it('projects provider profiles and concrete live state', () => {
     const result = projectAgentGraphView(parseAgentGraphProjection(view()))
 
@@ -175,6 +192,167 @@ describe('Maestro projection contract', () => {
       terminalId: 'pty-1',
       live: false
     })
+  })
+  it('maps a dispatched task and explicit live terminal status', () => {
+    const input = view()
+    const result = projectAgentGraphView(
+      parseAgentGraphProjection({
+        ...input,
+        nodes: [
+          {
+            id: 'task-1',
+            type: 'task',
+            status: 'dispatched',
+            summary: 'Implement contract',
+            task_id: 'task-1'
+          },
+          input.nodes[0],
+          {
+            ...input.nodes[1],
+            status: 'live',
+            task_id: 'task-1',
+            resource: {
+              attempt_id: 'attempt-1',
+              terminal_id: 'pty-1',
+              terminal_status: 'live'
+            }
+          }
+        ],
+        edges: [
+          ...input.edges,
+          {
+            id: 'edge-reports-1',
+            type: 'reports_to',
+            source_id: 'attempt-1',
+            target_id: 'task-1'
+          }
+        ]
+      })
+    )
+
+    expect(result.nodes.find((node) => node.id === 'task-1')).toMatchObject({
+      status: 'Running',
+      terminalId: 'pty-1',
+      live: true
+    })
+    expect(result.nodes.find((node) => node.id === 'attempt-1')).toMatchObject({
+      terminalId: 'pty-1',
+      live: true
+    })
+    expect(result.nodes.find((node) => node.id === 'terminal-1')).toMatchObject({
+      status: 'Running',
+      terminalId: 'pty-1',
+      live: true
+    })
+  })
+  it('preserves terminal identity when an optional liveness value is unsupported', () => {
+    const input = view()
+    const result = projectAgentGraphView(
+      parseAgentGraphProjection({
+        ...input,
+        nodes: input.nodes.map((node) =>
+          node.type === 'terminal-receipt'
+            ? {
+                ...node,
+                resource: {
+                  attempt_id: 'attempt-1',
+                  terminal_id: 'pty-1',
+                  terminal_status: 'running',
+                  liveness: 'verified'
+                }
+              }
+            : node
+        )
+      })
+    )
+
+    expect(result.nodes.find((node) => node.id === 'attempt-1')).toMatchObject({
+      terminalId: 'pty-1',
+      terminalStatus: 'running',
+      live: false
+    })
+  })
+  it('replaces a failed historical attempt with the successful retry', () => {
+    const input = view()
+    const result = projectAgentGraphView(
+      parseAgentGraphProjection({
+        ...input,
+        nodes: [
+          {
+            id: 'task-1',
+            type: 'task',
+            status: 'completed',
+            summary: 'Implement contract',
+            task_id: 'task-1'
+          },
+          {
+            id: 'attempt-failed',
+            type: 'attempt',
+            status: 'failed',
+            summary: 'Failed attempt',
+            task_id: 'task-1',
+            attempt_id: 'attempt-failed'
+          },
+          {
+            id: 'terminal-failed',
+            type: 'terminal-receipt',
+            status: 'exited',
+            summary: 'Failed terminal',
+            task_id: 'task-1',
+            attempt_id: 'attempt-failed',
+            resource: {
+              attempt_id: 'attempt-failed',
+              terminal_id: 'pty-failed',
+              terminal_status: 'exited',
+              liveness: 'exited'
+            }
+          },
+          {
+            id: 'attempt-successful',
+            type: 'attempt',
+            status: 'completed',
+            summary: 'Successful retry',
+            task_id: 'task-1',
+            attempt_id: 'attempt-successful'
+          },
+          {
+            id: 'terminal-successful',
+            type: 'terminal-receipt',
+            status: 'exited',
+            summary: 'Successful terminal',
+            task_id: 'task-1',
+            attempt_id: 'attempt-successful',
+            resource: {
+              attempt_id: 'attempt-successful',
+              terminal_id: 'pty-successful',
+              terminal_status: 'exited',
+              liveness: 'exited'
+            }
+          }
+        ],
+        edges: [
+          {
+            id: 'edge-failed',
+            type: 'executes',
+            source_id: 'attempt-failed',
+            target_id: 'terminal-failed'
+          },
+          {
+            id: 'edge-successful',
+            type: 'executes',
+            source_id: 'attempt-successful',
+            target_id: 'terminal-successful'
+          }
+        ]
+      })
+    )
+
+    expect(result.nodes.map((node) => node.id)).toEqual([
+      'task-1',
+      'attempt-successful',
+      'terminal-successful'
+    ])
+    expect(result.edges.map((edge) => edge.id)).toEqual(['edge-successful'])
   })
   it('preserves the graph when required progress is structurally invalid', () => {
     const input = view()

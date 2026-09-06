@@ -5,10 +5,10 @@ import {
   parseExecutionProfile,
   parseExecutionResource,
   sameProjectedWorkspace,
-  terminalReceiptIsLive,
   workspaceFromIdentity,
   type ProjectedWorkspace
 } from './maestro-projection-boundary'
+import { reconcileCurrentAttemptNodes, terminalBinding } from './maestro-projection-current-attempt'
 import { parseNegotiatedMaestroRunProgress, type MaestroRunProgress } from './maestro-run-progress'
 import { MaestroRunProgressV2Schema, type MaestroRunProgressV2 } from './maestro-run-progress-v2'
 import {
@@ -65,12 +65,6 @@ export type MaestroProjection = {
 }
 export type RuntimeMaestroProjection = Omit<MaestroProjection, 'runProgress'> & {
   runProgress: MaestroRunProgressV2
-}
-
-type TerminalBinding = {
-  terminalId: string | null
-  terminalStatus: string
-  live: boolean
 }
 
 function projectedEdgeType(type: AgentGraphView['edges'][number]['type']): MaestroEdgeType {
@@ -153,16 +147,6 @@ function assignNodeWorkspaces(
   return nodeWorkspace
 }
 
-function terminalBinding(node: AgentGraphView['nodes'][number]): TerminalBinding {
-  const resource = parseExecutionResource(node.resource)
-  const terminalId = resource?.terminal_id ?? null
-  return {
-    terminalId,
-    terminalStatus: resource?.terminal_status ?? node.status,
-    live: terminalId !== null && terminalReceiptIsLive(node.status, resource)
-  }
-}
-
 function browserSurfaceBinding(
   node: AgentGraphView['nodes'][number]
 ): MaestroBrowserSurfaceReceipt | undefined {
@@ -173,38 +157,6 @@ function browserSurfaceBinding(
   return parsed.success ? parsed.data : undefined
 }
 
-function mapAttemptTerminals(view: AgentGraphView): Map<string, TerminalBinding> {
-  const terminalByAttempt = new Map<string, TerminalBinding>()
-  const nodesById = new Map(view.nodes.map((node) => [node.id, node]))
-  for (const node of view.nodes) {
-    if (node.type !== 'terminal-receipt') {
-      continue
-    }
-    const attemptId = node.attempt_id ?? parseExecutionResource(node.resource)?.attempt_id
-    if (attemptId) {
-      terminalByAttempt.set(attemptId, terminalBinding(node))
-    }
-  }
-  for (const edge of view.edges) {
-    if (edge.type !== 'executes') {
-      continue
-    }
-    const source = nodesById.get(edge.source_id)
-    const target = nodesById.get(edge.target_id)
-    const attempt = source?.type === 'attempt' ? source : target?.type === 'attempt' ? target : null
-    const terminal =
-      source?.type === 'terminal-receipt'
-        ? source
-        : target?.type === 'terminal-receipt'
-          ? target
-          : null
-    if (attempt && terminal) {
-      terminalByAttempt.set(attempt.attempt_id ?? attempt.id, terminalBinding(terminal))
-    }
-  }
-  return terminalByAttempt
-}
-
 export function projectAgentGraphView(
   view: AgentGraphView,
   targetWorkspace = workspaceFromIdentity(view.workspace_scope.execution_workspace)
@@ -212,9 +164,13 @@ export function projectAgentGraphView(
   const orchestrationHome = workspaceFromIdentity(view.workspace_scope.orchestration_home)
   const executionWorkspace = workspaceFromIdentity(view.workspace_scope.execution_workspace)
   const singleWorkspace = sameProjectedWorkspace(orchestrationHome, executionWorkspace)
-  const nodeWorkspaces = assignNodeWorkspaces(view, orchestrationHome, executionWorkspace)
-  const terminalByAttempt = mapAttemptTerminals(view)
-  const includedNodes = view.nodes.filter((node) => {
+  const {
+    view: currentView,
+    terminalByAttempt,
+    liveTerminalByTask
+  } = reconcileCurrentAttemptNodes(view)
+  const nodeWorkspaces = assignNodeWorkspaces(currentView, orchestrationHome, executionWorkspace)
+  const includedNodes = currentView.nodes.filter((node) => {
     if (singleWorkspace || node.type === 'portal') {
       return true
     }
@@ -230,6 +186,7 @@ export function projectAgentGraphView(
     const attemptId = node.attempt_id ?? resource?.attempt_id
     const linkedTerminal =
       (attemptId ? terminalByAttempt.get(attemptId) : undefined) ??
+      (node.type === 'task' ? liveTerminalByTask.get(node.task_id ?? node.id) : undefined) ??
       (node.type === 'terminal-receipt' ? terminalBinding(node) : undefined)
     const backlink =
       node.type === 'portal' && sameProjectedWorkspace(targetWorkspace, executionWorkspace)
@@ -280,7 +237,7 @@ export function projectAgentGraphView(
     repositoryId: view.workspace_scope.repository_id,
     coordinator: view.coordinator,
     nodes,
-    edges: view.edges
+    edges: currentView.edges
       .filter((edge) => includedIds.has(edge.source_id) && includedIds.has(edge.target_id))
       .map((edge) => ({ ...edge, type: projectedEdgeType(edge.type) })),
     revision: view.revision,

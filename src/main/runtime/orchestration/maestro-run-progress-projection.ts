@@ -17,6 +17,7 @@ import {
   type TaskProgressOutcome
 } from './db/tasks/task-progress-outcome'
 import { disambiguateTaskProgressTitles } from './db/tasks/task-progress-title'
+import { selectCurrentTaskDispatches } from './maestro-current-task-dispatch'
 
 type CreatedRow = { created_at: string; id: string }
 
@@ -53,9 +54,9 @@ export function projectMaestroRunProgress(
 ): MaestroRunProgressV2 {
   const orderedTasks = [...input.tasks].sort(compareCreatedRows)
   const dispatchesByTask = new Map(
-    [...input.dispatches]
-      .sort(compareCreatedRows)
-      .map((dispatch) => [dispatch.task_id, dispatch] as const)
+    selectCurrentTaskDispatches(orderedTasks, input.dispatches).map(
+      (dispatch) => [dispatch.task_id, dispatch] as const
+    )
   )
   const leasesByTask = new Map(
     [...input.terminalLeases]
@@ -63,7 +64,7 @@ export function projectMaestroRunProgress(
       .flatMap((lease) => (lease.taskId ? [[lease.taskId, lease] as const] : []))
   )
   const titles = disambiguateTaskProgressTitles(orderedTasks, boundedText)
-  const tasks = orderedTasks.map((task, index): TaskProjection => {
+  const taskHistory = orderedTasks.map((task, index): TaskProjection => {
     const dispatch = dispatchesByTask.get(task.id)
     const lease = leasesByTask.get(task.id)
     const workerLabel = task.display_name?.trim()
@@ -79,6 +80,14 @@ export function projectMaestroRunProgress(
         : {})
     }
   })
+  const taskIds = new Set(orderedTasks.map((task) => task.id))
+  const tasks = taskHistory.filter(
+    ({ task }) =>
+      task.operational_outcome !== 'superseded' ||
+      !task.successor_task_id ||
+      task.successor_task_id === task.id ||
+      !taskIds.has(task.successor_task_id)
+  )
   const counts: MaestroRunProgressV2['execution']['counts'] = {
     pending: 0,
     running: 0,
@@ -103,7 +112,7 @@ export function projectMaestroRunProgress(
     superseded: 0,
     unverifiable: 0
   }
-  for (const task of tasks) {
+  for (const task of taskHistory) {
     if (task.operationalOutcome) {
       operationalReliability[task.operationalOutcome] += 1
     }

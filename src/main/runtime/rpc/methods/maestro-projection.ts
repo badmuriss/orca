@@ -21,6 +21,7 @@ import {
 } from '../../orchestration/db/maestro-terminal-lease/maestro-terminal-lease-row'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import type { DispatchContextRow, TaskRow } from '../../orchestration/types'
+import { selectCurrentTaskDispatches } from '../../orchestration/maestro-current-task-dispatch'
 import { defineMethod, type RpcMethod } from '../core'
 import { resolveMaestroDocumentReadScope, resolveMaestroPrincipal } from '../maestro-principal'
 
@@ -80,12 +81,21 @@ export function buildInitialMaestroProjection(
 ): AgentGraphView {
   const tasks = database.listTasks({ runId: request.mutation.run_id })
   const taskIds = new Set(tasks.map((task) => task.id))
-  const dispatches = listDispatches(database, request.mutation.run_id)
+  const dispatches = selectCurrentTaskDispatches(
+    tasks,
+    listDispatches(database, request.mutation.run_id)
+  )
   const leases = listTerminalLeases(database, request.mutation.run_id)
   const leaseByDispatch = new Map(
     leases
       .filter((lease) => lease.ownerPrincipal.startsWith('dispatch:'))
       .map((lease) => [lease.ownerPrincipal.slice('dispatch:'.length), lease])
+  )
+  const currentAttemptIds = new Set(
+    dispatches.flatMap((dispatch) => {
+      const attemptId = leaseByDispatch.get(dispatch.id)?.attemptId
+      return attemptId ? [dispatch.id, attemptId] : [dispatch.id]
+    })
   )
   const browserSurfaces = database
     .listReconcilableMaestroBrowserSurfaces()
@@ -178,6 +188,9 @@ export function buildInitialMaestroProjection(
     addEdge('executes', dispatch.id, lease.id)
   }
   for (const { receipt } of browserSurfaces) {
+    if (!currentAttemptIds.has(receipt.attempt_id)) {
+      continue
+    }
     nodes.push({
       id: receipt.surface_id,
       type: 'browser-surface',
