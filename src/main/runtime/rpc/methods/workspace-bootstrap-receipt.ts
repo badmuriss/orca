@@ -8,7 +8,10 @@ import {
   type WorkspaceBootstrapWorkspaceIdentity
 } from '../../../../shared/workspace-bootstrap-receipt'
 import { LOCAL_EXECUTION_HOST_ID, parseExecutionHostId } from '../../../../shared/execution-host'
-import { WORKSPACE_BOOTSTRAP_RECEIPT_V2_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
+import {
+  WORKSPACE_BOOTSTRAP_GIT_HOME_RUNTIME_CAPABILITY,
+  WORKSPACE_BOOTSTRAP_RECEIPT_V2_RUNTIME_CAPABILITY
+} from '../../../../shared/protocol-version'
 import { parseWorkspaceKey, worktreeWorkspaceKey } from '../../../../shared/workspace-scope'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
@@ -43,6 +46,22 @@ const workspaceBootstrapReceiptParams = z
 export type WorkspaceBootstrapCoordinator = {
   terminalHandle: string
   paneKey: string
+}
+
+export function requireWorkspaceBootstrapHomeCapability(
+  context: RpcContext,
+  workspaceKey: string
+): void {
+  if (
+    parseWorkspaceKey(workspaceKey)?.type === 'worktree' &&
+    context.clientCapabilities !== undefined &&
+    !context.clientCapabilities.includes(WORKSPACE_BOOTSTRAP_GIT_HOME_RUNTIME_CAPABILITY)
+  ) {
+    throw new OrchestrationError(
+      'update_required',
+      'Git orchestration homes require workspace-bootstrap.git-home.v1; update the calling Orca client.'
+    )
+  }
 }
 
 export function requireWorkspaceBootstrapCoordinator(
@@ -316,6 +335,7 @@ export const ORCHESTRATION_WORKSPACE_BOOTSTRAP_RECEIPT_METHODS: RpcMethod[] = [
       const caller = requireWorkspaceBootstrapCoordinator(context, request.runId)
       const receipt = await issueWorkspaceBootstrapReceipt(context.runtime, request)
       requireCoordinatorWorkspace(context.runtime, caller, receipt.orchestration_home.workspace_key)
+      requireWorkspaceBootstrapHomeCapability(context, receipt.orchestration_home.workspace_key)
       return receipt
     }
   })

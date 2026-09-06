@@ -2,7 +2,8 @@ import { z } from 'zod'
 import { AgentGraphWorkspaceScopeSchema, type AgentGraphWorkspaceScope } from './workspace-scope'
 import {
   parseNegotiatedWorkspaceBootstrapReceipt,
-  type NegotiatedWorkspaceBootstrapReceipt
+  type NegotiatedWorkspaceBootstrapReceipt,
+  type WorkspaceBootstrapWorkspaceIdentity
 } from './workspace-bootstrap-receipt'
 
 const WorkspaceScopeBindingSchema = z
@@ -15,6 +16,16 @@ const WorkspaceScopeBindingSchema = z
   .strict()
 
 export type WorkspaceScopeBinding = z.infer<typeof WorkspaceScopeBindingSchema>
+
+function graphWorkspaceIdentity(identity: WorkspaceBootstrapWorkspaceIdentity) {
+  return {
+    execution_host_id: identity.execution_host_id,
+    workspace_key: identity.workspace_key,
+    kind: identity.kind,
+    path: identity.path,
+    ...(identity.kind === 'git-worktree' ? { worktree_path: identity.worktree_path } : {})
+  }
+}
 
 export function receiptToAgentGraphWorkspaceScope(
   receiptValue: NegotiatedWorkspaceBootstrapReceipt,
@@ -29,22 +40,6 @@ export function receiptToAgentGraphWorkspaceScope(
     throw new Error('Workspace bootstrap receipt was issued for another run')
   }
 
-  const executionWorkspace =
-    receipt.execution_workspace.kind === 'git-worktree'
-      ? {
-          execution_host_id: receipt.execution_workspace.execution_host_id,
-          workspace_key: receipt.execution_workspace.workspace_key,
-          kind: receipt.execution_workspace.kind,
-          path: receipt.execution_workspace.path,
-          worktree_path: receipt.execution_workspace.worktree_path
-        }
-      : {
-          execution_host_id: receipt.execution_workspace.execution_host_id,
-          workspace_key: receipt.execution_workspace.workspace_key,
-          kind: receipt.execution_workspace.kind,
-          path: receipt.execution_workspace.path
-        }
-
   return AgentGraphWorkspaceScopeSchema.parse({
     schema_version: 1,
     repository_id: receipt.repository_id,
@@ -53,13 +48,8 @@ export function receiptToAgentGraphWorkspaceScope(
       id: receipt.execution_host.id,
       boundary: receipt.execution_host.boundary
     },
-    orchestration_home: {
-      execution_host_id: receipt.orchestration_home.execution_host_id,
-      workspace_key: receipt.orchestration_home.workspace_key,
-      kind: 'folder',
-      path: receipt.orchestration_home.path
-    },
-    execution_workspace: executionWorkspace,
+    orchestration_home: graphWorkspaceIdentity(receipt.orchestration_home),
+    execution_workspace: graphWorkspaceIdentity(receipt.execution_workspace),
     base_revision: receipt.base_revision,
     dirty_paths: [...receipt.dirty_paths],
     run_id: binding.run_id,

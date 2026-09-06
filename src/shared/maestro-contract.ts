@@ -90,7 +90,8 @@ const workspaceScope = z
         execution_host_id: opaqueKey,
         workspace_key: opaqueKey,
         kind: z.enum(['folder', 'git-worktree']),
-        path: z.string().min(1)
+        path: z.string().min(1),
+        worktree_path: z.string().min(1).optional()
       })
       .strict(),
     execution_workspace: z

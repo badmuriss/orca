@@ -4,7 +4,6 @@ import {
   AgentGraphExecutionHostSchema,
   AgentGraphIdentifierSchema,
   AgentGraphWorkspaceIdentitySchema,
-  AgentGraphWorkspaceOrchestrationHomeSchema,
   containsAgentGraphControlCharacter
 } from './workspace-scope'
 
@@ -26,7 +25,7 @@ const WorkspaceBootstrapReceiptV2BaseSchema = z
     repository_id: AgentGraphIdentifierSchema,
     canonical_root: AgentGraphAbsolutePathSchema,
     execution_host: AgentGraphExecutionHostSchema,
-    orchestration_home: AgentGraphWorkspaceOrchestrationHomeSchema,
+    orchestration_home: AgentGraphWorkspaceIdentitySchema,
     execution_workspace: AgentGraphWorkspaceIdentitySchema,
     base_revision_kind: z.enum(['git_head', 'folder_observation']),
     base_revision: z

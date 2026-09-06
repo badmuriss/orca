@@ -23,7 +23,8 @@ import { resolveMaestroDocumentReadScope } from '../maestro-principal'
 import {
   issueWorkspaceBootstrapReceipt,
   requireCoordinatorWorkspace,
-  requireWorkspaceBootstrapCoordinator
+  requireWorkspaceBootstrapCoordinator,
+  requireWorkspaceBootstrapHomeCapability
 } from './workspace-bootstrap-receipt'
 import { buildInitialMaestroProjection } from './maestro-projection'
 
@@ -71,6 +72,14 @@ export async function bootstrapMaestroProjection(
     execution_host_id: request.mutation.execution_host_id,
     workspace_key: request.mutation.workspace_key
   })
+  const terminal = context.runtime.getOrchestrationDispatchAuthority(caller.terminalHandle)
+  if (!terminal || terminal.paneKey !== caller.paneKey) {
+    throw new OrchestrationError('unauthorized', 'Coordinator workspace authority is unavailable.')
+  }
+  const orchestrationHomeKey = parseWorkspaceKey(terminal.worktreeId)
+    ? terminal.worktreeId
+    : worktreeWorkspaceKey(terminal.worktreeId)
+  requireWorkspaceBootstrapHomeCapability(context, orchestrationHomeKey)
   const replay = replayMaestroBootstrap.call(database, request)
   if (replay) {
     requireCoordinatorWorkspace(
@@ -81,13 +90,6 @@ export async function bootstrapMaestroProjection(
     return replay
   }
 
-  const terminal = context.runtime.getOrchestrationDispatchAuthority(caller.terminalHandle)
-  if (!terminal || terminal.paneKey !== caller.paneKey) {
-    throw new OrchestrationError('unauthorized', 'Coordinator workspace authority is unavailable.')
-  }
-  const orchestrationHomeKey = parseWorkspaceKey(terminal.worktreeId)
-    ? terminal.worktreeId
-    : worktreeWorkspaceKey(terminal.worktreeId)
   const receipt = await issueWorkspaceBootstrapReceipt(context.runtime, {
     runId: request.mutation.run_id,
     orchestrationHomeSelector: orchestrationHomeKey,

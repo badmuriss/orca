@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { OrchestrationCompatibilityEvidence } from '../../../shared/orchestration-compatibility-evidence'
-import { ORCHESTRATION_CONTRACT_VERSION } from '../../../shared/protocol-version'
+import {
+  ORCHESTRATION_CONTRACT_VERSION,
+  RUNTIME_CAPABILITIES,
+  WORKSPACE_BOOTSTRAP_GIT_HOME_RUNTIME_CAPABILITY
+} from '../../../shared/protocol-version'
 import { OrcaRuntimeService } from '../orca-runtime'
 import { OrchestrationDb } from '../orchestration/db'
 import type { RpcRequest } from './core'
@@ -83,7 +87,7 @@ describe('workspace bootstrap receipt current authority', () => {
       hostId: 'local'
     } as never)
     const status = vi.spyOn(runtime, 'getRuntimeGitStatus').mockResolvedValue({
-      head: 'abc123',
+      head: 'a'.repeat(40),
       entries: []
     } as never)
     const dispatcher = new RpcDispatcher({ runtime, methods: ORCHESTRATION_METHODS })
@@ -105,6 +109,14 @@ describe('workspace bootstrap receipt current authority', () => {
     const unauthenticated = await dispatcher.dispatch(
       bootstrapRequest(run.id, 'unauthenticated-bootstrap-receipt')
     )
+    const oldClient = await dispatcher.dispatch(
+      bootstrapRequest(run.id, 'old-client-bootstrap-receipt', evidence),
+      {
+        clientCapabilities: RUNTIME_CAPABILITIES.filter(
+          (capability) => capability !== WORKSPACE_BOOTSTRAP_GIT_HOME_RUNTIME_CAPABILITY
+        )
+      }
+    )
 
     expect(current).toMatchObject({
       ok: true,
@@ -121,6 +133,7 @@ describe('workspace bootstrap receipt current authority', () => {
     }
     expect(stale).toMatchObject(authorizationFailure)
     expect(unauthenticated).toMatchObject(authorizationFailure)
-    expect(status).toHaveBeenCalledOnce()
+    expect(oldClient).toMatchObject({ ok: false, error: { code: 'update_required' } })
+    expect(status).toHaveBeenCalledTimes(2)
   })
 })

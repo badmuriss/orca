@@ -84,15 +84,6 @@ const AgentGraphWorktreeWorkspaceIdentitySchema = z
   })
   .strict()
 
-export const AgentGraphWorkspaceOrchestrationHomeSchema =
-  AgentGraphFolderWorkspaceIdentitySchema.refine(
-    (workspace) => workspace.workspace_key.startsWith('folder:'),
-    {
-      path: ['workspace_key'],
-      message: 'Folder workspace key must use the folder prefix'
-    }
-  )
-
 export const AgentGraphWorkspaceIdentitySchema = z
   .discriminatedUnion('kind', [
     AgentGraphFolderWorkspaceIdentitySchema,
@@ -122,7 +113,7 @@ export const AgentGraphWorkspaceScopeSchema = z
     repository_id: AgentGraphIdentifierSchema,
     canonical_root: AgentGraphAbsolutePathSchema,
     execution_host: AgentGraphExecutionHostSchema,
-    orchestration_home: AgentGraphWorkspaceOrchestrationHomeSchema,
+    orchestration_home: AgentGraphWorkspaceIdentitySchema,
     execution_workspace: AgentGraphWorkspaceIdentitySchema,
     base_revision: z.string().min(1).max(AGENT_GRAPH_IDENTITY_MAX_LENGTH),
     dirty_paths: z.array(RepositoryRelativePathSchema).max(128),

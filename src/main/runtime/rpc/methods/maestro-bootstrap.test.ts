@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest'
 import type { FolderWorkspace } from '../../../../shared/folder-workspace-types'
 import {
   MAESTRO_COMPOSED_BOOTSTRAP_RUNTIME_CAPABILITY,
-  WORKSPACE_BOOTSTRAP_RECEIPT_V2_RUNTIME_CAPABILITY
+  WORKSPACE_BOOTSTRAP_GIT_HOME_RUNTIME_CAPABILITY,
+  WORKSPACE_BOOTSTRAP_RECEIPT_V2_RUNTIME_CAPABILITY,
+  type RuntimeCapability
 } from '../../../../shared/protocol-version'
 import { OrchestrationDb } from '../../orchestration/db/orchestration-db'
 import { createRootDispatch } from '../../orchestration/db/root-dispatch-test-fixture'
@@ -27,7 +29,16 @@ const HOME_FOLDER: FolderWorkspace = {
   updatedAt: 0
 }
 
-function harness(options: { execution?: 'folder' | 'git'; clientCapabilities?: [] } = {}) {
+function harness(
+  options: {
+    home?: 'folder' | 'git'
+    execution?: 'folder' | 'git'
+    clientCapabilities?: readonly RuntimeCapability[]
+  } = {}
+) {
+  const gitHome = options.home === 'git'
+  const homeId = gitHome ? 'repo-home::/workspace/home' : 'folder:home-1'
+  const homeKey = gitHome ? `worktree:${homeId}` : homeId
   const database = new OrchestrationDb(':memory:')
   const run = database.createRun({
     objective: 'Bootstrap authoritative projection',
@@ -50,7 +61,7 @@ function harness(options: { execution?: 'folder' | 'git'; clientCapabilities?: [
           runtimeId: 'runtime-1',
           terminalHandle: 'coordinator-1',
           ptyId: 'pty-1',
-          worktreeId: 'folder:home-1',
+          worktreeId: homeId,
           processIncarnation: 'pty-1:incarnation-1',
           paneKey: 'tab-1:leaf-1',
           launchTokenHash: 'hash-1',
@@ -60,10 +71,10 @@ function harness(options: { execution?: 'folder' | 'git'; clientCapabilities?: [
   )
   const gitExecution = options.execution === 'git'
   vi.spyOn(runtime, 'showManagedTerminalWorkspace').mockImplementation(async (selector) => {
-    if (selector === 'folder:home-1') {
+    if (selector === homeKey) {
       return {
-        id: 'folder:home-1',
-        repoId: 'folder-workspace:group-1',
+        id: homeId,
+        repoId: gitHome ? 'repo-home' : 'folder-workspace:group-1',
         path: '/workspace/home',
         hostId: 'local'
       } as never
@@ -78,13 +89,19 @@ function harness(options: { execution?: 'folder' | 'git'; clientCapabilities?: [
     }
     throw new Error(`selector_not_found:${selector}`)
   })
-  vi.spyOn(runtime, 'showManagedWorktree').mockResolvedValue({
-    id: 'repo-1::/srv/repo',
-    repoId: 'repo-1',
-    path: '/srv/repo',
-    hostId: 'ssh:build'
-  } as never)
+  vi.spyOn(runtime, 'showManagedWorktree').mockImplementation(async (selector) => {
+    if (selector === `id:${homeId}`) {
+      return { id: homeId, repoId: 'repo-home', path: '/workspace/home', hostId: 'local' } as never
+    }
+    return {
+      id: 'repo-1::/srv/repo',
+      repoId: 'repo-1',
+      path: '/srv/repo',
+      hostId: 'ssh:build'
+    } as never
+  })
   vi.spyOn(runtime, 'listRepos').mockReturnValue([
+    { id: 'repo-home', path: '/workspace/home', connectionId: null } as never,
     { id: 'repo-1', path: '/srv/repo', connectionId: 'build' } as never
   ])
   vi.spyOn(runtime, 'getRuntimeGitStatus').mockResolvedValue({
@@ -103,6 +120,7 @@ function harness(options: { execution?: 'folder' | 'git'; clientCapabilities?: [
     },
     clientCapabilities: options.clientCapabilities ?? [
       MAESTRO_COMPOSED_BOOTSTRAP_RUNTIME_CAPABILITY,
+      WORKSPACE_BOOTSTRAP_GIT_HOME_RUNTIME_CAPABILITY,
       WORKSPACE_BOOTSTRAP_RECEIPT_V2_RUNTIME_CAPABILITY
     ]
   }
@@ -112,7 +130,7 @@ function harness(options: { execution?: 'folder' | 'git'; clientCapabilities?: [
     mutation: {
       mutation_id: 'bootstrap-1',
       execution_host_id: gitExecution ? 'ssh:build' : 'local',
-      workspace_key: gitExecution ? 'worktree:repo-1::/srv/repo' : 'folder:home-1',
+      workspace_key: gitExecution ? 'worktree:repo-1::/srv/repo' : homeKey,
       run_id: run.id
     },
     coordinator_generation: run.consumer_generation
@@ -121,6 +139,65 @@ function harness(options: { execution?: 'folder' | 'git'; clientCapabilities?: [
 }
 
 describe('Maestro composed bootstrap', () => {
+  it.each(['local', 'remote'] as const)(
+    'preserves a Git coordinator home when bootstrapping %s execution',
+    async (execution) => {
+      const { context, database, request, task } = harness({
+        home: 'git',
+        execution: execution === 'remote' ? 'git' : 'folder'
+      })
+      try {
+        const receipt = await bootstrapMaestroProjection(context, request)
+        const projection = getMaestroProjection.call(database, request.mutation)
+
+        expect(receipt.workspace_scope).toMatchObject({
+          orchestration_home: {
+            execution_host_id: 'local',
+            workspace_key: 'worktree:repo-home::/workspace/home',
+            kind: 'git-worktree',
+            path: '/workspace/home',
+            worktree_path: '/workspace/home'
+          },
+          execution_workspace: { workspace_key: request.mutation.workspace_key },
+          base_revision: 'a'.repeat(40),
+          dirty_paths: ['src/index.ts']
+        })
+        expect(projection?.nodes).toContainEqual(
+          expect.objectContaining({ type: 'attempt', taskId: task.id })
+        )
+        expect(await bootstrapMaestroProjection(context, request)).toMatchObject({
+          outcome: 'replayed',
+          workspace_scope: receipt.workspace_scope
+        })
+      } finally {
+        database.close()
+      }
+    }
+  )
+
+  it('rejects Git home bootstrap and replay for clients without Git home support', async () => {
+    const { context, database, request } = harness({ home: 'git' })
+    const oldContext = {
+      ...context,
+      clientCapabilities: [
+        MAESTRO_COMPOSED_BOOTSTRAP_RUNTIME_CAPABILITY,
+        WORKSPACE_BOOTSTRAP_RECEIPT_V2_RUNTIME_CAPABILITY
+      ]
+    }
+    try {
+      await expect(bootstrapMaestroProjection(oldContext, request)).rejects.toMatchObject({
+        code: 'update_required'
+      })
+      expect(getMaestroProjection.call(database, request.mutation)).toBeNull()
+      await bootstrapMaestroProjection(context, request)
+      await expect(bootstrapMaestroProjection(oldContext, request)).rejects.toMatchObject({
+        code: 'update_required'
+      })
+    } finally {
+      database.close()
+    }
+  })
+
   it('publishes folder revision zero from authoritative Run, Task, and Dispatch rows', async () => {
     const { context, database, dispatch, request, run, task } = harness()
 
