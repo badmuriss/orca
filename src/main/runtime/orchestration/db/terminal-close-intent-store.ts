@@ -79,6 +79,23 @@ export function assertTerminalCloseIntentAuthority(
   }
   const lease = this.getMaestroTerminalLeaseByHandle(params.terminalHandle)
   if (lease) {
+    const resource = lease.workerTerminalResourceId
+      ? this.getWorkerTerminalResource(lease.workerTerminalResourceId)
+      : undefined
+    const releasedToOwner =
+      lease.role === 'worker' &&
+      lease.ptyIncarnation === params.ptyIncarnation &&
+      resource?.terminal_handle === params.terminalHandle &&
+      resource.process_incarnation === params.ptyIncarnation &&
+      resource.ownership_state === 'external' &&
+      resource.release_state === 'retained' &&
+      resource.retained_reason === 'external_terminal' &&
+      ['succeeded', 'failed'].includes(
+        this.getWorkerDispatch(resource.owner_dispatch_id)?.state ?? ''
+      )
+    if (releasedToOwner) {
+      return
+    }
     const authority = lease.role === 'worker' ? 'worker-release' : 'coordinator-lease'
     throw new OrchestrationError(
       lease.role === 'worker' ? 'worker_release_required' : 'coordinator_lease_required',

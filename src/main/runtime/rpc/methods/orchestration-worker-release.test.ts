@@ -169,6 +169,13 @@ describe('orchestration worker release', () => {
     }
     expect(receipt).toMatchObject({ state: 'retained', reason: 'external_terminal' })
     expect(runtime.closeTerminal).not.toHaveBeenCalled()
+    const resource = db.getWorkerTerminalResourceByOwner(dispatchId)!
+    expect(() =>
+      db.assertTerminalCloseIntentAuthority({
+        terminalHandle: resource.terminal_handle,
+        ptyIncarnation: resource.process_incarnation!
+      })
+    ).not.toThrow()
   })
 
   it('retains an external terminal even when its former process is reported exited', async () => {
@@ -481,9 +488,15 @@ describe('orchestration worker release', () => {
     setup()
     const { dispatchId } = await startSettledWorker()
     inspectProcessLiveness.mockResolvedValue('exited')
-    vi.mocked(runtime.showTerminal).mockImplementation(
-      async (handle) => ({ handle, worktreeId: 'repo::worktree', connected: false }) as never
-    )
+    const terminal = await runtime.showTerminal('term_worker')
+    vi.mocked(runtime.showTerminal).mockImplementation(async (handle) => ({
+      ...terminal,
+      handle,
+      connected: false,
+      ptyId: 'runtime_test:term_worker',
+      incarnationId: '1',
+      executionHostId: 'local'
+    }))
     vi.mocked(runtime.readTerminal).mockResolvedValue({
       handle: 'term_worker',
       status: 'exited',
