@@ -1,10 +1,37 @@
+import {
+  isResumableRelease,
+  isRetryableFederatedRelease,
+  isRetryableFederatedReleaseResult,
+  attestFederatedReleaseReplay
+} from './orchestration-release-mutation-replay'
 import { createHash } from 'node:crypto'
-import { isOrchestrationMutation } from '../../../shared/orchestration-rpc-contract'
-import { parsePaneKey } from '../../../shared/stable-pane-id'
+import {
+  isDurableMutation,
+  isTerminalPromptMutation
+} from '../../../shared/orchestration-rpc-contract'
 import type { OrcaRuntimeService } from '../orca-runtime'
 import { OrchestrationError } from '../orchestration/orchestration-error'
 import { reconcileMaestroWorkerLeaseTransfer } from '../orchestration/maestro-terminal-lease-reconciliation'
 import type { RpcRequest } from './core'
+import {
+  attachMutationReceipt,
+  EFFECT_FREE_WORKER_DONE_CHECKPOINT,
+  getPendingWorkerStartRecovery,
+  hashCanonical,
+  readTerminalPromptBindingHash,
+  isResumablePendingWorkerDone,
+  markReplayedPromptIncarnationReplaced,
+  readPromptBasePayloadHash,
+  readPromptBindingPayloadHash,
+  replayStableCallerParams,
+  shouldObserveCompletedMutation
+} from './orchestration-mutation-receipt'
+
+export {
+  readMutationReplayNudge,
+  readWorkerDoneReplayNudge,
+  stripMutationReplayNudge
+} from './orchestration-mutation-receipt'
 
 export type DurableMutationInvocation = {
   identity: {
@@ -14,10 +41,19 @@ export type DurableMutationInvocation = {
     payloadHash: string
   }
   recordReceipt: (receipt: unknown) => void
+  markWorkerDoneEffectFree: () => void
+  markEffectPossible: () => void
+  replayedReceipt?: unknown
+}
+
+type InFlightMutation = {
+  method: string
+  payloadHash: string
+  promise: Promise<unknown>
 }
 
 export class OrchestrationMutationExecutor {
-  private readonly inFlight = new Map<string, Promise<unknown>>()
+  private readonly inFlight = new Map<string, InFlightMutation>()
 
   constructor(private readonly runtime: OrcaRuntimeService) {}
 
@@ -28,64 +64,149 @@ export class OrchestrationMutationExecutor {
     callerFingerprintOverride?: string
   ): Promise<unknown> {
     const requestId = request.orchestrationRequestId
-    if (!requestId || !isOrchestrationMutation(request.method, params)) {
+    if (!requestId || !isDurableMutation(request.method, params)) {
       return await invoke()
     }
     const callerFingerprint =
       callerFingerprintOverride ?? this.getLocalAuthenticatedCallerFingerprint()
-    const payloadHash = createHash('sha256')
-      .update(
-        JSON.stringify(
-          canonicalize({
-            method: request.method,
-            params: replayStableCallerParams(this.runtime, params)
-          })
-        )
-      )
-      .digest('hex')
+    const stableParams = replayStableCallerParams(this.runtime, params)
+    const basePayloadHash = hashCanonical({ method: request.method, params: stableParams })
     const key = `${callerFingerprint}:${requestId}`
     const db = this.runtime.getOrchestrationDb()
+    const isPromptMutation = isTerminalPromptMutation(request.method, params)
+    const existingPromptReceipt = isPromptMutation
+      ? db.getMutationReceipt(callerFingerprint, requestId)
+      : undefined
+    if (
+      existingPromptReceipt &&
+      (existingPromptReceipt.method !== request.method ||
+        readPromptBasePayloadHash(existingPromptReceipt.payload_hash) !== basePayloadHash)
+    ) {
+      throw new OrchestrationError(
+        'request_mismatch',
+        `Mutation request ${requestId} was already used with different input.`
+      )
+    }
+    const recordedPromptBindingHash = existingPromptReceipt
+      ? readPromptBindingPayloadHash(existingPromptReceipt.payload_hash)
+      : null
+    // The recorded observation is only true while the prompt's terminal incarnation survives, so
+    // every replay re-checks the binding rather than only the --wait-submit ones.
+    const promptBindingChanged =
+      recordedPromptBindingHash !== null &&
+      recordedPromptBindingHash !==
+        readTerminalPromptBindingHash(this.runtime, (params as { terminal: string }).terminal)
+    const payloadHash = existingPromptReceipt
+      ? existingPromptReceipt.payload_hash
+      : isPromptMutation
+        ? `${basePayloadHash}:${hashCanonical(
+            this.runtime.getTerminalPromptRequestBinding((params as { terminal: string }).terminal)
+          )}`
+        : basePayloadHash
     const identity = { callerFingerprint, requestId, method: request.method, payloadHash }
     const retryableFederatedRelease = isRetryableFederatedRelease(request.method, params, db)
     const atomicWorkerAcceptance =
       request.method === 'orchestration.workerStart' ||
       request.method === 'orchestration.federationAttachStart'
-    const begun = atomicWorkerAcceptance
-      ? (() => {
-          const row = db.getMutationReceipt(callerFingerprint, requestId)
-          if (!row) {
-            return { disposition: 'started' as const }
-          }
-          if (row.method !== request.method || row.payload_hash !== payloadHash) {
-            throw new OrchestrationError(
-              'request_mismatch',
-              `Mutation request ${requestId} was already used with different input.`
-            )
-          }
-          return { disposition: row.state, row }
-        })()
-      : db.beginMutationReceipt(identity)
+    // Worker starts perform asynchronous topology validation before their durable
+    // acceptance claim. Join an identical in-process attempt before that boundary.
+    if (atomicWorkerAcceptance) {
+      const active = this.inFlight.get(key)
+      if (active) {
+        if (active.method !== request.method || active.payloadHash !== payloadHash) {
+          throw new OrchestrationError(
+            'request_mismatch',
+            `Mutation request ${requestId} was already used with different input.`
+          )
+        }
+        return attachMutationReceipt(await active.promise, requestId, true)
+      }
+    }
+    const begun = existingPromptReceipt
+      ? { disposition: existingPromptReceipt.state, row: existingPromptReceipt }
+      : atomicWorkerAcceptance
+        ? (() => {
+            const row = db.getMutationReceipt(callerFingerprint, requestId)
+            if (!row) {
+              return { disposition: 'started' as const }
+            }
+            if (row.method !== request.method || row.payload_hash !== payloadHash) {
+              throw new OrchestrationError(
+                'request_mismatch',
+                `Mutation request ${requestId} was already used with different input.`
+              )
+            }
+            return { disposition: row.state, row }
+          })()
+        : db.beginMutationReceipt(identity)
     const resumableRelease = isResumableRelease(request.method)
-    const resumedPendingMutation = begun.disposition === 'pending' && resumableRelease
+    const resumedPendingWorkerDone =
+      begun.disposition === 'pending' &&
+      isResumablePendingWorkerDone(request.method, params, begun.row.receipt)
+    const resumedPendingMutation =
+      begun.disposition === 'pending' && (resumableRelease || resumedPendingWorkerDone)
 
     if (begun.disposition === 'completed') {
       const active = this.inFlight.get(key)
       if (active) {
-        return attachMutationReceipt(await active, requestId, true)
+        return attachMutationReceipt(await active.promise, requestId, true)
       }
-      const receipt = JSON.parse(begun.row.receipt ?? 'null') as unknown
-      return attachMutationReceipt(
-        attestFederatedReleaseReplay(request.method, receipt, this.runtime.getRuntimeId()),
-        requestId,
-        true
+      const receipt = attestFederatedReleaseReplay(
+        request.method,
+        JSON.parse(begun.row.receipt ?? 'null'),
+        this.runtime.getRuntimeId()
       )
+      if (promptBindingChanged) {
+        return attachMutationReceipt(
+          markReplayedPromptIncarnationReplaced(receipt),
+          requestId,
+          true
+        )
+      }
+      if (!shouldObserveCompletedMutation(request.method, params, receipt)) {
+        return attachMutationReceipt(receipt, requestId, true)
+      }
+      const replayObservation = Promise.resolve().then(() =>
+        invoke({
+          identity,
+          recordReceipt: (result) => {
+            db.completeMutationReceipt({
+              ...identity,
+              receipt: JSON.stringify(attachMutationReceipt(result, requestId, true))
+            })
+          },
+          markWorkerDoneEffectFree: () => undefined,
+          markEffectPossible: () => undefined,
+          replayedReceipt: receipt
+        })
+      )
+      this.inFlight.set(key, { method: request.method, payloadHash, promise: replayObservation })
+      try {
+        const observed = await replayObservation
+        const replayed = attachMutationReceipt(observed, requestId, true)
+        db.completeMutationReceipt({ ...identity, receipt: JSON.stringify(replayed) })
+        return replayed
+      } catch {
+        // The original mutation is already durable; an observation-only replay
+        // must not turn a completed request into a retry or resend opportunity.
+        return attachMutationReceipt(receipt, requestId, true)
+      } finally {
+        this.inFlight.delete(key)
+      }
     }
     if (begun.disposition === 'pending') {
       const active = this.inFlight.get(key)
       if (active) {
-        return attachMutationReceipt(await active, requestId, true)
+        return attachMutationReceipt(await active.promise, requestId, true)
       }
-      if (!resumableRelease) {
+      if (isTerminalPromptMutation(request.method, params)) {
+        throw new OrchestrationError(
+          'operation_unknown',
+          `Terminal prompt ${requestId} may have reached its exact terminal incarnation before restart. It will not be sent again.`,
+          { requestId }
+        )
+      }
+      if (!resumableRelease && !resumedPendingWorkerDone) {
         const recovery = getPendingWorkerStartRecovery(request.method, begun.row.receipt)
         if (recovery?.transferRequestId) {
           const transfer = db.getMaestroWorkerLeaseTransferReceiptByMutationRequest(identity)
@@ -130,9 +251,26 @@ export class OrchestrationMutationExecutor {
         ...identity,
         receipt: JSON.stringify(attachMutationReceipt(result, requestId, resumedPendingMutation))
       })
+      // Keep completed receipts when post-commit notification fails; retries replay the durable effect.
+      effectPossible = true
     }
-    const active = Promise.resolve().then(() => invoke({ identity, recordReceipt }))
-    this.inFlight.set(key, active)
+    let effectPossible = false
+    const active = Promise.resolve().then(() =>
+      invoke({
+        identity,
+        recordReceipt,
+        markWorkerDoneEffectFree: () => {
+          db.checkpointPendingMutationReceipt({
+            ...identity,
+            receipt: EFFECT_FREE_WORKER_DONE_CHECKPOINT
+          })
+        },
+        markEffectPossible: () => {
+          effectPossible = true
+        }
+      })
+    )
+    this.inFlight.set(key, { method: request.method, payloadHash, promise: active })
     try {
       const result = await active
       const receipted = attachMutationReceipt(result, requestId, resumedPendingMutation)
@@ -142,7 +280,10 @@ export class OrchestrationMutationExecutor {
       db.completeMutationReceipt({ ...identity, receipt: JSON.stringify(receipted) })
       return receipted
     } catch (error) {
-      if (!(error instanceof OrchestrationError && error.code === 'operation_unknown')) {
+      if (
+        (!isPromptMutation || !effectPossible) &&
+        !(error instanceof OrchestrationError && error.code === 'operation_unknown')
+      ) {
         db.discardPendingMutationReceipt(callerFingerprint, requestId)
       }
       throw error
@@ -154,58 +295,6 @@ export class OrchestrationMutationExecutor {
   getLocalAuthenticatedCallerFingerprint(): string {
     return this.runtime.getOrchestrationDb().getOrCreateLocalMutationCallerFingerprint()
   }
-}
-
-// Why: worker release is idempotent on both paths — it can answer already_released —
-// so an interrupted release resumes rather than reporting an unknown outcome. Only the
-// federated flavour needs a dispatch to route by; a local release resumes on its own.
-function isResumableRelease(method: string): boolean {
-  return method === 'orchestration.federationRelease' || method === 'orchestration.workerRelease'
-}
-
-function isRetryableFederatedRelease(
-  method: string,
-  params: unknown,
-  db: ReturnType<OrcaRuntimeService['getOrchestrationDb']>
-): boolean {
-  if (method === 'orchestration.federationRelease') {
-    return true
-  }
-  if (method !== 'orchestration.workerRelease') {
-    return false
-  }
-  return (
-    typeof params === 'object' &&
-    params !== null &&
-    typeof (params as { dispatch?: unknown }).dispatch === 'string' &&
-    Boolean(db.getFederatedDispatch((params as { dispatch: string }).dispatch))
-  )
-}
-
-function isRetryableFederatedReleaseResult(
-  retryableFederatedRelease: boolean,
-  result: unknown
-): boolean {
-  if (!retryableFederatedRelease || !result || typeof result !== 'object') {
-    return false
-  }
-  return (result as { state?: unknown }).state === 'unverifiable'
-}
-
-function attestFederatedReleaseReplay(
-  method: string,
-  receipt: unknown,
-  servingRuntimeEpoch: string
-): unknown {
-  if (
-    method !== 'orchestration.federationRelease' ||
-    !receipt ||
-    typeof receipt !== 'object' ||
-    Array.isArray(receipt)
-  ) {
-    return receipt
-  }
-  return { ...(receipt as Record<string, unknown>), servingRuntimeEpoch }
 }
 
 const executorsByRuntime = new WeakMap<OrcaRuntimeService, OrchestrationMutationExecutor>()
@@ -224,76 +313,4 @@ export function getOrchestrationMutationExecutor(
 
 export function fingerprintAuthenticatedPairingCredential(token: string): string {
   return createHash('sha256').update(token).digest('hex')
-}
-
-function replayStableCallerParams(runtime: OrcaRuntimeService, params: unknown): unknown {
-  if (!params || typeof params !== 'object' || Array.isArray(params)) {
-    return params
-  }
-  const source = params as Record<string, unknown>
-  const result = { ...source }
-  for (const property of ['from', 'callerTerminalHandle'] as const) {
-    const handle = source[property]
-    if (typeof handle !== 'string') {
-      continue
-    }
-    const paneKey =
-      property === 'from' && typeof source.senderPaneKey === 'string'
-        ? source.senderPaneKey
-        : runtime.getTerminalPaneKey(handle)
-    if (paneKey) {
-      const leafId = parsePaneKey(paneKey)?.leafId
-      result[property] = leafId ? { paneLeafId: leafId } : { paneKey }
-    }
-  }
-  return result
-}
-
-function canonicalize(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(canonicalize)
-  }
-  if (!value || typeof value !== 'object') {
-    return value
-  }
-  const source = value as Record<string, unknown>
-  const result: Record<string, unknown> = {}
-  for (const key of Object.keys(source).sort()) {
-    if (source[key] !== undefined) {
-      result[key] = canonicalize(source[key])
-    }
-  }
-  return result
-}
-
-function attachMutationReceipt(result: unknown, requestId: string, replayed: boolean): unknown {
-  if (!result || typeof result !== 'object' || Array.isArray(result)) {
-    return { result, mutation: { requestId, replayed } }
-  }
-  return { ...(result as Record<string, unknown>), mutation: { requestId, replayed } }
-}
-
-function getPendingWorkerStartRecovery(
-  method: string,
-  receipt: string | null
-): { dispatchId: string; transferRequestId?: string } | undefined {
-  if (method !== 'orchestration.workerStart' || !receipt) {
-    return undefined
-  }
-  try {
-    const parsed = JSON.parse(receipt) as {
-      accepted?: { dispatchId?: unknown }
-      leaseTransfer?: { requestId?: unknown }
-    }
-    return typeof parsed.accepted?.dispatchId === 'string'
-      ? {
-          dispatchId: parsed.accepted.dispatchId,
-          ...(typeof parsed.leaseTransfer?.requestId === 'string'
-            ? { transferRequestId: parsed.leaseTransfer.requestId }
-            : {})
-        }
-      : undefined
-  } catch {
-    return undefined
-  }
 }

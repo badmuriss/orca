@@ -1,5 +1,5 @@
 import { reconcileMaestroWorkerLeaseTransfer } from '../../orchestration/maestro-terminal-lease-reconciliation'
-import { failWorkerStartWithReceipt } from './orchestration-worker-start-receipt'
+import { failWorkerStartWithReceipt } from './orchestration/worker/worker-start-receipt'
 import type { MaestroTerminalLease } from '../../../../shared/maestro-terminal-lease'
 
 type LeaseTransferReceipt = { requestId: string }
@@ -21,6 +21,7 @@ type RecoverWorkerStartFailureArgs = {
   workerLease: MaestroTerminalLease | undefined
   leaseTransferReceipt: LeaseTransferReceipt | undefined
   recordMutationReceipt?: (receipt: unknown) => void
+  residualAgentTerminal?: Parameters<typeof failWorkerStartWithReceipt>[0]['residualAgentTerminal']
 }
 
 const SETTLED_LEASE_STATES = ['released', 'archived', 'retained']
@@ -64,6 +65,7 @@ export function recoverWorkerStartFailure(args: RecoverWorkerStartFailureArgs) {
     error: args.error,
     setup: args.setup,
     launch: args.launch,
+    residualAgentTerminal: args.residualAgentTerminal,
     attemptId: args.attemptId,
     terminalHandle: args.terminalHandle,
     leaseId: args.workerLease?.id

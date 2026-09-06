@@ -1,7 +1,7 @@
 import type { OrcaRuntimeService } from '../../../orca-runtime'
 import type { WorkerTerminalResourceRow } from '../../worker-terminal-ownership'
 import type { OrchestrationDb } from '../orchestration-db'
-import type { WorkerReleaseReceipt } from '../../../rpc/methods/orchestration-worker-release-completion'
+import type { WorkerReleaseReceipt } from '../../../rpc/methods/orchestration/worker/worker-release-completion'
 import {
   LOCAL_EXECUTION_HOST_ID,
   toSshExecutionHostId,

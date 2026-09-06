@@ -1,4 +1,4 @@
-import type { OrchestrationWorkerLaunchReceipt } from './orchestration-worker-launch-preferences'
+import type { OrchestrationWorkerLaunchReceipt } from './orchestration/worker/worker-launch-preferences'
 
 /** Classifies a remote start reply: a known failure code, or an unknown-outcome receipt. */
 export type RemoteStartReceipt = {

@@ -34,14 +34,25 @@ export async function reconcileMissingWorkerTerminalRelease(args: {
   db: OrchestrationDb
   dispatchId: string
   resource: WorkerTerminalResourceRow
+  mode?: 'interactive' | 'recovery'
 }): Promise<WorkerReleaseReceipt> {
   const { runtime, db, dispatchId, resource } = args
   const archive = db.getWorkerTerminalArchive(dispatchId)
   if (
-    resource.release_state !== 'unknown' ||
+    (args.mode !== 'recovery' && resource.release_state !== 'unknown') ||
     !resource.process_incarnation ||
     archive?.resource_id !== resource.id
   ) {
+    if (args.mode === 'recovery') {
+      return {
+        dispatchId,
+        state: 'release_pending',
+        processAction: 'none',
+        processVerdict: 'unverifiable',
+        archive: archiveSummary(resource),
+        recovery: releaseRecovery(dispatchId)
+      }
+    }
     return {
       ...releaseUnknown(
         db,
@@ -76,6 +87,17 @@ export async function reconcileMissingWorkerTerminalRelease(args: {
       : processVerdict === 'exited'
         ? 'The exact process exited, but its worker release identity no longer matches.'
         : 'The recorded terminal is missing, and its exact process is unverifiable on the owning host.'
+  if (args.mode === 'recovery') {
+    return {
+      dispatchId,
+      state: 'release_pending',
+      processAction: 'none',
+      processVerdict,
+      archive: archiveSummary(resource),
+      lastError: reason,
+      recovery: releaseRecovery(dispatchId)
+    }
+  }
   return { ...releaseUnknown(db, dispatchId, resource, reason), processVerdict }
 }
 
@@ -133,12 +155,12 @@ export async function closeWorkerTerminalOnOwningHost(args: {
     }
     if (/disposed|not connected|unavailable/i.test(reason)) {
       return {
-        ...releaseUnknown(
-          db,
-          dispatchId,
-          releasing,
-          `The owning endpoint is unavailable, so the exact worker process is unverifiable: ${reason}`
-        ),
+        dispatchId,
+        state: 'release_pending',
+        processAction: 'none',
+        archive: archiveSummary(releasing),
+        lastError: reason,
+        recovery: releaseRecovery(dispatchId),
         processVerdict: 'unverifiable'
       }
     }

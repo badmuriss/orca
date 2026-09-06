@@ -4,10 +4,10 @@ import {
   appendFederationSetupEffect,
   appendFederationTerminalEffects,
   type FederationEffect
-} from './orchestration-federation-effects'
-import type { WorkerSetupReceipt } from './orchestration-worker-topology'
-import type { prepareFederationAttachmentWorkerStart } from './orchestration-worker-start-validation'
-import type { FederationAttachStartInput } from './orchestration-federation-start-schema'
+} from './orchestration/federation/federation-effects'
+import type { WorkerSetupReceipt } from './orchestration/worker/worker-topology'
+import type { prepareFederationAttachmentWorkerStart } from './orchestration/worker/worker-start-validation'
+import type { FederationAttachStartInput } from './orchestration/federation/federation-start-schema'
 import type { OrchestrationDb } from '../../orchestration/db'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 

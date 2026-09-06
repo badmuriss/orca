@@ -64,12 +64,6 @@ CREATE TABLE IF NOT EXISTS maestro_terminal_lease_transfer_receipts (
   mutation_payload_hash TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_maestro_terminal_lease_transfer_mutation
-  ON maestro_terminal_lease_transfer_receipts(
-    mutation_caller_fingerprint, mutation_request_id, mutation_method, mutation_payload_hash
-  )
-  WHERE mutation_caller_fingerprint IS NOT NULL AND mutation_request_id IS NOT NULL
-    AND mutation_method IS NOT NULL AND mutation_payload_hash IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS maestro_terminal_input_receipts (
   command_id TEXT PRIMARY KEY,

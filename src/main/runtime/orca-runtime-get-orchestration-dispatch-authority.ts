@@ -8,7 +8,13 @@ import { RECENT_PTY_OUTPUT_LIMIT, RecentPtyOutputBuffer } from './recent-pty-out
 import { appendRecentPtyPathCandidates } from './terminal-output-path-candidates'
 import { resolveLocalProjectRuntimeForWorktreeId } from '../local-project-runtime-resolution'
 import type { RuntimePtyWorktreeRecord } from './runtime-terminal-state-records'
-import { resolveTerminalOrchestrationCliCommand } from './orchestration/cli-command'
+import {
+  resolveTerminalOrchestrationCliCommand,
+  type OrchestrationCliCommand
+} from './orchestration/cli-command'
+import { getAppEnvironment } from '../../shared/app-environment'
+import type { FleetAgentStatusEvidence } from '../../shared/orchestration-fleet-agent-status-evidence'
+import { readOrchestrationFleetAgentStatusSnapshot } from './orchestration-fleet-agent-status-snapshot'
 
 export class OrcaRuntimeWithGetOrchestrationDispatchAuthority extends OrcaRuntimeWithVerifyOrchestrationCompatibilityCaller {
   /** Every pane key this PTY could be addressed by, including restored receipts. */
@@ -177,7 +183,21 @@ export class OrcaRuntimeWithGetOrchestrationDispatchAuthority extends OrcaRuntim
     return pty ? { worktreeId: pty.worktreeId, connectionId: pty.connectionId } : null
   }
 
-  getTerminalOrchestrationCliCommand(handle: string): 'orca' | 'orca-ide' {
+  // Why: remote clients cannot resolve this runtime's WSL project preference,
+  // so host-affecting RPCs (skill discovery) resolve it from the owning store.
+  resolveProjectRuntimeForWorktree(
+    worktreeId: string | null | undefined
+  ): ProjectExecutionRuntimeResolution | undefined {
+    return this.store && worktreeId
+      ? resolveLocalProjectRuntimeForWorktreeId(this.requireStore(), worktreeId)
+      : undefined
+  }
+
+  getOrchestrationFleetAgentStatusSnapshot(): readonly FleetAgentStatusEvidence[] {
+    return readOrchestrationFleetAgentStatusSnapshot(this)
+  }
+
+  getTerminalOrchestrationCliCommand(handle: string): OrchestrationCliCommand {
     let pty: RuntimePtyWorktreeRecord | null = null
     try {
       const ptyId = this.resolveLeafForHandle(handle)?.ptyId
@@ -192,6 +212,8 @@ export class OrcaRuntimeWithGetOrchestrationDispatchAuthority extends OrcaRuntim
       connectionId: pty.connectionId,
       isWsl: pty.isWsl,
       worktreeId: pty.worktreeId,
+      // Dev builds run the CLI as `orca-dev`; a packaged app must not advertise it.
+      runtimeCliCommand: getAppEnvironment().isPackaged() ? undefined : 'orca-dev',
       projectRuntime: this.store
         ? resolveLocalProjectRuntimeForWorktreeId(this.requireStore(), pty.worktreeId)
         : undefined

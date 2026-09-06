@@ -3,7 +3,7 @@ import { resolveManagedCliExecutable } from '../../../shared/managed-cli-context
 import { isWslUncPath } from '../../../shared/wsl-paths'
 import { splitWorktreeIdForFilesystem } from '../../../shared/worktree/id'
 
-export type OrchestrationCliCommand = 'orca' | 'orca-ide'
+export type OrchestrationCliCommand = 'orca' | 'orca-dev' | 'orca-ide'
 
 export type ManagedOrchestrationCli = OrchestrationCliCommand | 'orca-dev'
 
@@ -41,9 +41,13 @@ export function resolveTerminalOrchestrationCliCommand(args: {
   isWsl: boolean | null | undefined
   worktreeId: string
   projectRuntime?: ProjectExecutionRuntimeResolution
+  runtimeCliCommand?: OrchestrationCliCommand
 }): OrchestrationCliCommand {
   if (args.connectionId) {
     return 'orca'
+  }
+  if (args.runtimeCliCommand) {
+    return args.runtimeCliCommand
   }
   if (args.isWsl !== null && args.isWsl !== undefined) {
     return args.isWsl ? 'orca-ide' : 'orca'

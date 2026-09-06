@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { createOrchestrationRpcHarness } from './orchestration-rpc-test-harness'
+import { createOrchestrationRpcHarness } from './orchestration/rpc-test-harness'
 
 describe('orchestration coordinator handoff RPC', () => {
   const harness = createOrchestrationRpcHarness()

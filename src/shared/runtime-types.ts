@@ -163,6 +163,8 @@ export type {
   RuntimeTerminalOrphanTopologyGroup,
   RuntimeTerminalOrphanTopologyTab,
   RuntimeTerminalPresentation,
+  RuntimeTerminalPromptDelivery,
+  RuntimeTerminalPromptStage,
   RuntimeTerminalRead,
   RuntimeTerminalRename,
   RuntimeTerminalResolvePane,

@@ -1,10 +1,15 @@
 import type { OrcaRuntimeService } from '../orca-runtime'
-import type { WorkerReleaseReceipt } from '../rpc/methods/orchestration-worker-release-completion'
-import { inspectWorkerTerminal } from '../rpc/methods/orchestration-worker-observation'
+import {
+  completeWorkerTerminalRelease,
+  type WorkerReleaseReceipt
+} from '../rpc/methods/orchestration/worker/worker-release-completion'
+import { inspectWorkerTerminal } from '../rpc/methods/orchestration/worker/worker-observation'
 import type { OrchestrationDb } from './db'
 import { workerTerminalLeaseIsCurrent } from './db/worker-terminal/worker-terminal-release-identity'
 import type { WorkerTerminalResourceRow } from './worker-terminal-ownership'
 import { archiveSummary } from '../rpc/methods/orchestration-worker-terminal-resource-view'
+import { inspectRemoteAttachment } from '../rpc/methods/orchestration/federation/federation-attachment-observation'
+import { releaseRemoteAttachment } from '../rpc/methods/orchestration/federation/federated-worker-release-host'
 
 export type WorkerTerminalReleaseReconciliationResult = {
   attempted: number
@@ -69,8 +74,6 @@ export async function autoReleaseSettledWorkerTerminal(args: {
     return null
   }
   const requested = db.requestWorkerTerminalRelease(dispatchId, { auto: true })
-  const { completeWorkerTerminalRelease } =
-    await import('../rpc/methods/orchestration-worker-release-completion')
   return requested.disposition === 'requested'
     ? completeWorkerTerminalRelease({ runtime, db, dispatchId, resource: requested.resource })
     : null
@@ -121,8 +124,6 @@ async function runReconciliationPasses(
 async function reconcileRequestedWorkerTerminalReleasesOnce(
   runtime: OrcaRuntimeService
 ): Promise<WorkerTerminalReleaseReconciliationResult> {
-  const { completeWorkerTerminalRelease } =
-    await import('../rpc/methods/orchestration-worker-release-completion')
   const db = runtime.getOrchestrationDb()
   const backlog = listReleaseReconciliationBacklog(db)
   const result = { ...emptyResult(), attempted: backlog.length }
@@ -131,13 +132,21 @@ async function reconcileRequestedWorkerTerminalReleasesOnce(
     .filter(({ resource }) => resource?.release_state === 'retained_for_review').length
   for (const resource of backlog) {
     try {
-      const receipt = await completeWorkerTerminalRelease({
-        runtime,
-        db,
-        dispatchId: resource.owner_dispatch_id,
-        resource,
-        mode: 'recovery'
-      })
+      const attachment = db.getRemoteDispatchAttachment(resource.owner_dispatch_id)
+      const receipt = attachment
+        ? await releaseRemoteAttachment({
+            runtime,
+            attachment,
+            observation: await inspectRemoteAttachment(runtime, resource.owner_dispatch_id),
+            mode: 'recovery'
+          })
+        : await completeWorkerTerminalRelease({
+            runtime,
+            db,
+            dispatchId: resource.owner_dispatch_id,
+            resource,
+            mode: 'recovery'
+          })
       if (receipt.state === 'released' || receipt.state === 'already_released') {
         result.released += 1
       } else if (receipt.state === 'release_pending') {

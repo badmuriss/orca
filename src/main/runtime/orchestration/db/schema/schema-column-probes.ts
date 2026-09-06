@@ -6,11 +6,27 @@ export function hasColumn(this: OrchestrationDb, table: string, column: string):
 }
 
 export function createMailboxDeliveryIndexesIfPossible(this: OrchestrationDb): void {
+  createMaestroTransferMutationIndexIfPossible(this)
+  if (this.hasColumn('deliveries', 'mailbox_handle')) {
+    // Excluding '' trades the pre-v34 per-run one-outstanding backstop for downgraded binaries; the
+    // app-level BEGIN IMMEDIATE still serializes one process.
+    this.db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_deliveries_one_outstanding
+        ON deliveries(mailbox_handle) WHERE status = 'outstanding' AND mailbox_handle != '';
+    `)
+  }
   const hasDeliveredAt = this.hasColumn('messages', 'delivered_at')
   if (hasDeliveredAt) {
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_messages_undelivered_inbox
         ON messages(to_handle, read, delivered_at, sequence)
+    `)
+  }
+  if (this.hasColumn('messages', 'pointer_enter_pending')) {
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_messages_pending_pointer_enter
+        ON messages(to_handle, sequence)
+        WHERE read = 0 AND pointer_enter_pending > 0;
     `)
   }
 
@@ -36,6 +52,25 @@ export function createMailboxDeliveryIndexesIfPossible(this: OrchestrationDb): v
       ON messages(run_id, to_handle, type, sequence)
       WHERE read = 0 AND delivery_contract = 'current_delivery';
   `)
+}
+
+export function createMaestroTransferMutationIndexIfPossible(db: OrchestrationDb): void {
+  const columns = [
+    'mutation_caller_fingerprint',
+    'mutation_request_id',
+    'mutation_method',
+    'mutation_payload_hash'
+  ]
+  if (
+    !columns.every((column) => db.hasColumn('maestro_terminal_lease_transfer_receipts', column))
+  ) {
+    return
+  }
+  db.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_maestro_terminal_lease_transfer_mutation
+    ON maestro_terminal_lease_transfer_receipts(
+      mutation_caller_fingerprint, mutation_request_id, mutation_method, mutation_payload_hash
+    ) WHERE mutation_caller_fingerprint IS NOT NULL AND mutation_request_id IS NOT NULL
+      AND mutation_method IS NOT NULL AND mutation_payload_hash IS NOT NULL`)
 }
 
 // Why: sqlite_master holds the table's CREATE SQL incl. the CHECK — cheapest reliable probe for whether it already allows 'heartbeat'.

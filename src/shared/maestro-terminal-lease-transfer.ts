@@ -94,7 +94,7 @@ export function matchesMaestroTerminalLaunchProfile(
     left.effort === right.effort &&
     left.permissionMode === right.permissionMode &&
     left.routeRef === right.routeRef &&
-    left.serviceTier === right.serviceTier &&
-    left.environmentPolicy === right.environmentPolicy
+    (left.serviceTier ?? null) === (right.serviceTier ?? null) &&
+    (left.environmentPolicy ?? null) === (right.environmentPolicy ?? null)
   )
 }

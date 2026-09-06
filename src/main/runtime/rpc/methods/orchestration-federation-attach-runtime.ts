@@ -2,12 +2,12 @@ import type { TuiAgent } from '../../../../shared/tui-agent'
 import { buildMaestroTerminalLeaseTitle } from '../../../../shared/maestro-terminal-lease'
 import { parseWorkspaceKey, worktreeWorkspaceKey } from '../../../../shared/workspace-scope'
 import type { OrcaRuntimeService } from '../../orca-runtime'
-import { assertOrchestrationWorktreeCreationSupported } from './orchestration-folder-worktree-placement'
+import { assertOrchestrationWorktreeCreationSupported } from './orchestration/worker/folder-worktree-placement'
 import {
   isAttemptBoundAttachStart,
   type FederationAttachStartInput
-} from './orchestration-federation-start-schema'
-import type { prepareFederationAttachmentWorkerStart } from './orchestration-worker-start-validation'
+} from './orchestration/federation/federation-start-schema'
+import type { prepareFederationAttachmentWorkerStart } from './orchestration/worker/worker-start-validation'
 
 export type OrchestrationMutation = {
   callerFingerprint: string

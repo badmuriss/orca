@@ -3,7 +3,7 @@ import type { OrcaRuntimeService } from '../../orca-runtime'
 import type { OrchestrationDb } from '../../orchestration/db'
 import type { WorkerTerminalResourceRow } from '../../orchestration/worker-terminal-ownership'
 import { autoReleaseSettledWorkerTerminal } from '../../orchestration/worker-terminal-release-reconciliation'
-import { completeWorkerTerminalRelease } from './orchestration-worker-release-completion'
+import { completeWorkerTerminalRelease } from './orchestration/worker/worker-release-completion'
 
 const resource = {
   id: 'resource-1',

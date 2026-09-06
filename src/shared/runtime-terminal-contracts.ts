@@ -1,3 +1,8 @@
+import type { RuntimeTerminalPromptDelivery } from './runtime-terminal-prompt-contract'
+export type {
+  RuntimeTerminalPromptDelivery,
+  RuntimeTerminalPromptStage
+} from './runtime-terminal-prompt-contract'
 import type { AgentSessionPtyWriteRefusal } from './agent-session-pty-write-admission'
 import type {
   AgentProviderSessionMetadata,
@@ -218,6 +223,7 @@ export type RuntimeTerminalSend = {
    * old client sees the `accepted: false` it already handles and ignores this field.
    */
   agentSessionRefusal?: AgentSessionPtyWriteRefusal
+  prompt?: RuntimeTerminalPromptDelivery
 }
 
 export type RuntimeTerminalAgentStatusState = 'working' | 'permission' | 'idle' | null

@@ -5,7 +5,7 @@ import type { OrchestrationDb } from '../../orchestration/db'
 import { createRootDispatch } from '../../orchestration/db/root-dispatch-test-fixture'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import { selectExactWorkerProviderSession } from '../../orchestration/worker-provider-session'
-import { createOrchestrationRpcHarness } from './orchestration-rpc-test-harness'
+import { createOrchestrationRpcHarness } from './orchestration/rpc-test-harness'
 
 describe('orchestration nested-agent settlement', () => {
   const harness = createOrchestrationRpcHarness()

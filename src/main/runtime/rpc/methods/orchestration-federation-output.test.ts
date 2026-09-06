@@ -9,7 +9,7 @@ import type { OrchestrationEnvironmentTransport } from '../../orchestration/envi
 import type { RpcRequest } from '../core'
 import { RpcDispatcher } from '../dispatcher'
 import { ORCHESTRATION_METHODS } from './orchestration'
-import { createFederationWorkerStartRequest } from './orchestration-federation-test-request'
+import { createFederationWorkerStartRequest } from './orchestration/federation/federation-request.test-support'
 
 describe('orchestration federated worker output', () => {
   const databases: OrchestrationDb[] = []

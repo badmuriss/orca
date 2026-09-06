@@ -16,7 +16,7 @@ import { parseWorkspaceKey, worktreeWorkspaceKey } from '../../../../shared/work
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import { defineMethod, type RpcContext, type RpcMethod } from '../core'
-import { resolveRunScope } from './orchestration-run-scope'
+import { resolveRunScope } from './orchestration/runs/run-scope'
 
 export type WorkspaceBootstrapReceiptRequest = {
   runId: string

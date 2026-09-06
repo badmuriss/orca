@@ -1,3 +1,4 @@
+import { stopTerminalHostSession } from './terminal-host-session-stop'
 import type { Session } from './session'
 import {
   SessionNotFoundError,
@@ -55,7 +56,6 @@ export class TerminalHost {
   private onSessionReaped: TerminalHostOptions['onSessionReaped']
   private reportReadinessEvent: TerminalHostOptions['reportReadinessEvent']
   private onFinalCheckpoint: TerminalHostOptions['onFinalCheckpoint']
-  private maxTombstones: number
   private creationFenced = false
   private disposePromise: Promise<void> | null = null
   private readonly windowsJobReceiptHandoff = new WindowsPtyJobObjectReceiptHandoff()
@@ -73,8 +73,7 @@ export class TerminalHost {
     this.onSessionReaped = opts.onSessionReaped
     this.reportReadinessEvent = opts.reportReadinessEvent
     this.onFinalCheckpoint = opts.onFinalCheckpoint
-    this.maxTombstones = opts.maxTombstones ?? DEFAULT_MAX_TOMBSTONES
-    this.killedTombstones = new TerminalHostTombstones(this.maxTombstones)
+    this.killedTombstones = new TerminalHostTombstones(opts.maxTombstones ?? DEFAULT_MAX_TOMBSTONES)
   }
 
   async createOrAttach(opts: InternalCreateOrAttachOptions): Promise<CreateOrAttachResult> {
@@ -188,31 +187,12 @@ export class TerminalHost {
   }
 
   kill(sessionId: string, opts: { immediate?: boolean; expectedIncarnationId?: string } = {}) {
-    const pending = this.sessionTeardown.get(sessionId)
-    if (pending) {
-      const receipt = opts.immediate ? this.sessionTeardown.requestImmediate(sessionId) : pending
-      if (!receipt) {
-        return Promise.reject(new Error('pty_stop_receipt_unavailable'))
-      }
-      return this.windowsJobReceiptHandoff.resolve(sessionId, receipt, opts.expectedIncarnationId)!
-    }
-    const replay =
-      this.windowsJobReceiptHandoff.resolve(sessionId, null, opts.expectedIncarnationId) ??
-      this.sessionTeardown.getReceipt(sessionId, opts)
-    if (replay) {
-      return Promise.resolve(replay)
-    }
-    const session = this.getAliveSession(sessionId)
-    if (opts.expectedIncarnationId && session.incarnationId !== opts.expectedIncarnationId) {
-      return Promise.reject(new Error('pty_stop_receipt_identity_mismatch'))
-    }
-    const killed = this.windowsJobReceiptHandoff.resolve(
-      sessionId,
-      this.sessionTeardown.killSession(sessionId, session, opts.immediate === true)
-    )!
-    this.killedTombstones.record(sessionId)
-    void killed.catch(() => this.killedTombstones.clearForCreate(sessionId))
-    return killed
+    return stopTerminalHostSession(sessionId, opts, {
+      sessionTeardown: this.sessionTeardown,
+      windowsJobReceiptHandoff: this.windowsJobReceiptHandoff,
+      killedTombstones: this.killedTombstones,
+      getAliveSession: (id) => this.getAliveSession(id)
+    })
   }
 
   // Why: dispose a dead session's emulator so exited terminals don't pin their scrollback window for the daemon's life.
@@ -247,15 +227,12 @@ export class TerminalHost {
   // Why: null-not-throw — fetched for the tab-bar icon, so a vanished pane should quietly yield "no agent".
   getForegroundProcess(sessionId: string): string | null {
     const session = this.sessions.get(sessionId)
-    if (!session || !session.isAlive) {
-      return null
-    }
-    return session.getForegroundProcess()
+    return session?.isAlive ? session.getForegroundProcess() : null
   }
 
   inspectProcess(
     sessionId: string,
-    options?: { expectedIncarnationId?: string }
+    options?: { expectedIncarnationId?: string; steadyState?: boolean }
   ): Promise<TerminalHostProcessInspection> {
     pruneRetiredPtyIncarnations(this.retiredIncarnations)
     const session = this.sessions.get(sessionId)
@@ -275,6 +252,7 @@ export class TerminalHost {
       ...(options?.expectedIncarnationId
         ? { expectedIncarnationId: options.expectedIncarnationId }
         : {}),
+      ...(options?.steadyState === true ? { steadyState: true } : {}),
       retiredIncarnation: this.retiredIncarnations.get(sessionId),
       authorityGeneration: this.authorityGeneration,
       nextObservationEpoch: () => ++this.observationEpoch

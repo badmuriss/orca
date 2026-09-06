@@ -1,6 +1,11 @@
 import type * as pty from 'node-pty'
 import type { IPtyProvider, PtyProcessInfo, PtySpawnOptions, PtySpawnResult } from './types'
 import {
+  WRITE_ACCEPTED,
+  writeRefused,
+  type WriteSettlement
+} from '../../shared/pty-write-settlement'
+import {
   confirmLocalPtyForegroundProcess,
   confirmLocalPtyShellForeground,
   getLocalPtyForegroundProcess,
@@ -17,7 +22,6 @@ import {
   type ExitCallback
 } from './local-pty-provider-state'
 import {
-
   clearLocalPtyBuffer,
   closeLocalPtyStartupQueryAuthority,
   getDefaultLocalPtyShell,
@@ -64,7 +68,7 @@ export class LocalPtyProvider implements IPtyProvider {
 
   spawn(args: PtySpawnOptions): Promise<PtySpawnResult> {
     return spawnLocalPty(args, () => this.opts)
-}
+  }
 
   // Local PTYs are always attached -- no-op. Remote providers use this to resubscribe.
   async attach(_id: string): Promise<void> {}
@@ -73,6 +77,11 @@ export class LocalPtyProvider implements IPtyProvider {
   }
   write(id: string, data: string): boolean {
     return writeLocalPty(id, data)
+  }
+
+  // In-process node-pty is its own sole owner, so its synchronous answer is the settlement.
+  writeWithSettlement(id: string, data: string): WriteSettlement {
+    return writeLocalPty(id, data) ? WRITE_ACCEPTED : writeRefused('provider_refused_write')
   }
   resize(id: string, cols: number, rows: number): void {
     resizeLocalPty(id, cols, rows)
@@ -90,7 +99,6 @@ export class LocalPtyProvider implements IPtyProvider {
     return getLocalPtyAppliedSize(id)
   }
 
-
   shutdown(
     id: string,
     opts: Parameters<IPtyProvider['shutdown']>[1]
@@ -100,7 +108,7 @@ export class LocalPtyProvider implements IPtyProvider {
 
   sendSignal(id: string, signal: string): Promise<void> {
     return sendLocalPtySignal(id, signal)
-}
+  }
 
   getCwd(id: string): Promise<string> {
     return getLocalPtyCwd(id)

@@ -9,10 +9,10 @@ import { OptionalFiniteNumber, requiredString } from '../schemas'
 import {
   inspectWorkerTerminal,
   resolvePinnedFederatedServer
-} from './orchestration-worker-observation'
-import { readArchivedWorkerOutput } from './orchestration-worker-archive-read'
-import { readLegacyFederatedTerminal } from './orchestration-worker-legacy-federated-read'
-import { readExactWorkerOutput } from './orchestration-worker-output'
+} from './orchestration/worker/worker-observation'
+import { readArchivedWorkerOutput } from './orchestration/worker/worker-archive-read'
+import { readLegacyFederatedTerminal } from './orchestration/worker/worker-legacy-federated-read'
+import { readExactWorkerOutput } from './orchestration/worker/worker-output'
 
 const WorkerReadParams = z.object({
   dispatch: requiredString('Missing --dispatch'),
@@ -80,11 +80,19 @@ export const WORKER_READ_METHOD: RpcMethod = defineMethod({
     }
     const resource = db.getWorkerTerminalResourceByOwner(params.dispatch)
     if (resource && ['releasing', 'unknown', 'released'].includes(resource.release_state)) {
+      const observed =
+        resource.release_state === 'releasing'
+          ? await inspectWorkerTerminal(runtime, db, params.dispatch)
+          : null
       return readArchivedWorkerOutput({
         db,
         dispatchId: params.dispatch,
         workerState: worker?.state ?? 'unsupervised',
         resource,
+        liveness:
+          observed?.exact && (observed.status === 'live' || observed.status === 'exited')
+            ? observed.status
+            : undefined,
         source: params.source,
         cursor: params.cursor,
         limit: params.limit

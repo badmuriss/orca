@@ -12,6 +12,7 @@ import type { ClientHostedBrowserRowsEvent } from '../../shared/client-hosted-br
 import { TERMINAL_FIT_RESTORE_DEADLINE_MS } from '../../shared/terminal-fit-restore-deadline'
 import {
   MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY,
+  CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
   STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
 } from '../../shared/protocol-version'
 import { RpcDispatcher } from '../runtime/rpc/dispatcher'
@@ -19,6 +20,7 @@ import { ALL_RPC_METHODS } from '../runtime/rpc/methods'
 import { DesktopRuntimeSenderLifecycle } from './desktop-runtime-sender-lifecycle'
 
 const LOCAL_RUNTIME_CLIENT_CAPABILITIES = [
+  CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
   STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
   MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY
 ] as const

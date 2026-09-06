@@ -1,6 +1,6 @@
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import { ORCHESTRATION_FEDERATION_ATTEMPT_BOUND_WORKER_LEASE_PROTOCOL_VERSION } from '../../../../shared/protocol-version'
-import type { FederationAttachStartInput } from './orchestration-federation-start-schema'
+import type { FederationAttachStartInput } from './orchestration/federation/federation-start-schema'
 
 /** Every federated attach must be durable, first-attempt, exact-worktree and on-protocol. */
 export function assertFederationAttachmentRequest(

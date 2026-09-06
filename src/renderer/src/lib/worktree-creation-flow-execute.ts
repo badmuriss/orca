@@ -13,6 +13,7 @@ import {
   formatWorkspaceCreateError,
   getWorkspaceCreateErrorToastMessage
 } from '@/lib/workspace-create-error-format'
+import { isAgentSessionHandleProvider } from '../../../shared/agent-session-provider-handle'
 import type { CreateWorktreeResult } from '../../../shared/worktree/create-types'
 import type { WorktreeCreationRequest } from '@/lib/pending-worktree-creation'
 import { createBrowserUuid } from '@/lib/browser-uuid'
@@ -202,13 +203,14 @@ export async function executeWorktreeCreation(
             result.defaultTabs,
             {
               activateCreatedTabs: false,
+              ...(structuredLaunch ? { callerProvidesSurface: true } : {}),
               ...(backendSpawned ? { backendStartupTerminalSpawned: true } : {})
             }
           )
   }
 
   let structuredLaunchAccepted = structuredLaunch
-  if (structuredLaunch && preparedRequest.agent === 'codex') {
+  if (structuredLaunch && isAgentSessionHandleProvider(preparedRequest.agent)) {
     const structuredSession = await launchStructuredWorktreeSession({
       creationId,
       request: preparedRequest,

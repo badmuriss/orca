@@ -9,6 +9,12 @@ import {
   AUTOMATION_OWNER_CONFLICT_CODES,
   AutomationOwnerConflictError
 } from '../../../shared/automation-owner-conflict'
+import {
+  NESTED_WORKER_DEPTH_EXCEEDED_CODE,
+  NESTED_WORKER_DEPTH_EXCEEDED_NEXT_STEPS,
+  nestedWorkerDepthExceededMessage
+} from '../../../shared/nested-worker-depth'
+import { OrchestrationError } from '../orchestration/orchestration-error'
 
 class LineageError extends Error {
   code = 'LINEAGE_PARENT_NOT_FOUND'
@@ -75,17 +81,14 @@ describe('mapRuntimeError', () => {
     'runtime_timeout',
     'invalid_runtime_response',
     'update_required'
-  ])(
-    'preserves structured remote transport failure %s',
-    (code) => {
-      const error = Object.assign(new Error(`Remote transport failed: ${code}`), { code })
+  ])('preserves structured remote transport failure %s', (code) => {
+    const error = Object.assign(new Error(`Remote transport failed: ${code}`), { code })
 
-      expect(mapRuntimeError('req_1', { runtimeId: 'runtime-1' }, error)).toMatchObject({
-        ok: false,
-        error: { code, message: `Remote transport failed: ${code}` }
-      })
-    }
-  )
+    expect(mapRuntimeError('req_1', { runtimeId: 'runtime-1' }, error)).toMatchObject({
+      ok: false,
+      error: { code, message: `Remote transport failed: ${code}` }
+    })
+  })
 
   it.each([
     ['window_not_focused', 'keyboard input requires focus', 'restore-window'],
@@ -253,5 +256,25 @@ describe('automation owner conflicts', () => {
   it('still lets an old runtime be classified from the message tail', () => {
     const error = new AutomationOwnerConflictError(AUTOMATION_OWNER_CONFLICT_CODES.ownerChanged)
     expect(error.message.endsWith(`: ${AUTOMATION_OWNER_CONFLICT_CODES.ownerChanged}`)).toBe(true)
+  })
+})
+
+describe('nested worker depth cap', () => {
+  it('keeps its code and next steps instead of collapsing to runtime_error', () => {
+    const failure = mapRuntimeError(
+      'rpc_depth',
+      { runtimeId: 'runtime-1' },
+      new OrchestrationError(
+        NESTED_WORKER_DEPTH_EXCEEDED_CODE,
+        nestedWorkerDepthExceededMessage(2, 1),
+        { effectsApplied: false, nextSteps: [...NESTED_WORKER_DEPTH_EXCEEDED_NEXT_STEPS] }
+      )
+    )
+
+    expect(failure.error.code).toBe(NESTED_WORKER_DEPTH_EXCEEDED_CODE)
+    expect(failure.error.data).toMatchObject({
+      effectsApplied: false,
+      nextSteps: [...NESTED_WORKER_DEPTH_EXCEEDED_NEXT_STEPS]
+    })
   })
 })

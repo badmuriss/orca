@@ -93,6 +93,8 @@ terminalHandle: ${params.managedCliContext.terminalHandle}
 capability: ${params.managedCliContext.protocolCapability}`
     : ''
 
+  // Why: one-line recipes paste unchanged in POSIX shells, PowerShell, and cmd.exe.
+  // Why fenced: keeps the shell comments executable without rendering them as Chat UI headings.
   const header = `You are working inside Orca, a multi-agent IDE. You are a dispatched worker.
 Your coordinator's terminal handle is: ${params.coordinatorHandle}
 Your task ID is: ${params.taskId}
@@ -139,13 +141,15 @@ second Chromium after an Orca page already exists.
 
 === CLI COMMANDS ===
 
+\`\`\`sh
   # Report the terminal task outcome (REQUIRED exactly once).
   #
   # RULE: --body must be a 3-sentence executive summary (what you did,
   # what you found, what's left). Never send an empty body; the coordinator
   # reads the body first and only opens artifacts if it needs more detail.
-  # If you produced a long-form artifact, include its path as
-  # payload.reportPath so the coordinator can find it without a file search.
+  # Append --files-modified only when files changed, and append --report-path
+  # only when you produced a durable report. Always pass real values; do not
+  # send the example placeholders literally.
   #
   # RULE: send worker_done exactly once. Use --outcome succeeded when the
   # requested work is done, or replace it with --outcome failed when it is not.
@@ -154,12 +158,7 @@ second Chromium after an Orca page already exists.
   # from a failed retry cannot complete the current dispatch.
   # Native provider subagents cannot send worker_done for this parent Dispatch.
   # Wait until every native child is settled or absent before reporting completion.
-  ${cli} orchestration send --from ${params.workerHandle}${capabilityFlag} \\
-    --type worker_done --subject "<short status>" \\
-    --body "<3-sentence summary: what you did, what you found, what's left>" \\
-    --task-id ${params.taskId} --dispatch-id ${params.dispatchId} --outcome succeeded \\
-    --files-modified "path/a,path/b" \\
-    --report-path "<optional: path to the full artifact>"
+  ${cli} orchestration send --from ${params.workerHandle}${capabilityFlag} --type worker_done --subject "<short status>" --body "<3-sentence summary: what you did, what you found, what's left>" --task-id ${params.taskId} --dispatch-id ${params.dispatchId} --outcome succeeded
 
   # BEHAVIOR RULE: send a heartbeat every ${HEARTBEAT_INTERVAL_MIN} minutes
   # while actively working on the task. The coordinator uses this to
@@ -171,10 +170,7 @@ second Chromium after an Orca page already exists.
   # attributes the heartbeat to the specific dispatch context, not just
   # the task, so a straggler heartbeat from a previously-failed dispatch
   # cannot mask a hung retry.
-  ${cli} orchestration send --from ${params.workerHandle}${capabilityFlag} \\
-    --type heartbeat --subject "alive" \\
-    --task-id ${params.taskId} --dispatch-id ${params.dispatchId} \\
-    --phase "<short: investigating|implementing|reviewing|waiting>"
+  ${cli} orchestration send --from ${params.workerHandle}${capabilityFlag} --type heartbeat --subject "alive" --task-id ${params.taskId} --dispatch-id ${params.dispatchId} --phase "<short: investigating|implementing|reviewing|waiting>"
 
   # Ask the coordinator a question and block until it answers.
   #
@@ -188,20 +184,18 @@ second Chromium after an Orca page already exists.
   # blocks until the coordinator replies, then prints the reply body. If the
   # call times out or disconnects, resume with the returned message ID instead
   # of creating a duplicate question.
-  ${cli} orchestration ask --from ${params.workerHandle}${capabilityFlag} \\
-    --question "<your question>" \\
-    --options "<optional,comma,separated>" \\
-    --timeout-ms 600000
+  ${cli} orchestration ask --from ${params.workerHandle}${capabilityFlag} --question "<your question>" --options "<optional,comma,separated>" --timeout-ms 600000
 
   # Escalate a blocker or failure (pre-completion, when you need the
   # coordinator to do something before you can continue):
-  ${cli} orchestration send --from ${params.workerHandle}${capabilityFlag} \\
-    --type escalation --subject "Blocked: <reason>" \\
-    --body "<details>" \\
-    --task-id ${params.taskId} --dispatch-id ${params.dispatchId}
+  ${cli} orchestration send --from ${params.workerHandle}${capabilityFlag} --type escalation --subject "Blocked: <reason>" --body "<details>" --task-id ${params.taskId} --dispatch-id ${params.dispatchId}
 
-  # Check for messages from the coordinator:
-  ${cli} orchestration check --terminal ${params.workerHandle}
+  # Read coordinator follow-ups. Nothing interrupts you: a durable message only
+  # arrives when you look, so run this at each natural checkpoint — before you
+  # start a new file and after a test run — and once more immediately before
+  # you send worker_done, so a redirect lands before the task settles.
+  ${cli} orchestration check --terminal ${params.workerHandle} --json
+\`\`\`
 
 ${postDoneInstructions}`
 
@@ -266,6 +260,8 @@ work under the new Dispatch; ignore stale follow-ups from the settled task.`
 // Why the whole section is omitted rather than softened when nesting is off: a
 // worker told it "usually cannot" delegate still tries, then reports the refusal
 // as a blocker.
+// Why fenced + blank line before the closing `---`: unfenced `<placeholders>` are stripped as raw
+// HTML by the Chat UI, and a rule directly under a paragraph is a setext H2 (giant last sentence).
 function buildSubDispatchSection(cli: string): string {
   return `
 
@@ -273,13 +269,16 @@ function buildSubDispatchSection(cli: string): string {
 You may dispatch sub-workers for this task. Bind your own Run first, then create
 and start each one:
 
+\`\`\`sh
   ${cli} orchestration run-create --objective "<what the sub-workers are for>" --json
   ${cli} orchestration task-create --spec "<sub-task>" --json
   ${cli} orchestration worker-start --task <task_id> --worktree current --agent <agent> --json
+\`\`\`
 
 You own those sub-workers: wait for their worker_done, and do not report your own
 until they have settled. Nesting is capped, so a sub-worker of yours may not be
 able to dispatch further.
+
 ---`
 }
 
@@ -294,5 +293,6 @@ ${subjects}
 
 If any look relevant to your task, either pull them in (\`git pull --rebase
 ${drift.base}\` or equivalent) or escalate to the coordinator before starting.
+
 ---`
 }

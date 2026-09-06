@@ -1,13 +1,12 @@
-import { createHash } from 'node:crypto'
+import { acceptManagedTerminalInput } from './managed-terminal-input-acceptance'
 import { isAgentSessionPtyWriteRefusedError } from '../../../../../shared/agent-session-pty-write-admission'
-import { assertLegacyAiVaultResumeCommandAllowed } from '../../../../ai-vault/structured-session-ownership'
-import { InvalidArgumentError, defineMethod, type RpcAnyMethod } from '../../core'
-import { isTerminalQueryReply } from '../../../../../shared/terminal-query-reply'
+import { defineMethod, type RpcAnyMethod } from '../../core'
 import { assertTerminalAgentSendable } from '../../terminal-agent-send-guard'
 import { TerminalSend } from './unary-schemas'
 import {
   assertTerminalSendExactPtyBinding,
-  assertTerminalSendTextWithinLimit,
+  assertTerminalQueryReplyRequest,
+  assertTerminalSendPayload,
   commitMobileInputFloorClaim,
   getTerminalSendGuardRefusedReason,
   isTerminalInputLockedForClient,
@@ -16,196 +15,44 @@ import {
   type MobileInputFloorClaimHolder
 } from './terminal-input-delivery'
 import { updateViewportForClient } from './terminal-viewport-update'
+import {
+  ensureUnsupportedTerminalPromptReceipt,
+  observeReplayedTerminalPrompt
+} from './terminal-prompt-receipt'
 
 export const TERMINAL_SEND_METHODS: RpcAnyMethod[] = [
   defineMethod({
     name: 'terminal.send',
     params: TerminalSend,
-    handler: async (
-      params,
-      {
+    handler: async (params, context) => {
+      const {
         runtime,
         clientId,
         signal,
-        authenticatedCallerFingerprint,
         orchestrationMutation,
-        orchestrationCompatibilityCallerAuthority,
-        orchestrationCompatibilityEvidence
-      }
-    ) => {
-      await assertTerminalSendTextWithinLimit(params.text)
-      await assertTerminalSendTextWithinLimit(params.resolvedLaunchDraft?.text)
-      if (params.text) {
-        await assertLegacyAiVaultResumeCommandAllowed(params.text, () =>
-          runtime.ensureStructuredAgentSessionHost()
-        )
-      }
-      if (params.resolvedLaunchDraft?.text) {
-        await assertLegacyAiVaultResumeCommandAllowed(params.resolvedLaunchDraft.text, () =>
-          runtime.ensureStructuredAgentSessionHost()
-        )
-      }
+        recordMutationReceipt,
+        markMutationEffectPossible,
+        replayedMutationReceipt
+      } = context
+
+      await assertTerminalSendPayload(runtime, params)
       const queryReplyClientId = clientId ?? params.client?.id
       const db = runtime.getOrchestrationDb()
-      const managedLease = db.getMaestroTerminalLeaseByHandle(params.terminal)
-      if (managedLease && !params.leaseInput) {
-        throw new InvalidArgumentError(
-          'An orchestration-owned terminal requires an authenticated lease input envelope.'
-        )
+      const leaseInput = await acceptManagedTerminalInput(params, context)
+      if ('send' in leaseInput) {
+        return leaseInput
       }
-      let durableInputCommandId: string | null = null
-      if (params.leaseInput) {
-        if (!managedLease || managedLease.id !== params.leaseInput.leaseId) {
-          throw new InvalidArgumentError('Lease input does not match this managed terminal.')
-        }
-        const contentDigest = `sha256:${createHash('sha256')
-          .update(params.text ?? '')
-          .digest('hex')}`
-        if (contentDigest !== params.leaseInput.contentDigest) {
-          throw new InvalidArgumentError('Lease input content digest mismatched.')
-        }
-        const terminal = await runtime.showTerminal(params.terminal)
-        const agentStatus = await runtime.getTerminalAgentStatus(params.terminal)
-        const observedInputSurface =
-          agentStatus.status === 'working'
-            ? 'working'
-            : agentStatus.status === 'permission'
-              ? 'permission'
-              : terminal.agentWait
-                ? 'input_required'
-                : 'ready_prompt'
-        if (observedInputSurface !== params.leaseInput.observedInputSurface) {
-          throw new InvalidArgumentError(
-            `Managed terminal input surface is ${observedInputSurface}, not ${params.leaseInput.observedInputSurface}.`
-          )
-        }
-        const ptyIncarnation = runtime.getTerminalProcessIncarnation(params.terminal)
-        if (!ptyIncarnation) {
-          throw new InvalidArgumentError('Managed terminal incarnation is unavailable.')
-        }
-        const principalId =
-          authenticatedCallerFingerprint ??
-          orchestrationMutation?.callerFingerprint ??
-          clientId ??
-          'local-runtime'
-        if (params.leaseInput.authority !== 'user') {
-          const callerAuthority =
-            orchestrationCompatibilityCallerAuthority ??
-            runtime.verifyOrchestrationCompatibilityCaller(orchestrationCompatibilityEvidence, {
-              currentRuntimeLaunchSufficient: true
-            })
-          if (!callerAuthority) {
-            throw new InvalidArgumentError(
-              'Managed terminal input authority requires an authenticated caller terminal.'
-            )
-          }
-          if (params.leaseInput.authority === 'coordinator') {
-            const run = db.getRun(params.leaseInput.runId)
-            if (
-              !run ||
-              run.consumer_generation !== params.leaseInput.coordinatorGeneration ||
-              run.coordinator_handle !== callerAuthority.terminalHandle ||
-              run.coordinator_pane_key !== callerAuthority.paneKey
-            ) {
-              throw new InvalidArgumentError('Coordinator terminal input authority is stale.')
-            }
-          } else {
-            const dispatch = db.getActiveDispatchForIdentity(
-              callerAuthority.terminalHandle,
-              callerAuthority.paneKey
-            )
-            if (!dispatch || dispatch.run_id !== params.leaseInput.runId) {
-              throw new InvalidArgumentError('Worker terminal input authority is stale.')
-            }
-          }
-        }
-        const inputAcceptance = db.acceptMaestroTerminalInput({
-          commandId: params.leaseInput.commandId,
-          idempotencyKey: params.leaseInput.idempotencyKey,
-          contentDigest,
-          enqueueSequence: params.leaseInput.enqueueSequence,
-          sender: {
-            principalId,
-            authority: params.leaseInput.authority,
-            runId: params.leaseInput.runId,
-            coordinatorGeneration: params.leaseInput.coordinatorGeneration
-          },
-          leaseId: managedLease.id,
-          executionHostId: managedLease.executionHostId,
-          workspaceKey: managedLease.workspaceKey,
-          terminalHandle: managedLease.terminalHandle as string,
-          tabId: terminal.tabId,
-          ptyIncarnation,
-          expectedLifecycleState: params.leaseInput.expectedLifecycleState,
-          observedInputSurface,
-          expiresAt: params.leaseInput.expiresAt,
-          expectedGraphRevision: params.leaseInput.expectedGraphRevision
-        })
-        const accepted = inputAcceptance.receipt
-        durableInputCommandId = accepted.commandId
-        if (inputAcceptance.replayed && accepted.state === 'accepted') {
-          const unknown = db.transitionMaestroTerminalInput({
-            commandId: accepted.commandId,
-            state: 'delivery_unknown',
-            rejectionCode: 'delivery_interrupted_before_receipt'
-          })
-          return {
-            send: {
-              handle: params.terminal,
-              accepted: false,
-              bytesWritten: unknown.bytesWritten,
-              deliveryReceipt: unknown
-            }
-          }
-        }
-        if (
-          accepted.state === 'written_to_pty' ||
-          accepted.state === 'acknowledged' ||
-          accepted.state === 'rejected' ||
-          accepted.state === 'superseded' ||
-          accepted.state === 'delivery_unknown'
-        ) {
-          return {
-            send: {
-              handle: params.terminal,
-              accepted: accepted.state === 'written_to_pty' || accepted.state === 'acknowledged',
-              bytesWritten: accepted.bytesWritten,
-              deliveryReceipt: accepted
-            }
-          }
-        }
-        if (
-          observedInputSurface === 'working' ||
-          observedInputSurface === 'permission' ||
-          observedInputSurface === 'input_required'
-        ) {
-          const queued = db.transitionMaestroTerminalInput({
-            commandId: accepted.commandId,
-            state: 'queued'
-          })
-          return {
-            send: {
-              handle: params.terminal,
-              accepted: true,
-              bytesWritten: 0,
-              deliveryReceipt: queued
-            }
-          }
-        }
-      }
-      if (
-        params.inputKind === 'query-reply' &&
-        (!params.text ||
-          !isTerminalQueryReply(params.text) ||
-          params.enter === true ||
-          params.interrupt === true ||
-          params.agentPrompt === true ||
-          params.requireAgentStatus !== undefined ||
-          params.client?.type !== 'mobile' ||
-          !queryReplyClientId ||
-          (clientId !== undefined && params.client.id !== clientId))
-      ) {
-        throw new InvalidArgumentError('Invalid terminal query reply')
+      const durableInputCommandId = leaseInput.commandId
+      assertTerminalQueryReplyRequest(params, clientId, queryReplyClientId)
+      const replayObservation = await observeReplayedTerminalPrompt(
+        runtime,
+        params.terminal,
+        replayedMutationReceipt,
+        params.waitSubmitMs,
+        signal
+      )
+      if (replayObservation) {
+        return replayObservation
       }
       // Why: a stale handle must fail with terminal_handle_stale, not evaluate driver/lock state against the wrong PTY (#7718).
       const leaf = runtime.resolveLiveLeafForHandle(params.terminal)
@@ -316,7 +163,13 @@ export const TERMINAL_SEND_METHODS: RpcAnyMethod[] = [
       }
       const mobileFloorClientId = resolveMobileFloorClientId(driver, params.client)
       const mobileFloorClaim: MobileInputFloorClaimHolder = { current: null }
-      const beforeWrite = assertSendPreconditions
+      const beforeWrite =
+        orchestrationMutation && params.agentPrompt === true
+          ? async (ptyId?: string): Promise<void> => {
+              await assertSendPreconditions?.(ptyId)
+              markMutationEffectPossible?.()
+            }
+          : assertSendPreconditions
       const useSettledAgentPrompt =
         params.agentPrompt === true &&
         hasText &&
@@ -335,11 +188,23 @@ export const TERMINAL_SEND_METHODS: RpcAnyMethod[] = [
             }
           : undefined
       let result
+      let acceptedPromptCheckpoint: unknown
       try {
         result = useSettledAgentPrompt
           ? await runtime.sendTerminalAgentPrompt(params.terminal, params.text!, {
               beforeWrite,
-              signal
+              signal,
+              ...(orchestrationMutation
+                ? {
+                    acceptQueued: true,
+                    observationTimeoutMs: params.waitSubmitMs ?? 0,
+                    requestId: orchestrationMutation.requestId,
+                    onInputAccepted: (send) => {
+                      acceptedPromptCheckpoint = { send }
+                      recordMutationReceipt?.(acceptedPromptCheckpoint)
+                    }
+                  }
+                : {})
             })
           : await runtime.sendTerminal(
               params.terminal,
@@ -376,6 +241,9 @@ export const TERMINAL_SEND_METHODS: RpcAnyMethod[] = [
               agentSessionRefusal: error.refusal
             }
           }
+        }
+        if (acceptedPromptCheckpoint) {
+          return acceptedPromptCheckpoint
         }
         const refusedReason = getTerminalSendGuardRefusedReason(error)
         if (refusedReason) {
@@ -417,6 +285,14 @@ export const TERMINAL_SEND_METHODS: RpcAnyMethod[] = [
         params.resolvedLaunchDraft
       ) {
         runtime.notifyNativeChatLaunchDraftResolved(params.terminal, params.resolvedLaunchDraft)
+      }
+      if (orchestrationMutation && params.agentPrompt === true && !result.prompt) {
+        result = ensureUnsupportedTerminalPromptReceipt(
+          runtime,
+          params.terminal,
+          orchestrationMutation.requestId,
+          result
+        )
       }
       // Why: deliberate mobile input takes the floor (drives `* → mobile{clientId}`); clientless sends fall back to the current mobile driver.
       return { send: { ...result, ...(deliveryReceipt ? { deliveryReceipt } : {}) } }

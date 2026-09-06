@@ -72,4 +72,19 @@ describe('Maestro terminal lease transfer contract', () => {
       })
     ).toBe(false)
   })
+  it('matches omitted optional legacy profile fields without accepting a changed policy', () => {
+    const legacy = {
+      ...identity.launchProfile,
+      serviceTier: undefined,
+      environmentPolicy: undefined
+    }
+    expect(
+      matchesMaestroTerminalLaunchProfile(legacy, {
+        ...legacy,
+        serviceTier: null,
+        environmentPolicy: null
+      })
+    ).toBe(true)
+    expect(matchesMaestroTerminalLaunchProfile(legacy, identity.launchProfile)).toBe(false)
+  })
 })

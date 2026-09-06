@@ -1,5 +1,5 @@
 import type { OrcaRuntimeService } from '../orca-runtime'
-import type { inspectWorkerTerminal } from '../rpc/methods/orchestration-worker-observation'
+import type { inspectWorkerTerminal } from '../rpc/methods/orchestration/worker/worker-observation'
 import type { OrchestrationDb } from './db'
 import { exitedWorkerTerminalLeaseIsCurrent } from './db/worker-terminal/worker-terminal-release-identity'
 import type { WorkerTerminalResourceRow } from './worker-terminal-ownership'

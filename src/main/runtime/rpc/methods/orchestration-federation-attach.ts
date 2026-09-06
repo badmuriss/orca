@@ -1,18 +1,18 @@
 import { createHash } from 'node:crypto'
 import { buildDispatchPreamble } from '../../orchestration/preamble'
-import type { FederationEffect } from './orchestration-federation-effects'
-import type { WorkerSetupReceipt } from './orchestration-worker-topology'
+import type { FederationEffect } from './orchestration/federation/federation-effects'
+import type { WorkerSetupReceipt } from './orchestration/worker/worker-topology'
 import {
   monitorFederatedSetup,
   persistFederatedReadinessStage,
   persistFederatedSetupSpawnFailure,
   persistFederatedSetupWaitOutcome
-} from './orchestration-federation-setup'
-import { failFederatedAttachmentWithReceipt } from './orchestration-federation-start-receipt'
-import { prepareFederationAttachmentWorkerStart } from './orchestration-worker-start-validation'
-import { attachWorkerLaunchExecutable } from './orchestration-worker-launch-preferences'
+} from './orchestration/federation/federation-setup'
+import { failFederatedAttachmentWithReceipt } from './orchestration/federation/federation-start-receipt'
+import { prepareFederationAttachmentWorkerStart } from './orchestration/worker/worker-start-validation'
+import { attachWorkerLaunchExecutable } from './orchestration/worker/worker-launch-preferences'
 import { assertFederationAttachmentRequest } from './orchestration-federation-attach-request'
-import type { FederationAttachStartInput } from './orchestration-federation-start-schema'
+import type { FederationAttachStartInput } from './orchestration/federation/federation-start-schema'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import { provisionFederatedWorkerWorkspace } from './orchestration-federation-provision'
 import {
@@ -145,7 +145,8 @@ export async function attachFederatedWorker({
           dispatchCapability: capability,
           devMode: params.devMode,
           cliCommand: runtime.getTerminalOrchestrationCliCommand(terminalHandle)
-        })
+        }),
+        { acceptQueued: true, observationTimeoutMs: 0, requestId: params.dispatchId }
       )
       if (send && send.accepted === false) {
         throw new Error('dispatch_input_delivery_unknown')
@@ -215,7 +216,11 @@ export async function attachFederatedWorker({
           throw new Error('federated_preamble_delivery_unknown')
         }
         if (!inputAcceptance.replayed) {
-          const send = await runtime.sendTerminalAgentPrompt(terminalHandle, preamble)
+          const send = await runtime.sendTerminalAgentPrompt(terminalHandle, preamble, {
+            acceptQueued: true,
+            observationTimeoutMs: 0,
+            requestId: params.dispatchId
+          })
           db.transitionMaestroTerminalInput({
             commandId: inputAcceptance.receipt.commandId,
             state: send.accepted ? 'written_to_pty' : 'delivery_unknown',

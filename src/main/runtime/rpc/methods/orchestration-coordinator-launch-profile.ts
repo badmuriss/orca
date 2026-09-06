@@ -1,7 +1,7 @@
 import type { MaestroTerminalLaunchProfile } from '../../../../shared/maestro-terminal-lease'
 import { matchesMaestroTerminalLaunchProfile } from '../../../../shared/maestro-terminal-lease-transfer'
 import type { TuiAgent } from '../../../../shared/tui-agent'
-import { resolveWorkerLaunchPreferences } from './orchestration-worker-launch-preferences'
+import { resolveWorkerLaunchPreferences } from './orchestration/worker/worker-launch-preferences'
 
 export function resolveCoordinatorLaunchProfile(args: {
   agent: TuiAgent

@@ -1,7 +1,7 @@
 import type { OrchestrationDb } from '../../orchestration/db'
 import { retainedWorkerTerminalReason } from '../../orchestration/db/worker-terminal/worker-terminal-release-identity'
 import type { WorkerTerminalResourceRow } from '../../orchestration/worker-terminal-ownership'
-import type { WorkerReleaseReceipt } from './orchestration-worker-release-completion'
+import type { WorkerReleaseReceipt } from './orchestration/worker/worker-release-completion'
 import { archiveSummary } from './orchestration-worker-terminal-resource-view'
 
 export function identityMismatchReceipt(

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ORCHESTRATION_CONTRACT_VERSION } from '../../../../shared/protocol-version'
-import { createFederationWorkerStartRequest as startRequest } from './orchestration-federation-test-request'
+import { createFederationWorkerStartRequest as startRequest } from './orchestration/federation/federation-request.test-support'
 import { createFederationPeers, type FederationPeers } from './orchestration-federation-peers'
 
 describe('orchestration federation relay', () => {

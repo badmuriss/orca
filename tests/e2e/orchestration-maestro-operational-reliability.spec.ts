@@ -10,7 +10,7 @@ import {
   createWorkerStartRecoveryCommand,
   isReadinessUnverifiable
 } from '../../src/main/runtime/rpc/methods/orchestration-worker-start'
-import { resolveReplacementWorkerStart } from '../../src/main/runtime/rpc/methods/orchestration-worker-start-schema'
+import { resolveReplacementWorkerStart } from '../../src/main/runtime/rpc/methods/orchestration/worker/worker-start-schema'
 import { createDraftPasteReadyScanner } from '../../src/shared/draft-paste-ready-scanner'
 import { exerciseWorkflowReviewAndMobile } from './fixtures/orchestration-maestro-operational-reliability/career-ops-journey-fixture'
 import {

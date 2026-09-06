@@ -4,7 +4,7 @@ import type { TaskRow } from '../../orchestration/types'
 import {
   createExistingWorktreeWorkerTerminal,
   resolveWorkerTerminalTitle
-} from './orchestration-worker-topology'
+} from './orchestration/worker/worker-topology'
 
 const task: TaskRow = {
   id: 'task-opaque',

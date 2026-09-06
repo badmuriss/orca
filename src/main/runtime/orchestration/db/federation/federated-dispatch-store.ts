@@ -11,6 +11,22 @@ export function getFederatedDispatch(
     .get(dispatchId) as FederatedDispatchRow | undefined
 }
 
+/** One statement for a whole worker-list page; the per-id lookup was an N+1 over the page. */
+export function listFederatedDispatchesByIds(
+  this: OrchestrationDb,
+  dispatchIds: readonly string[]
+): FederatedDispatchRow[] {
+  if (dispatchIds.length === 0) {
+    return []
+  }
+  return this.db
+    .prepare(
+      `SELECT * FROM federated_dispatches
+        WHERE dispatch_id IN (SELECT value FROM json_each(?))`
+    )
+    .all(JSON.stringify([...dispatchIds])) as FederatedDispatchRow[]
+}
+
 export function listActiveFederatedDispatches(
   this: OrchestrationDb,
   runId?: string
@@ -68,17 +84,23 @@ export function isFederatedDispatchRelayEligible(
   )
 }
 
+import {
+  beginLifecycleWriteTransaction,
+  commitLifecycleWriteTransaction,
+  rollbackLifecycleWriteTransaction
+} from '../lifecycle-transition'
+
 export function updateFederatedDispatchResources(
   this: OrchestrationDb,
   params: FederatedDispatchResourceBinding
 ): FederatedDispatchRow {
-  this.db.exec('BEGIN IMMEDIATE')
+  const transaction = beginLifecycleWriteTransaction(this.db, 'federated_dispatch_resources')
   try {
     const row = bindFederatedDispatchResources(this, params)
-    this.db.exec('COMMIT')
+    commitLifecycleWriteTransaction(this.db, transaction)
     return row
   } catch (error) {
-    this.db.exec('ROLLBACK')
+    rollbackLifecycleWriteTransaction(this.db, transaction)
     throw error
   }
 }
@@ -169,20 +191,38 @@ export function bindFederatedDispatchResources(
   return db.getFederatedDispatch(params.dispatchId) as FederatedDispatchRow
 }
 
+export function updateFederatedDispatchRuntimeEpoch(
+  this: OrchestrationDb,
+  dispatchId: string,
+  remoteRuntimeEpoch: string
+): void {
+  this.db
+    .prepare(
+      `UPDATE federated_dispatches
+       SET remote_runtime_epoch = ?, updated_at = datetime('now')
+       WHERE dispatch_id = ?`
+    )
+    .run(remoteRuntimeEpoch, dispatchId)
+}
+
 export type FederatedDispatchStoreMethods = {
   getFederatedDispatch: typeof getFederatedDispatch
+  listFederatedDispatchesByIds: typeof listFederatedDispatchesByIds
   listActiveFederatedDispatches: typeof listActiveFederatedDispatches
   findNextTerminalFederatedDispatchPendingAcknowledgment: typeof findNextTerminalFederatedDispatchPendingAcknowledgment
   isFederatedDispatchRelayEligible: typeof isFederatedDispatchRelayEligible
   updateFederatedDispatchResources: typeof updateFederatedDispatchResources
+  updateFederatedDispatchRuntimeEpoch: typeof updateFederatedDispatchRuntimeEpoch
 }
 
 export function attachFederatedDispatchStore(ctor: { prototype: object }): void {
   Object.assign(ctor.prototype, {
     getFederatedDispatch,
+    listFederatedDispatchesByIds,
     listActiveFederatedDispatches,
     findNextTerminalFederatedDispatchPendingAcknowledgment,
     isFederatedDispatchRelayEligible,
-    updateFederatedDispatchResources
+    updateFederatedDispatchResources,
+    updateFederatedDispatchRuntimeEpoch
   })
 }

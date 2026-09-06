@@ -3,17 +3,25 @@ import type { CliStatusResult, RuntimeStatus } from '../../shared/runtime-types'
 import { runtimeHostConnectionState } from '../../shared/runtime-host-connection-state'
 import type { RuntimeOrchestrationEnvelope } from '../../shared/runtime-rpc-envelope'
 import {
+  isDurableMutation,
   isOrchestrationMutation,
+  isTerminalPromptMutation,
   orchestrationMigrationData
 } from '../../shared/orchestration-rpc-contract'
-import { parsePairingCode, type PairingOffer } from '../../shared/pairing'
+import type { PairingOffer } from '../../shared/pairing'
 import { launchOrcaApp } from './launch'
 import { getDefaultUserDataPath, readMetadata } from './metadata'
 import { getCliStatus, projectRemoteAppStatus } from './status'
 import { sendRequest } from './transport'
 import { RuntimeClientError, RuntimeRpcFailureError, type RuntimeRpcSuccess } from './types'
-import { attachMutationRecovery } from './client-error-recovery'
-import { markEnvironmentUsed, resolveEnvironmentPairingOffer } from './environments'
+import {
+  attachDurableMutationRecovery,
+  attachLegacyTerminalPromptRecovery,
+  attachUnverifiedTerminalPromptRecovery,
+  didAnotherRuntimeHandleTerminalPrompt
+} from './terminal-prompt-mutation-recovery'
+import { markEnvironmentUsed } from './environments'
+import { resolveRemotePairing } from './runtime-remote-pairing'
 import {
   ORCHESTRATION_CONTRACT_RUNTIME_CAPABILITY,
   ORCHESTRATION_CONTRACT_VERSION
@@ -32,12 +40,6 @@ import {
   resolveOrchestrationCliExecutable
 } from './orchestration-recovery-command'
 
-// Why: for long-poll methods the caller's method-level
-// `params.timeoutMs` is the inner waiter budget; we extend the client-side
-// socket timeout to `timeoutMs + GRACE_MS` so the client's own idle timer
-// never fires before the server-side waiter has had a chance to resolve and
-// emit its terminal frame. The 10 s grace absorbs round-trip + one final
-// keepalive window. See design doc §3.1.
 const LONG_POLL_CLIENT_GRACE_MS = 10_000
 
 const COORDINATOR_AUTHORIZED_MAESTRO_METHODS = new Set([
@@ -98,19 +100,43 @@ export class RuntimeClient {
   async call<TResult>(
     method: string,
     params?: unknown,
-    options?: { timeoutMs?: number } & RuntimeOrchestrationEnvelope
+    options?: {
+      timeoutMs?: number
+      legacyTerminalPrompt?: true
+      terminalPromptPreflight?: { runtimeId: string | null }
+    } & RuntimeOrchestrationEnvelope
   ): Promise<RuntimeRpcSuccess<TResult>> {
     const effectiveTimeoutMs = options?.timeoutMs ?? this.resolveMethodTimeoutMs(method, params)
     const orchestrationMutation = isOrchestrationMutation(method, params)
+    const terminalPromptMutation = isTerminalPromptMutation(method, params)
+    const legacyTerminalPrompt = options?.legacyTerminalPrompt === true && terminalPromptMutation
+    const durableMutation = !legacyTerminalPrompt && isDurableMutation(method, params)
     if (orchestrationMutation) {
       await this.ensureOrchestrationContractCompatible(effectiveTimeoutMs)
     }
-    const orchestrationRequestId = orchestrationMutation
+    const orchestrationRequestId = durableMutation
       ? (options?.orchestrationRequestId ?? randomUUID())
       : undefined
-    const originalCommand = orchestrationMutation
+    const originalCommand = durableMutation
       ? buildOrchestrationRecoveryCommand(method, params, this.cliExecutable, this.originalArgs)
       : undefined
+    const recover = (error: unknown, targetRuntimeId: string | null) => {
+      if (legacyTerminalPrompt) {
+        return attachLegacyTerminalPromptRecovery(error)
+      }
+      if (
+        terminalPromptMutation &&
+        options?.terminalPromptPreflight &&
+        didAnotherRuntimeHandleTerminalPrompt(
+          error,
+          options.terminalPromptPreflight.runtimeId,
+          targetRuntimeId
+        )
+      ) {
+        return attachUnverifiedTerminalPromptRecovery(error)
+      }
+      return attachDurableMutationRecovery(error, orchestrationRequestId, originalCommand, method)
+    }
     const compatibilityEnvelope = carriesOrchestrationCompatibilityAuthority(method)
       ? {
           ...this.orchestrationCompatibility,
@@ -139,14 +165,10 @@ export class RuntimeClient {
           envelope
         })
       } catch (error) {
-        throw attachMutationRecovery(error, orchestrationRequestId, originalCommand)
+        throw recover(error, null)
       }
       if (response.ok === false) {
-        throw attachMutationRecovery(
-          new RuntimeRpcFailureError(response),
-          orchestrationRequestId,
-          originalCommand
-        )
+        throw recover(new RuntimeRpcFailureError(response), null)
       }
       if (this.environmentSelector) {
         markEnvironmentUsed(this.userDataPath, this.environmentSelector, {
@@ -160,14 +182,10 @@ export class RuntimeClient {
     try {
       response = await sendRequest<TResult>(metadata, method, params, effectiveTimeoutMs, envelope)
     } catch (error) {
-      throw attachMutationRecovery(error, orchestrationRequestId, originalCommand)
+      throw recover(error, metadata.runtimeId ?? null)
     }
     if (response.ok === false) {
-      throw attachMutationRecovery(
-        new RuntimeRpcFailureError(response),
-        orchestrationRequestId,
-        originalCommand
-      )
+      throw recover(new RuntimeRpcFailureError(response), metadata.runtimeId ?? null)
     }
     return response
   }
@@ -304,33 +322,4 @@ function throwDesktopActivationBlocked(): never {
   )
 }
 
-function resolveRemotePairing(
-  userDataPath: string,
-  pairingCode: string | null,
-  environmentSelector: string | null
-): PairingOffer | null {
-  if (pairingCode && environmentSelector) {
-    throw new RuntimeClientError(
-      'invalid_argument',
-      'Use either --pairing-code or --environment, not both.'
-    )
-  }
-  if (environmentSelector) {
-    return resolveEnvironmentPairingOffer(userDataPath, environmentSelector)
-  }
-  if (!pairingCode) {
-    return null
-  }
-  const pairing = parsePairingCode(pairingCode)
-  if (!pairing) {
-    throw new RuntimeClientError(
-      'invalid_argument',
-      'Invalid remote pairing code. Expected an orca://pair?... URL or bare pairing payload.'
-    )
-  }
-  return pairing
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))

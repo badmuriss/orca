@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { OrcaRuntimeService } from '../orca-runtime'
 import type { OrchestrationDb } from './db'
 import type { WorkerTerminalResourceRow } from './worker-terminal-ownership'
-import { completeWorkerTerminalRelease } from '../rpc/methods/orchestration-worker-release-completion'
+import { completeWorkerTerminalRelease } from '../rpc/methods/orchestration/worker/worker-release-completion'
 
 const DISPATCH_ID = 'ctx-worker'
 const RESOURCE_ID = 'resource-worker'
@@ -23,6 +23,10 @@ function workerResource(overrides: Partial<WorkerTerminalResourceRow> = {}) {
     pane_key: PANE_KEY,
     process_incarnation: PROCESS_INCARNATION,
     host_scope: HOST_SCOPE,
+    endpoint_id: null,
+    endpoint_incarnation: null,
+    recovery_attempt_count: 0,
+    last_recovery_at: null,
     ownership_state: 'owned',
     release_state: 'requested',
     retained_reason: null,
