@@ -8,6 +8,7 @@ import {
   type MaestroWorkspaceWindowPlacement
 } from './maestro-workspace-window-layout'
 import { placeMaestroWorkspaceTopologyRoot } from './maestro-workspace-topology-root-placement'
+import { workspacePlacementProximity } from './maestro-workspace-placement-proximity'
 
 const TOPOLOGY_LAYER_GAP = 96
 const TOPOLOGY_SIBLING_GAP = 64
@@ -290,7 +291,10 @@ export function layoutIncrementalMaestroWorkspaceTopology({
       ? findWorkspaceWindowPlacementNearPosition(
           node.preferredPlacement,
           occupied,
-          preferredPosition
+          preferredPosition,
+          parentPlacement
+            ? workspacePlacementProximity(node.preferredPlacement, parentPlacement)
+            : undefined
         )
       : placeMaestroWorkspaceTopologyRoot(
           node.preferredPlacement,

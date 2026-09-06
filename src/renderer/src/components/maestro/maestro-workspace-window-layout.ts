@@ -127,8 +127,20 @@ function* placementScanOffsets(): Generator<{ x: number; y: number }> {
 export function findWorkspaceWindowPlacementNearPosition(
   placement: MaestroWorkspaceWindowPlacement,
   occupied: readonly MaestroWorkspaceWindowPlacement[],
-  preferredPosition: { x: number; y: number }
+  preferredPosition: { x: number; y: number },
+  proximity?: { origin: { x: number; y: number }; radius: number }
 ): MaestroWorkspaceWindowPlacementAttempt {
+  if (proximity) {
+    const dx = preferredPosition.x - proximity.origin.x
+    const dy = preferredPosition.y - proximity.origin.y
+    const distance = Math.hypot(dx, dy)
+    if (distance > proximity.radius) {
+      preferredPosition = {
+        x: proximity.origin.x + (dx / distance) * proximity.radius,
+        y: proximity.origin.y + (dy / distance) * proximity.radius
+      }
+    }
+  }
   const zOrder = placementZOrder(placement, occupied)
   const stepX = placement.size.width + NEW_WINDOW_GAP
   const stepY = placement.size.height + NEW_WINDOW_GAP
@@ -141,6 +153,16 @@ export function findWorkspaceWindowPlacementNearPosition(
         y: boundedLayoutCoordinate(preferredPosition.y + offset.y * stepY)
       },
       z_order: zOrder
+    }
+    if (
+      proximity &&
+      Math.hypot(
+        candidate.position.x - proximity.origin.x,
+        candidate.position.y - proximity.origin.y
+      ) >
+        proximity.radius + 1
+    ) {
+      continue
     }
     if (!occupied.some((item) => workspaceWindowPlacementsOverlap(candidate, item))) {
       return { placement: candidate, collisionFree: true }

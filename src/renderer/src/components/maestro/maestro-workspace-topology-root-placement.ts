@@ -3,6 +3,7 @@ import type {
   MaestroCanvasSize,
   MaestroCanvasViewport
 } from './maestro-canvas-viewport'
+import { workspacePlacementProximity } from './maestro-workspace-placement-proximity'
 import {
   findWorkspaceWindowPlacementNearPosition,
   placeWorkspaceWindowNearViewport,
@@ -29,11 +30,17 @@ export function placeMaestroWorkspaceTopologyRoot(
     (canvas.width - insets.left - insets.right) / viewport.zoom,
     (canvas.height - insets.top - insets.bottom) / viewport.zoom
   )
+  const { radius } = workspacePlacementProximity(placement)
   if (
-    Math.abs(nearViewport.position.x - preferredPosition.x) <= usableWorldSpan &&
-    Math.abs(nearViewport.position.y - preferredPosition.y) <= usableWorldSpan
+    Math.hypot(
+      nearViewport.position.x - preferredPosition.x,
+      nearViewport.position.y - preferredPosition.y
+    ) <= Math.min(usableWorldSpan, radius)
   ) {
     return { placement: nearViewport, collisionFree: true }
   }
-  return findWorkspaceWindowPlacementNearPosition(placement, occupied, preferredPosition)
+  return findWorkspaceWindowPlacementNearPosition(placement, occupied, preferredPosition, {
+    origin: preferredPosition,
+    radius
+  })
 }

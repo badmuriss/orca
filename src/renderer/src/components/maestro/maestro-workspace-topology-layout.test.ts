@@ -50,6 +50,40 @@ function layout(
 }
 
 describe('Maestro workspace topology layout', () => {
+  it('keeps a new worker near its parent when old siblings were moved far away', () => {
+    const parent = placement(100, 80, 760, 530)
+    const siblings = Array.from({ length: 30 }, (_, index) =>
+      node(`old-${index}`, {
+        parentSurfaceKey: 'coordinator',
+        preferredPlacement: placement(0, 0, 760, 530)
+      })
+    )
+    const existing = Object.fromEntries(
+      siblings.map((sibling, index) => [
+        sibling.surfaceKey,
+        placement(20000 + index * 800, 20000, 760, 530)
+      ])
+    )
+    const result = layout(
+      [
+        node('coordinator', { isCoordinator: true }),
+        ...siblings,
+        node('new-worker', {
+          parentSurfaceKey: 'coordinator',
+          preferredPlacement: placement(0, 0, 760, 530)
+        })
+      ],
+      { coordinator: parent, ...existing }
+    )
+    const worker = result.placements['new-worker']
+    expect(
+      Math.hypot(worker.position.x - parent.position.x, worker.position.y - parent.position.y)
+    ).toBeLessThanOrEqual(2281)
+    expect(workspaceWindowPlacementsOverlap(worker, parent)).toBe(false)
+    for (const [key, value] of Object.entries(existing)) {
+      expect(result.placements[key]).toBe(value)
+    }
+  })
   it('keeps existing user geometry and places stable sibling layers below the parent', () => {
     const coordinatorPlacement = placement(100, 80, 320, 220, 7)
     const beta = node('worker-beta', {
