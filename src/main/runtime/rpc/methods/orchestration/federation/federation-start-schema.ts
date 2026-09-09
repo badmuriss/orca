@@ -8,6 +8,8 @@ import { OptionalWorkerLaunchPreference } from '../worker/worker-start-schema'
 // rather than one object with optional identity — a v4 attachment can never fall
 // back to the looser shape, and a legacy attachment can never claim a lease.
 const FederationAttachStartCommon = {
+  /** Omitted by v1.4.198 coordinators; the worker host then mints a stub home Run. */
+  runId: OptionalString,
   dispatchId: requiredString('Missing Dispatch ID'),
   taskId: requiredString('Missing Task ID'),
   retryOf: OptionalString,

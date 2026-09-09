@@ -2,6 +2,7 @@ import type { WorkerDispatchRow } from '../../types'
 import { OrchestrationError } from '../../orchestration-error'
 import type { OrchestrationDb } from '../orchestration-db'
 import { transitionLifecycleWithDb } from '../lifecycle-transition'
+import { recordFailedStartDispatchIdentity } from '../worker-terminal/failed-start-dispatch-identity'
 import {
   adoptFailedStartTerminal,
   type FailedStartTerminalAdoption
@@ -53,7 +54,6 @@ export function failWorkerStart(
   // own report needs.
   options: {
     retainCapability?: boolean
-    /** A start that died before authority attached still owns the terminal it created. */
     adoptResidualTerminal?: FailedStartTerminalAdoption
   } = {}
 ): WorkerDispatchRow {
@@ -104,11 +104,9 @@ export function failWorkerStart(
       })
     }
     this.closeQuestionsForDispatch(dispatchId)
-    adoptFailedStartTerminal(
-      this,
-      this.getWorkerDispatch(dispatchId) as WorkerDispatchRow,
-      options.adoptResidualTerminal
-    )
+    const failedWorker = this.getWorkerDispatch(dispatchId) as WorkerDispatchRow
+    adoptFailedStartTerminal(this, failedWorker, options.adoptResidualTerminal)
+    recordFailedStartDispatchIdentity(this, failedWorker)
     this.db.exec('COMMIT')
     return this.getWorkerDispatch(dispatchId) as WorkerDispatchRow
   } catch (error) {
@@ -121,7 +119,8 @@ export function markWorkerStartUnknown(
   this: OrchestrationDb,
   dispatchId: string,
   stage: string,
-  reason: string
+  reason: string,
+  effects?: unknown[]
 ): WorkerDispatchRow {
   this.db.exec('BEGIN IMMEDIATE')
   try {
@@ -135,7 +134,12 @@ export function markWorkerStartUnknown(
       id: dispatchId,
       from: 'starting',
       to: 'start_unknown',
-      projection: { stage, last_error: reason, updated_at: new Date().toISOString() }
+      projection: {
+        stage,
+        last_error: reason,
+        updated_at: new Date().toISOString(),
+        ...(effects ? { effects: JSON.stringify(effects) } : {})
+      }
     })
     transitionLifecycleWithDb(this.db, {
       entity: 'dispatch',
@@ -149,7 +153,7 @@ export function markWorkerStartUnknown(
       from: 'dispatched',
       to: 'blocked'
     })
-    this.closeQuestionsForDispatch(dispatchId)
+    // Authority survives uncertainty, so its outstanding questions must remain answerable.
     this.db.exec('COMMIT')
     return this.getWorkerDispatch(dispatchId) as WorkerDispatchRow
   } catch (error) {

@@ -168,8 +168,6 @@ export function sendPointToPointMessage(args: {
       : commitMessage()
   committed.nudge()
   if (messageType === 'worker_done') {
-    // Settlement is what makes the pane fenceable; without this the fence only appeared at the
-    // next app start and reopening the pane in the same session respawned the agent.
     sweepSettledWorkerResumeFences(runtime)
   }
   return committed.receipt

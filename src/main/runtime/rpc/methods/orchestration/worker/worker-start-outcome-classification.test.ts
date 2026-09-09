@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isUnknownWorkerStartOutcome } from './worker-topology'
+import { isUnknownWorkerStartOutcome } from './worker-start-outcome-classification'
 import {
   createWorkerAgentDiscoveryReceipt,
   createWorkerStartRecoveryCommand

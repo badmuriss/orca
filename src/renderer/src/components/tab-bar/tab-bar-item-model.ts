@@ -257,6 +257,9 @@ export function findActiveVisibleTabId(
       return active.activeTabType === 'editor' && item.id === active.activeMaestroTabId
     }
     if (item.type === 'agent-session') {
+      // Reachable only from TabGroupPanel, which passes the structured tab's own id; the store's
+      // `activeTabId` names a background terminal here (cf. TerminalTitlebarTabs, which resolves
+      // `getActiveTab(...)?.id` for 'simulator' and never renders agent-session items).
       return active.activeTabType === 'agent-session' && item.id === active.activeTabId
     }
     return (

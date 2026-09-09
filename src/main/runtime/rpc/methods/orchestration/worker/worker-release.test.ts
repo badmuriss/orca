@@ -115,7 +115,10 @@ describe('orchestration worker release', () => {
       reason: 'external_terminal',
       processAction: 'none'
     })
-    expect(h.inspectProcessLiveness).not.toHaveBeenCalled()
+    expect(h.inspectProcessLiveness).toHaveBeenCalledWith(
+      'runtime_test:term_worker:1',
+      JSON.stringify({ kind: 'local', hostId: 'local' })
+    )
     expect(h.runtime.closeTerminal).not.toHaveBeenCalled()
     expect(h.db.getWorkerTerminalResourceByOwner(dispatchId)).toMatchObject({
       ownership_state: 'external',
@@ -167,7 +170,10 @@ describe('orchestration worker release', () => {
     await expect(
       h.call('orchestration.workerRelease', { dispatch: dispatchId })
     ).resolves.toMatchObject({ state: 'retained', reason: 'user_takeover', processAction: 'none' })
-    expect(h.inspectProcessLiveness).not.toHaveBeenCalled()
+    expect(h.inspectProcessLiveness).toHaveBeenCalledWith(
+      'runtime_test:term_worker:1',
+      JSON.stringify({ kind: 'local', hostId: 'local' })
+    )
     expect(h.runtime.closeTerminal).not.toHaveBeenCalled()
     expect(h.db.getWorkerTerminalResourceByOwner(dispatchId)).toMatchObject({
       ownership_state: 'user_owned',
@@ -320,18 +326,36 @@ describe('orchestration worker release', () => {
     expect(h.db.getWorkerTerminalResourceByOwner(dispatchId)?.ownership_state).toBe('user_owned')
   })
 
-  it('retains when the exact process identity changed instead of closing', async () => {
+  it('keeps a resumed settled worker retained in worker-list without re-dispatch or release', async () => {
     h.setup()
-    const { dispatchId } = await h.startSettledWorker()
+    const { dispatchId, taskId } = await h.startSettledWorker()
+    const dispatch = h.db.getDispatchContextById(dispatchId)
+    const task = h.db.getTask(taskId)
+    vi.mocked(h.runtime.createTerminal).mockClear()
+    vi.mocked(h.runtime.sendTerminalAgentPrompt).mockClear()
     vi.mocked(h.runtime.getTerminalProcessIncarnation).mockImplementation((handle) =>
       handle === 'term_worker' ? 'runtime_test:term_worker:2' : null
     )
-    const receipt = (await h.call('orchestration.workerRelease', { dispatch: dispatchId })) as {
-      state: string
-      reason?: string
+
+    await expect(
+      h.call('orchestration.workerRelease', { dispatch: dispatchId })
+    ).resolves.toMatchObject({
+      state: 'retained',
+      reason: 'identity_unproven',
+      processAction: 'none'
+    })
+    const listed = (await h.call('orchestration.workerList', { run: h.activeRunId })) as {
+      workers: { dispatchId: string; terminalState: string; workerState: string }[]
     }
-    expect(receipt).toMatchObject({ state: 'retained', reason: 'identity_unproven' })
+    expect(listed.workers).toEqual([
+      expect.objectContaining({ dispatchId, terminalState: 'retained', workerState: 'succeeded' })
+    ])
+    expect(h.db.getTask(taskId)).toEqual(task)
+    expect(h.db.getDispatchContextById(dispatchId)).toEqual(dispatch)
+    expect(h.db.getWorkerTerminalResourceByOwner(dispatchId)?.release_state).toBe('retained')
     expect(h.runtime.closeTerminal).not.toHaveBeenCalled()
+    expect(h.runtime.createTerminal).not.toHaveBeenCalled()
+    expect(h.runtime.sendTerminalAgentPrompt).not.toHaveBeenCalled()
   })
 
   it('retains when the terminal host scope changed instead of closing', async () => {

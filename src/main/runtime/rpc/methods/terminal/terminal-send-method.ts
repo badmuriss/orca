@@ -37,7 +37,6 @@ export const TERMINAL_SEND_METHODS: RpcAnyMethod[] = [
 
       await assertTerminalSendPayload(runtime, params)
       const queryReplyClientId = clientId ?? params.client?.id
-      const db = runtime.getOrchestrationDb()
       const leaseInput = await acceptManagedTerminalInput(params, context)
       if ('send' in leaseInput) {
         return leaseInput
@@ -225,7 +224,7 @@ export const TERMINAL_SEND_METHODS: RpcAnyMethod[] = [
       } catch (error) {
         mobileFloorClaim.current?.rollback()
         if (durableInputCommandId) {
-          db.transitionMaestroTerminalInput({
+          runtime.getOrchestrationDb().transitionMaestroTerminalInput({
             commandId: durableInputCommandId,
             state: 'delivery_unknown'
           })
@@ -271,7 +270,7 @@ export const TERMINAL_SEND_METHODS: RpcAnyMethod[] = [
         mobileFloorClaim.current?.rollback()
       }
       const deliveryReceipt = durableInputCommandId
-        ? db.transitionMaestroTerminalInput({
+        ? runtime.getOrchestrationDb().transitionMaestroTerminalInput({
             commandId: durableInputCommandId,
             state: result.accepted ? 'written_to_pty' : 'delivery_unknown',
             bytesWritten: result.bytesWritten,

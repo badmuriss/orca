@@ -9,10 +9,17 @@ export async function acceptManagedTerminalInput(
   context: RpcContext
 ) {
   const { runtime, clientId, authenticatedCallerFingerprint, orchestrationMutation } = context
+  const mobileOrRuntimeClient =
+    context.clientKind === 'mobile' ||
+    context.clientKind === 'runtime' ||
+    (!context.clientKind && params.client?.type === 'mobile')
+  if (!params.leaseInput && mobileOrRuntimeClient) {
+    return { commandId: null }
+  }
   const db = runtime.getOrchestrationDb()
   const managedLease = db.getMaestroTerminalLeaseByHandle(params.terminal)
   if (managedLease && !params.leaseInput) {
-    if (context.clientKind === 'mobile' || context.clientKind === 'runtime') {
+    if (mobileOrRuntimeClient) {
       return { commandId: null }
     }
     throw new InvalidArgumentError(

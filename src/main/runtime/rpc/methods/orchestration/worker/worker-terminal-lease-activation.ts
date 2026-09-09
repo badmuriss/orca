@@ -9,6 +9,7 @@ import { OrchestrationError } from '../../../../orchestration/orchestration-erro
 import { buildDispatchPreamble } from '../../../../orchestration/preamble'
 import type { WorkerEffect } from './worker-topology'
 import type { DurableWorkerMutationIdentity } from '../../orchestration-worker-terminal-lease-types'
+import type { prepareWorkerTerminalTransferAuthority } from '../../../../orchestration/db/worker-terminal/worker-terminal-start-authority'
 
 export type WorkerTerminalLeaseArgs = {
   db: OrchestrationDb
@@ -22,6 +23,7 @@ export type WorkerTerminalLeaseArgs = {
   attemptId: string
   retryOf?: string
   mutation?: DurableWorkerMutationIdentity
+  retryPreflight?: Parameters<typeof prepareWorkerTerminalTransferAuthority>[0]['retryPreflight']
   terminalHandle: string
   terminal: { tabId?: string; ptyId?: string | null }
   terminalAuthority: { paneKey: string; processIncarnation: string; hostScope?: string }

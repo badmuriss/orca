@@ -65,6 +65,7 @@ import type { WorkerTerminalRecoveryMethods } from './worker-dispatch/worker-ter
 import type { WorkerTerminalArchiveMethods } from './worker-terminal/worker-terminal-archive'
 import type { WorkerTerminalListingMethods } from './worker-terminal/worker-terminal-listing'
 import type { WorkerTerminalReleaseMethods } from './worker-terminal/worker-terminal-release'
+import type { StructuredPointerOperationStoreMethods } from './messages/structured-pointer-operation-store'
 import type { WorkerTerminalResourceStoreMethods } from './worker-terminal/worker-terminal-resource-store'
 import type { WorkerTerminalTransferMethods } from './worker-terminal/worker-terminal-transfer'
 import type { MaestroStoreMethods } from './maestro/maestro-store'
@@ -133,6 +134,7 @@ export type OrchestrationDbMethods = AttemptObservationStoreMethods &
   FederationRelayImportMethods &
   RemoteQuestionStoreMethods &
   FederationRelayItemMethods &
+  StructuredPointerOperationStoreMethods &
   WorkerTerminalResourceStoreMethods &
   WorkerTerminalTransferMethods &
   WorkerTerminalReleaseMethods &

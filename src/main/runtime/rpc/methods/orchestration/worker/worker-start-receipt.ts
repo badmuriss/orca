@@ -1,6 +1,7 @@
 import type { OrchestrationDb } from '../../../../orchestration/db'
 import { isAgentPromptStalledError } from '../../../../agent-prompt-submission-verification'
-import { isUnknownWorkerStartOutcome, type WorkerSetupReceipt } from './worker-topology'
+import type { WorkerSetupReceipt } from './worker-topology'
+import { isUnknownWorkerStartOutcome } from './worker-start-outcome-classification'
 import type { OrchestrationWorkerLaunchReceipt } from './worker-launch-preferences'
 import {
   createWorkerStartRecoveryCommand,
@@ -12,6 +13,7 @@ import { boundedRedactedDiagnostic } from '../../orchestration-worker-start-diag
 export { boundedRedactedDiagnostic } from '../../orchestration-worker-start-diagnostic'
 
 import type { FailedStartTerminalAdoption } from '../../../../orchestration/db/worker-terminal/failed-start-terminal-adoption'
+import type { WorkerStartModeReceipt } from '../../orchestration-worker-start-mode'
 
 export function failWorkerStartWithReceipt(args: {
   db: OrchestrationDb
@@ -27,6 +29,7 @@ export function failWorkerStartWithReceipt(args: {
   leaseId?: string
   /** The terminal this start created and never handed to an owner. */
   residualAgentTerminal?: FailedStartTerminalAdoption
+  mode?: WorkerStartModeReceipt
 }): unknown {
   const agentSessionRefusal = isAgentSessionPtyWriteRefusedError(args.error)
     ? args.error.refusal
@@ -49,8 +52,10 @@ export function failWorkerStartWithReceipt(args: {
   // Only claim cleanup the ownership table actually accepted; the adoption declines a terminal
   // another resource already accounts for.
   const adopted =
+    !unknown &&
     Boolean(args.residualAgentTerminal) &&
     Boolean(args.db.getWorkerTerminalResourceByOwner(args.dispatchId))
+  const retainedTerminal = Boolean(args.db.getWorkerTerminalResourceByOwner(args.dispatchId))
   return {
     runId: args.runId,
     taskId: args.taskId,
@@ -65,6 +70,7 @@ export function failWorkerStartWithReceipt(args: {
     lastError: reason,
     setup: args.setup,
     launch: args.launch,
+    ...(args.mode ? { mode: args.mode } : {}),
     effects: JSON.parse(worker.effects) as unknown[],
     residualResources: JSON.parse(worker.residual_resources) as unknown[],
     ...(agentSessionRefusal ? { agentSessionRefusal } : {}),
@@ -76,15 +82,17 @@ export function failWorkerStartWithReceipt(args: {
     ...(unknown
       ? {
           nextCommands: [
-            createWorkerStartRecoveryCommand({
-              executable: args.launch.effective?.executable ?? 'orca',
-              taskId: args.taskId,
-              dispatchId: args.dispatchId,
-              attemptId: args.attemptId,
-              terminalHandle: args.terminalHandle,
-              // start_unknown is intentionally not strict-retryable.
-              exactRetryAvailable: false
-            })
+            retainedTerminal && !readinessUnverifiable
+              ? `orca orchestration worker-abandon --dispatch ${args.dispatchId} --json`
+              : createWorkerStartRecoveryCommand({
+                  executable: args.launch.effective?.executable ?? 'orca',
+                  taskId: args.taskId,
+                  dispatchId: args.dispatchId,
+                  attemptId: args.attemptId,
+                  terminalHandle: args.terminalHandle,
+                  // start_unknown is intentionally not strict-retryable.
+                  exactRetryAvailable: false
+                })
           ]
         }
       : {})

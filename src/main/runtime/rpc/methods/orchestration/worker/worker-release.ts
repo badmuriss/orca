@@ -44,12 +44,36 @@ export const ORCHESTRATION_WORKER_RELEASE_METHODS: RpcMethod[] = [
         }
       }
       if (requested.disposition === 'retained') {
+        const resource = requested.resource
+        const processIncarnation = resource?.process_incarnation
+        if (
+          processIncarnation &&
+          (await runtime.inspectTerminalProcessIncarnationLiveness(
+            processIncarnation,
+            resource.host_scope
+          )) === 'exited'
+        ) {
+          const reconciled = db.settleDeadWorkerTerminalRelease({
+            requestingDispatchId: params.dispatch,
+            resourceId: resource.id,
+            processIncarnation
+          })
+          if (reconciled.disposition === 'released') {
+            runtime.notifyMessageArrived(`dispatch:${params.dispatch}`, 'status')
+            return {
+              dispatchId: params.dispatch,
+              state: 'released',
+              processAction: 'none',
+              archive: archiveSummary(reconciled.resource)
+            }
+          }
+        }
         return {
           dispatchId: params.dispatch,
           state: 'retained',
           reason: requested.reason,
           processAction: 'none',
-          archive: archiveSummary(requested.resource)
+          archive: archiveSummary(resource)
         }
       }
       return completeWorkerTerminalRelease({
@@ -109,11 +133,29 @@ export const ORCHESTRATION_WORKER_RELEASE_METHODS: RpcMethod[] = [
   ORCHESTRATION_WORKER_LIST_METHOD,
   defineMethod({
     name: 'orchestration.workerTerminalUserInput',
-    params: z.object({ paneKey: requiredString('Missing paneKey') }),
+    // `sessionId` addresses a structured worker whose pane key never leaves main. Legacy callers
+    // may still address a terminal handle while the runtime resolves its current pane.
+    params: z
+      .object({
+        paneKey: z.string().min(1).optional(),
+        sessionId: z.string().min(1).optional(),
+        terminal: z.string().min(1).optional()
+      })
+      .refine(
+        (value) => Boolean(value.paneKey ?? value.sessionId ?? value.terminal),
+        'Missing paneKey, sessionId or terminal'
+      ),
     // Real user keystrokes durably relinquish orchestration ownership on the owning runtime, so
     // restarts, SSH drops, remote viewing, and renderer remounts cannot erase the takeover.
     handler: (params, { runtime }) => {
-      const changed = runtime.getOrchestrationDb().markWorkerTerminalUserOwned(params.paneKey)
+      const paneKey =
+        params.paneKey ??
+        (params.sessionId
+          ? runtime.getStructuredWorkerPaneKeyForSession(params.sessionId)
+          : runtime.getTerminalPaneKey(params.terminal!))
+      const changed = paneKey
+        ? runtime.getOrchestrationDb().markWorkerTerminalUserOwned(paneKey)
+        : 0
       if (changed > 0) {
         // Only a real takeover retires the resource; ordinary panes report here too and must not
         // pay for a plan read on every keystroke window.

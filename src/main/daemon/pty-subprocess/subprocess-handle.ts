@@ -36,6 +36,8 @@ export function createDaemonPtySubprocessHandle(args: {
   const nativeProc = proc as DisposableNativePty
   const events = new PtyPreListenerEvents()
   let dead = false
+  // I/O failure is not exit evidence; keep termination and producer flow control available.
+  let ioFailed = false
   let disposed = false
   let nodePtyKillIssued = false
   const foreground = createPtyForegroundProcessTracker({
@@ -52,20 +54,19 @@ export function createDaemonPtySubprocessHandle(args: {
     events.acceptData(data)
   })
   proc.onExit(({ exitCode, signal }) => {
-    events.acceptExit({
-      exitCode,
-      signal,
-      hostReportsChildExitStatus: args.reportsChildExitStatus
-    })
-  })
-  proc.onExit(() => {
-    releaseWindowsPtyJobObjectOwner(args.sessionId)
+    // Exit listeners may re-enter cleanup; retire signal authority before notifying them.
     dead = true
     foreground.markDead()
     // Why: neutralize kill synchronously so a later async socket-close SIGHUP cannot hit a recycled pid.
     if (process.platform !== 'win32') {
       nativeProc.kill = () => {}
     }
+    releaseWindowsPtyJobObjectOwner(args.sessionId)
+    events.acceptExit({
+      exitCode,
+      signal,
+      hostReportsChildExitStatus: args.reportsChildExitStatus
+    })
   })
 
   const slavePath = readPtySlavePath(proc)
@@ -82,23 +83,23 @@ export function createDaemonPtySubprocessHandle(args: {
     confirmForegroundProcess: foreground.confirmForegroundProcess,
     confirmShellForeground: foreground.confirmShellForeground,
     write: (data) => {
-      if (dead) {
+      if (dead || ioFailed) {
         return
       }
       try {
         proc.write(data)
       } catch {
-        dead = true
+        ioFailed = true
       }
     },
     resize: (cols, rows) => {
-      if (dead || !isValidPtySize(cols, rows)) {
+      if (dead || ioFailed || !isValidPtySize(cols, rows)) {
         return
       }
       try {
         proc.resize(cols, rows)
       } catch {
-        dead = true
+        ioFailed = true
       }
     },
     // WindowsTerminal also wires _socket to the ConPTY conout pipe, so pausing backpressures the child.
@@ -123,7 +124,7 @@ export function createDaemonPtySubprocessHandle(args: {
       }
     },
     clear: () => {
-      if (dead) {
+      if (dead || ioFailed) {
         return
       }
       try {

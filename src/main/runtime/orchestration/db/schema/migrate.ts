@@ -9,6 +9,8 @@ import { migrateV35 } from './migrate-v35'
 import { migrateV36 } from './migrate-v36'
 import { migrateV37 } from './migrate-v37'
 import { migrateV38 } from './migrate-v38'
+import { migrateV39 } from './migrate-v39'
+import { migrateV40 } from './migrate-v40'
 import { applySchemaMigrationV39 } from './migrate-maestro-v39'
 import { applySchemaMigrationV40 } from './migrate-maestro-v40'
 import { applySchemaMigrationV41 } from './migrate-maestro-v41'
@@ -35,6 +37,8 @@ export function migrate(this: OrchestrationDb): void {
     migrateV36.call(this, current)
     migrateV37.call(this, current)
     migrateV38.call(this, current)
+    migrateV39.call(this, current)
+    migrateV40.call(this, current)
     applySchemaMigrationV39.call(this, current)
     applySchemaMigrationV40.call(this, current)
     applySchemaMigrationV41.call(this, current)
@@ -42,6 +46,7 @@ export function migrate(this: OrchestrationDb): void {
     applySchemaMigrationV43.call(this, current)
     applySchemaMigrationV44.call(this, current)
     applySchemaMigrationV45.call(this, current)
+    this.createMailboxDeliveryIndexesIfPossible()
     this.db.pragma(`user_version = ${SCHEMA_VERSION}`)
     this.db.exec('COMMIT')
   } catch (err) {

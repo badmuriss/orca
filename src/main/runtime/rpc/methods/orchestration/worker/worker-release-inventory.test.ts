@@ -48,7 +48,10 @@ describe('orchestration worker release inventory', () => {
       reason: 'ownership_transferred',
       processAction: 'none'
     })
-    expect(h.inspectProcessLiveness).not.toHaveBeenCalled()
+    expect(h.inspectProcessLiveness).toHaveBeenCalledWith(
+      'runtime_test:term_worker:1',
+      JSON.stringify({ kind: 'local', hostId: 'local' })
+    )
     expect(h.runtime.closeTerminal).not.toHaveBeenCalled()
     expect(h.db.getWorkerTerminalResourceByOwner(second.dispatchId)?.release_state).not.toBe(
       'released'

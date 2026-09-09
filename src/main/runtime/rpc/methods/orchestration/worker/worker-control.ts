@@ -15,6 +15,7 @@ import { exposeWorkerTerminalResource } from './worker-release-completion'
 import { showFederatedWorker } from '../federation/federated-worker-show'
 
 import { WORKER_READ_METHOD } from '../../orchestration-worker-read-method'
+import { releaseStructuredWorkerSession } from '../../orchestration-structured-worker-session'
 const WorkerDispatchParams = z.object({
   dispatch: requiredString('Missing --dispatch'),
   run: z.string().min(1).optional()
@@ -89,6 +90,7 @@ export const ORCHESTRATION_WORKER_CONTROL_METHODS: RpcMethod[] = [
       const abandoned = runtime.getOrchestrationDb().abandonWorkerDispatch(params.dispatch)
       if (abandoned.disposition === 'context_only') {
         if (!abandoned.alreadySettled) {
+          releaseStructuredWorkerSession(params.dispatch, runtime)
           runtime.notifyMessageArrived(`dispatch:${params.dispatch}`, 'status')
         }
         return {
@@ -103,6 +105,7 @@ export const ORCHESTRATION_WORKER_CONTROL_METHODS: RpcMethod[] = [
       }
       const worker = abandoned.worker
       if (abandoned.disposition === 'abandoned') {
+        releaseStructuredWorkerSession(params.dispatch, runtime)
         runtime.notifyMessageArrived(`dispatch:${params.dispatch}`, 'status')
       }
       return {

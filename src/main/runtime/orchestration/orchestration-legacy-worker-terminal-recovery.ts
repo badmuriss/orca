@@ -1,3 +1,4 @@
+import { sessionIdFromStructuredWorkerIncarnation } from '../structured-worker-identity'
 import { isPtyIncarnationId, type PtyIncarnationId } from '../../../shared/pty-incarnation'
 import { parsePaneKey } from '../../../shared/stable-pane-id'
 import type { LegacyWorkerTerminalRecoveryRow } from './types'
@@ -41,6 +42,9 @@ function parseProcessIncarnation(
   }
   const ptyId = value.slice(0, separator)
   const incarnationId = value.slice(separator + 1)
+  if (sessionIdFromStructuredWorkerIncarnation(value)) {
+    return null
+  }
   return ptyId && isPtyIncarnationId(incarnationId) ? { ptyId, incarnationId } : null
 }
 
@@ -62,6 +66,12 @@ export function planLegacyWorkerTerminalRecovery(
   const blockedPanes = new Map<string, LegacyWorkerTerminalRecoveryBlockedPane>()
   const parsedCandidates: LegacyWorkerTerminalRecoveryCandidate[] = []
   for (const row of rows) {
+    if (
+      row.process_incarnation &&
+      sessionIdFromStructuredWorkerIncarnation(row.process_incarnation)
+    ) {
+      continue
+    }
     const worktreeId = row.worktree_id?.trim()
     const paneKey = row.assignee_pane_key?.trim()
     const pane = paneKey ? parsePaneKey(paneKey) : null

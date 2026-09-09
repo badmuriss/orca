@@ -2,6 +2,10 @@ import { OrchestrationError } from '../../../../orchestration/orchestration-erro
 import { defineMethod, type RpcMethod } from '../../../core'
 import { startFederatedWorker } from '../federation/federated-worker-start'
 import { startLocalWorker } from './local-worker-start'
+import {
+  decideWorkerStartMode,
+  readWorkerStartModeSettings
+} from '../../orchestration-worker-start-mode'
 import { resolveOrchestrationCaller } from '../runs/run-scope'
 import { WorkerStartParams } from './worker-start-schema'
 import {
@@ -45,8 +49,12 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
         )
       }
       await assertWorkerStartTaskSpecWithinPromptBudget(params.spec ?? existingTask!.spec)
+      const mode = decideWorkerStartMode({
+        params,
+        settings: readWorkerStartModeSettings(runtime)
+      })
       if (params.on) {
-        return startFederatedWorker({
+        const receipt = await startFederatedWorker({
           params,
           runtime,
           db,
@@ -54,6 +62,7 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
           task: existingTask,
           orchestrationMutation
         })
+        return receipt && typeof receipt === 'object' ? { ...receipt, mode } : receipt
       }
       return startLocalWorker({
         params: { ...params, timeoutMs: readinessTimeoutMs },
@@ -63,6 +72,7 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
         coordinatorPane,
         existingTask,
         orchestrationMutation,
+        mode,
         recordMutationReceipt
       })
     }

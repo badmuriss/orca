@@ -1,6 +1,7 @@
 import type { OrchestrationDb } from '../../../../orchestration/db'
 import type {
   WorkerTerminalArchiveStatus,
+  WorkerTerminalArchiveKind,
   WorkerTerminalResourceRow
 } from '../../../../orchestration/worker-terminal-ownership'
 import { captureWorkerOutputArchive } from '../../../../orchestration/worker-output-archive'
@@ -157,7 +158,7 @@ async function completeWorkerTerminalReleaseOnce(
   }
   let archiveSource = resource.archive_source as 'transcript' | 'terminal' | null
   let archiveStatus: WorkerTerminalArchiveStatus | null = resource.archive_status
-  let capturedArchive: { kind: 'transcript_pin' | 'terminal_tail'; content: string } | undefined
+  let capturedArchive: { kind: WorkerTerminalArchiveKind; content: string } | undefined
   if (!archive) {
     const captured = await captureWorkerOutputArchive({
       runtime,

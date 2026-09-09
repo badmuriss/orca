@@ -58,6 +58,7 @@ describe('federation host liveness verdicts', () => {
       status: 'exited'
     } as never)
     db.createRemoteDispatchAttachment({
+      runId: 'run-home',
       dispatchId: DISPATCH_ID,
       taskId: 'task_remote',
       homePeerFingerprint: HOME_FINGERPRINT,
@@ -118,6 +119,7 @@ describe('federation host liveness verdicts', () => {
       throw new Error('Expected the real runtime PTY to be listed')
     }
     hostDb.createRemoteDispatchAttachment({
+      runId: 'run-home',
       dispatchId: DISPATCH_ID,
       taskId: 'task_remote',
       homePeerFingerprint: HOME_FINGERPRINT,
