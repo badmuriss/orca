@@ -9,6 +9,7 @@ describe('orchestration RPC contract', () => {
   it.each([
     ['orchestration.runCreate', {}],
     ['orchestration.runUse', {}],
+    ['orchestration.runComplete', {}],
     ['orchestration.send', {}],
     ['orchestration.reply', {}],
     ['orchestration.taskCreate', {}],

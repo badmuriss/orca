@@ -159,7 +159,7 @@ export function registerMaestroWorkspaceIpcBridge(unsubs: (() => void)[]): void 
     ) ?? (() => {})
   )
   unsubs.push(
-    window.api.ui.onMaestroWorkspaceTabCommand((command) => {
+    window.api.ui.onMaestroWorkspaceTabCommand?.((command) => {
       try {
         window.api.ui.respondMaestroWorkspaceTabCommand({
           requestId: command.requestId,
@@ -172,6 +172,6 @@ export function registerMaestroWorkspaceIpcBridge(unsubs: (() => void)[]): void 
           error: error instanceof Error ? error.message : 'Workspace tab command failed.'
         })
       }
-    })
+    }) ?? (() => {})
   )
 }

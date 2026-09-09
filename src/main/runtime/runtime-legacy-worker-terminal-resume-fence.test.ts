@@ -46,6 +46,8 @@ describe('settled worker automatic-resume fence persistence', () => {
     dispatchId: string
     persistence: RuntimeLegacyWorkerTerminalRecoveryPersistence
     fence: () => string | undefined
+    sleeping: () => unknown
+    setIncarnation: (incarnationId: string) => void
   } {
     const orchestrationDb = new OrchestrationDb(':memory:')
     db = orchestrationDb
@@ -88,7 +90,17 @@ describe('settled worker automatic-resume fence persistence', () => {
         () => LOCAL_EXECUTION_HOST_ID,
         onFenceChanged
       ),
-      fence: () => session.sleepingAgentSessionsByPaneKey?.[PANE_KEY]?.automaticResumeBlockedBy
+      fence: () => session.sleepingAgentSessionsByPaneKey?.[PANE_KEY]?.automaticResumeBlockedBy,
+      sleeping: () => session.sleepingAgentSessionsByPaneKey?.[PANE_KEY],
+      setIncarnation: (incarnationId) => {
+        session = {
+          ...session,
+          terminalPtyIncarnationsByPaneKey: {
+            ...session.terminalPtyIncarnationsByPaneKey,
+            [PANE_KEY]: incarnationId
+          }
+        }
+      }
     }
   }
 
@@ -150,6 +162,40 @@ describe('settled worker automatic-resume fence persistence', () => {
     h.persistence.prepare()
 
     expect(h.fence()).toBeUndefined()
+  })
+
+  it('removes exact resume authority before committing an exited release', async () => {
+    const h = harness()
+
+    await expect(
+      h.persistence.persistExitedWorkerTerminalRetirement({
+        worktreeId: WORKTREE_ID,
+        paneKey: PANE_KEY
+      })
+    ).resolves.toBe(true)
+
+    expect(h.sleeping()).toBeUndefined()
+  })
+
+  it('preserves resume authority owned by a replacement incarnation', async () => {
+    const h = harness()
+    h.setIncarnation('replacement-incarnation')
+
+    await expect(
+      h.persistence.persistExitedWorkerTerminalRetirement({
+        worktreeId: WORKTREE_ID,
+        paneKey: PANE_KEY,
+        surface: {
+          worktreeId: WORKTREE_ID,
+          parentTabId: 'tab_worker',
+          leafId: '33333333-3333-4333-8333-333333333333',
+          ptyId: 'pty-worker',
+          incarnationId: 'retired-incarnation'
+        }
+      })
+    ).resolves.toBe(false)
+
+    expect(h.sleeping()).toBeDefined()
   })
 
   it('lifts the fence when the user takes the pane over', () => {
@@ -228,6 +274,26 @@ describe('worker_done without a release', () => {
       handle === 'term_worker' ? PANE_KEY : 'tab_coord:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
     )
     vi.spyOn(runtime, 'getTerminalProcessIncarnation').mockReturnValue('runtime:pty:1')
+    vi.spyOn(runtime, 'getExactWorkerProviderSession').mockReturnValue({
+      paneKey: PANE_KEY,
+      processIncarnation: 'runtime:pty:1',
+      connectionId: null,
+      agent: 'codex',
+      providerSession: { key: 'session_id', id: 'lead-session' },
+      observedAt: Date.now(),
+      statusObservedAt: Date.now(),
+      subagents: [],
+      actorAttestation: {
+        authorityId: 'agent-hook-main:test',
+        incarnation: 1,
+        revision: 1,
+        observedAt: Date.now(),
+        provider: 'codex',
+        role: 'lead',
+        eventName: 'PreToolUse',
+        providerSessionId: 'lead-session'
+      }
+    } as never)
     vi.spyOn(runtime, 'notifyMessageArrived').mockImplementation(() => {})
 
     const run = orchestrationDb.createRun({

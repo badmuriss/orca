@@ -92,7 +92,13 @@ describe('federation host liveness verdicts', () => {
     }
     return method.handler(method.params!.parse(params), {
       runtime,
-      authenticatedCallerFingerprint: HOME_FINGERPRINT
+      authenticatedCallerFingerprint: HOME_FINGERPRINT,
+      orchestrationMutation: {
+        callerFingerprint: HOME_FINGERPRINT,
+        requestId: `request_${name}`,
+        method: name,
+        payloadHash: JSON.stringify(params)
+      }
     } as never)
   }
 
@@ -142,7 +148,13 @@ describe('federation host liveness verdicts', () => {
       }
       return method.handler(method.params!.parse(params), {
         runtime: hostRuntime,
-        authenticatedCallerFingerprint: HOME_FINGERPRINT
+        authenticatedCallerFingerprint: HOME_FINGERPRINT,
+        orchestrationMutation: {
+          callerFingerprint: HOME_FINGERPRINT,
+          requestId: `request_${name}`,
+          method: name,
+          payloadHash: JSON.stringify(params)
+        }
       } as never)
     }
     return { hostDb, hostRuntime, terminal, callHost }

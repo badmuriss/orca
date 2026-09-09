@@ -3,10 +3,11 @@ import { SSH_PROVIDER_UNREGISTERED_REASON } from '../../../../shared/pty-livenes
 import { parseAppSshPtyId } from '../../../providers/ssh-pty-id'
 import { ptyOwnership, ptyIncarnationById } from '../provider/ownership-state'
 import { getProvider, getProviderForPty } from '../provider/registry'
-import { isPtyAlreadyGoneError, delay } from '../provider/liveness'
+import { isPtyAlreadyGoneError } from '../provider/liveness'
 import { recordUndeliveredSshPtyKill } from './undelivered-ssh-kill'
 import type { PtyRuntimeControllerDeps } from './controller-deps'
-import type { PtyStopReceipt } from '../../../../shared/pty-stop-receipt'
+
+export { stopAndWaitPtyFromRuntimeController } from './stop-and-wait-pty'
 
 export function killPtyFromRuntimeController(
   deps: PtyRuntimeControllerDeps,
@@ -214,122 +215,4 @@ export function markReversibleStopsFromRuntimeController(
       }
     }
   }
-}
-
-/**
- * Deliberately records no undelivered-stop intent, unlike `killPtyFromRuntimeController`.
- *
- * Only a caller that gives the PTY up for good may leave a replayable kill order behind. This one
- * hands its failures back instead: worktree sleep marks these stops reversible and leaves the pane
- * live and usable when one does not land, so a durable order recorded here would come back on a
- * later handshake and destroy a terminal the user had gone back to using.
- */
-export async function stopAndWaitPtyFromRuntimeController(
-  deps: PtyRuntimeControllerDeps,
-  ptyId: string,
-  opts?: { keepHistory?: boolean; deadlineMs?: number }
-): Promise<PtyStopReceipt | null> {
-  const {
-    runtime,
-    store,
-    getLocalPtyProviderStartupPromise,
-    shutdownProviderAndDetectExit,
-    rememberSyntheticKillExit,
-    sendPtyExitToRenderer,
-    finishPtyShutdown
-  } = deps
-  runtime?.markPtyStopRequested?.(ptyId)
-  let connectionId: string | null | undefined = ptyOwnership.get(ptyId)
-  const parsedSshId = connectionId === undefined ? parseAppSshPtyId(ptyId) : null
-  connectionId ??= parsedSshId?.connectionId
-  // Why: destructive teardown threads one absolute deadline through every await
-  // below; each RPC leaf converts it to the remaining time when it issues, so
-  // sequential RPCs share the budget and cannot overrun the sweep deadline.
-  const deadlineMs = opts?.deadlineMs
-  const startupPromise = getLocalPtyProviderStartupPromise(connectionId)
-  if (startupPromise) {
-    // Why: exact-stop must resolve the provider after daemon startup just
-    // like renderer kills, or the fallback can falsely confirm teardown.
-    if (deadlineMs !== undefined) {
-      // Why: bound the cold-start await by the teardown deadline instead of the
-      // 60s startup fail-open cap; fail closed so the sweep records the miss.
-      const won = await Promise.race([
-        // Why: () => false on rejection both fails closed on a startup error and
-        // keeps the losing branch's rejection from surfacing as unhandled.
-        startupPromise.then(
-          () => true,
-          () => false
-        ),
-        delay(Math.max(1, deadlineMs - Date.now())).then(() => false)
-      ])
-      if (!won) {
-        return null
-      }
-    } else {
-      await startupPromise
-    }
-  }
-  let provider: IPtyProvider
-  try {
-    provider = connectionId ? getProvider(connectionId) : getProviderForPty(ptyId)
-  } catch {
-    if (connectionId) {
-      // Why: an absent SSH provider means there is no live target left to
-      // await, but the relay lease must still be tombstoned.
-      const incarnationId = finishPtyShutdown(ptyId, connectionId, store)
-      runtime?.onPtyExit(ptyId, -1, incarnationId)
-      rememberSyntheticKillExit(ptyId)
-      sendPtyExitToRenderer({
-        id: ptyId,
-        code: -1,
-        ...(incarnationId ? { incarnationId } : {})
-      })
-      runtime?.markPtyLivenessUnverifiable?.(ptyId, SSH_PROVIDER_UNREGISTERED_REASON)
-    }
-    return null
-  }
-  let receipt: PtyStopReceipt
-  let providerExitObserved = false
-  try {
-    const stopResult = await shutdownProviderAndDetectExit(provider, ptyId, {
-      immediate: true,
-      keepHistory: opts?.keepHistory ?? false,
-      deadlineMs
-    })
-    receipt = stopResult.receipt
-    providerExitObserved = stopResult.providerExitObserved
-  } catch (err) {
-    if (!isPtyAlreadyGoneError(err)) {
-      if (connectionId) {
-        runtime?.markPtyLivenessUnverifiable?.(
-          ptyId,
-          err instanceof Error ? err.message : String(err)
-        )
-      }
-      console.warn(
-        `[pty] Failed to stop PTY ${ptyId}: ${err instanceof Error ? err.message : String(err)}`
-      )
-      return null
-    }
-    return null
-  }
-  if (receipt.verdict === 'live') {
-    runtime?.markPtyLivenessLive?.(ptyId)
-    return receipt
-  }
-  if (receipt.verdict !== 'exited' || !receipt.processTreeVerified) {
-    runtime?.markPtyLivenessUnverifiable?.(ptyId, receipt.reason)
-    return receipt
-  }
-  const incarnationId = finishPtyShutdown(ptyId, connectionId, store)
-  if (!providerExitObserved) {
-    runtime?.onPtyExit(ptyId, 0, incarnationId)
-    rememberSyntheticKillExit(ptyId)
-    sendPtyExitToRenderer({
-      id: ptyId,
-      code: 0,
-      ...(incarnationId ? { incarnationId } : {})
-    })
-  }
-  return receipt
 }

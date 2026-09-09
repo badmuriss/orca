@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { installFakeAppEnvironment } from '../../../config/scripts/vitest-host-ports-setup'
 import type {
   RuntimeCreateAgentSessionRequest,
   RuntimeCreateAgentSessionResult
@@ -15,6 +16,10 @@ const electronMocks = vi.hoisted(() => ({
   app: { getPath: vi.fn(() => '/tmp'), isPackaged: true }
 }))
 vi.mock('electron', () => electronMocks)
+
+beforeEach(() => {
+  installFakeAppEnvironment({ isPackaged: () => true })
+})
 
 function operationId(now = Date.now()): string {
   return `${now}-0123456789abcdef0123456789abcdef`
@@ -575,7 +580,7 @@ describe('ManagedCliContext construction across hosts', () => {
   })
 
   it('builds the orca-dev executable for an unpacked (dev) local build', () => {
-    electronMocks.app.isPackaged = false
+    installFakeAppEnvironment({ isPackaged: () => false })
     try {
       const runtime = createRuntime()
       stubPty(runtime, 'term_dev', 'pty-dev', {
@@ -588,7 +593,7 @@ describe('ManagedCliContext construction across hosts', () => {
 
       expect(context.executable).toBe('orca-dev')
     } finally {
-      electronMocks.app.isPackaged = true
+      installFakeAppEnvironment({ isPackaged: () => true })
     }
   })
 

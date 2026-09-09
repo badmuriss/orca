@@ -389,7 +389,12 @@ describe('OrcaRuntimeService', () => {
           worktreeId: `${TEST_REPO_ID}::/remote/feature`
         }
       ]),
-      shutdown: vi.fn().mockResolvedValue(undefined),
+      shutdown: vi.fn(async (id: string, opts: { expectedIncarnationId?: string }) =>
+        exitedPtyStopReceipt(id, {
+          ...opts,
+          executionHostId: 'ssh:ssh-1'
+        })
+      ),
       deleteWorktreeHistory: vi.fn().mockResolvedValue(undefined)
     }
     const runtime = new OrcaRuntimeService(remoteStore as never, undefined, {

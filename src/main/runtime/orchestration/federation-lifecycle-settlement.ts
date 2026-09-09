@@ -4,6 +4,8 @@ import {
   recordRemoteAttachmentReleaseStage,
   REMOTE_ATTACHMENT_RELEASE_STAGES
 } from './db/federation/remote-dispatch-attachment-release'
+import type { WorkerTerminalRetainedReason } from './worker-terminal-ownership'
+import { classifyWorkerTerminalCloseError } from './worker-terminal-close-error'
 
 export type FederatedLifecycleSettlement =
   | { action: 'completed' | 'failed'; authority: 'run_home' }
@@ -30,7 +32,7 @@ const activeReleasesByRuntime = new WeakMap<
 
 export type FederatedReleaseReceipt = {
   state: 'released' | 'already_released' | 'retained' | 'unverifiable'
-  reason?: 'identity_unproven'
+  reason?: WorkerTerminalRetainedReason
   processAction: 'closed_agent_terminal' | 'none'
   lastError?: string
   recovery?: string
@@ -123,8 +125,19 @@ async function releaseFederatedAttachmentOnce(
   if (!['succeeded', 'failed', 'stopped', 'abandoned'].includes(attachment.state)) {
     throw new OrchestrationError(
       'dispatch_inactive',
-      `Remote Dispatch ${dispatchId} is not settled.`
+      `Remote Dispatch ${dispatchId} is ${attachment.state}; only a settled worker can release. Use worker-stop to cancel an active worker.`
     )
+  }
+  const requested = db.requestRemoteAttachmentTerminalRelease(dispatchId)
+  if (requested.disposition === 'already_released') {
+    return { state: 'already_released', processAction: 'none' }
+  }
+  if (requested.disposition === 'retained') {
+    return {
+      state: 'retained',
+      reason: requested.reason,
+      processAction: 'none'
+    }
   }
   if (!attachment.terminal_handle || !attachment.pane_key || !attachment.process_incarnation) {
     return { state: 'retained', reason: 'identity_unproven', processAction: 'none' }
@@ -160,12 +173,20 @@ async function releaseFederatedAttachmentOnce(
       )
     }
   } catch (error) {
-    return markRemoteReleaseUnverifiable(
-      runtime,
-      dispatchId,
-      error instanceof Error ? error.message : String(error)
-    )
+    const closeError = classifyWorkerTerminalCloseError(error)
+    if (liveness?.status === 'exited' && closeError.alreadyGone) {
+      db.settleWorkerTerminalRelease(requested.resource.id)
+      recordRemoteAttachmentReleaseStage(db, {
+        dispatchId,
+        stage: REMOTE_ATTACHMENT_RELEASE_STAGES.completed,
+        lastError: ''
+      })
+      runtime.notifyMessageArrived(`dispatch:${dispatchId}`, 'status')
+      return { state: 'released', processAction: 'closed_agent_terminal' }
+    }
+    return markRemoteReleaseUnverifiable(runtime, dispatchId, closeError.reason)
   }
+  db.settleWorkerTerminalRelease(requested.resource.id)
   recordRemoteAttachmentReleaseStage(db, {
     dispatchId,
     stage: REMOTE_ATTACHMENT_RELEASE_STAGES.completed,

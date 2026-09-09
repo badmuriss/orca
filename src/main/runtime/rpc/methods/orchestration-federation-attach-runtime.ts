@@ -57,6 +57,7 @@ export async function prepareFederatedAttachmentRuntime({
     homePeerFingerprint: orchestrationMutation.callerFingerprint,
     protocolVersion: params.protocolVersion,
     runtimeEpoch: runtime.getRuntimeId(),
+    depth: params.depth,
     mutationReceipt: orchestrationMutation
   })
   const attemptBound = isAttemptBoundAttachStart(params) ? params : null

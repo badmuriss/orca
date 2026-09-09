@@ -5,6 +5,7 @@ import { createRichMarkdownExtensions } from '@/components/editor/rich-markdown-
 import { encodeRawMarkdownHtmlForRichEditor } from '@/components/editor/raw-markdown-html'
 import { createRichMarkdownEditorCodec } from '@/components/editor/rich-markdown-source-transport'
 import { getRichMarkdownSpellcheckAttribute } from '@/components/editor/rich-markdown-spellcheck'
+import { translate } from '@/i18n/i18n'
 
 export function MaestroWorkspaceMiniMarkdownEditor({
   content,
@@ -29,7 +30,10 @@ export function MaestroWorkspaceMiniMarkdownEditor({
       attributes: {
         class: 'rich-markdown-editor',
         spellcheck: getRichMarkdownSpellcheckAttribute(true),
-        'aria-label': 'Edit annotation'
+        'aria-label': translate(
+          'auto.components.maestro.MaestroWorkspaceMiniMarkdownEditor.editAnnotation',
+          'Edit annotation'
+        )
       }
     },
     onFocus: () => window.api.ui.setMarkdownEditorFocused(true),
@@ -64,15 +68,64 @@ export function MaestroWorkspaceMiniMarkdownEditor({
 
   return (
     <div className="maestro-mini-markdown-editor flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="linear-issue-markdown-toolbar" aria-label="Annotation formatting">
+      <div
+        className="linear-issue-markdown-toolbar"
+        aria-label={translate(
+          'auto.components.maestro.MaestroWorkspaceMiniMarkdownEditor.annotationFormatting',
+          'Annotation formatting'
+        )}
+      >
         {[
-          ['Heading', Heading2, () => editor?.chain().focus().toggleHeading({ level: 2 }).run()],
-          ['Bold', Bold, () => editor?.chain().focus().toggleBold().run()],
-          ['Italic', Italic, () => editor?.chain().focus().toggleItalic().run()],
-          ['Inline code', Code, () => editor?.chain().focus().toggleCode().run()],
-          ['Bullet list', List, () => editor?.chain().focus().toggleBulletList().run()],
-          ['Task list', ListTodo, () => editor?.chain().focus().toggleTaskList().run()],
-          ['Quote', Quote, () => editor?.chain().focus().toggleBlockquote().run()]
+          [
+            translate(
+              'auto.components.maestro.MaestroWorkspaceMiniMarkdownEditor.heading',
+              'Heading'
+            ),
+            Heading2,
+            () => editor?.chain().focus().toggleHeading({ level: 2 }).run()
+          ],
+          [
+            translate('auto.components.maestro.MaestroWorkspaceMiniMarkdownEditor.bold', 'Bold'),
+            Bold,
+            () => editor?.chain().focus().toggleBold().run()
+          ],
+          [
+            translate(
+              'auto.components.maestro.MaestroWorkspaceMiniMarkdownEditor.italic',
+              'Italic'
+            ),
+            Italic,
+            () => editor?.chain().focus().toggleItalic().run()
+          ],
+          [
+            translate(
+              'auto.components.maestro.MaestroWorkspaceMiniMarkdownEditor.inlineCode',
+              'Inline code'
+            ),
+            Code,
+            () => editor?.chain().focus().toggleCode().run()
+          ],
+          [
+            translate(
+              'auto.components.maestro.MaestroWorkspaceMiniMarkdownEditor.bulletList',
+              'Bullet list'
+            ),
+            List,
+            () => editor?.chain().focus().toggleBulletList().run()
+          ],
+          [
+            translate(
+              'auto.components.maestro.MaestroWorkspaceMiniMarkdownEditor.taskList',
+              'Task list'
+            ),
+            ListTodo,
+            () => editor?.chain().focus().toggleTaskList().run()
+          ],
+          [
+            translate('auto.components.maestro.MaestroWorkspaceMiniMarkdownEditor.quote', 'Quote'),
+            Quote,
+            () => editor?.chain().focus().toggleBlockquote().run()
+          ]
         ].map(([label, Icon, command]) => (
           <button
             key={label as string}

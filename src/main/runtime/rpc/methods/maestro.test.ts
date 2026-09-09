@@ -127,7 +127,11 @@ function documentScope(
 function seedCurrentProjection(
   db: OrchestrationDb,
   anchor: MaestroWorkspaceAnchor,
-  generation: number
+  generation: number,
+  executionWorkspace: MaestroDocumentReadScope = {
+    execution_host_id: anchor.execution_host_id,
+    workspace_key: anchor.workspace_key
+  }
 ): void {
   applyMaestroProjection.call(db, anchor, {
     schema_version: 1,
@@ -145,10 +149,13 @@ function seedCurrentProjection(
         path: '/workspace/one'
       },
       execution_workspace: {
-        execution_host_id: anchor.execution_host_id,
-        workspace_key: anchor.workspace_key,
+        execution_host_id: executionWorkspace.execution_host_id,
+        workspace_key: executionWorkspace.workspace_key,
         kind: 'folder',
-        path: '/workspace/one'
+        path:
+          executionWorkspace.workspace_key === anchor.workspace_key
+            ? '/workspace/one'
+            : '/workspace/execution'
       },
       base_revision: 'base-1',
       dirty_paths: [],
@@ -554,6 +561,70 @@ describe('Maestro RPC methods', () => {
         })
       )
     ).rejects.toMatchObject({ code: 'unauthorized' })
+    db.close()
+  })
+
+  it('lets the current coordinator act in its projected execution workspace only', async () => {
+    const db = new OrchestrationDb(':memory:')
+    const run = db.createRun({
+      objective: 'Coordinate a split workspace',
+      coordinatorHandle: 'terminal-1',
+      coordinatorPaneKey: 'tab-1:leaf-1'
+    })
+    const executionFolder = {
+      ...FOLDER_WORKSPACE,
+      id: 'folder-2',
+      name: 'Execution',
+      folderPath: '/workspace/execution'
+    }
+    const unrelatedFolder = {
+      ...FOLDER_WORKSPACE,
+      id: 'folder-3',
+      name: 'Unrelated',
+      folderPath: '/workspace/unrelated'
+    }
+    const executionWorkspace = {
+      repository_id: 'execution-folder',
+      execution_host_id: 'local',
+      workspace_key: 'folder:folder-2',
+      run_id: run.id
+    }
+    seedCurrentProjection(db, workspace(run.id), run.consumer_generation, executionWorkspace)
+
+    await expect(
+      resolveMaestroPrincipal(
+        rpcContext(db, {
+          folders: [FOLDER_WORKSPACE, executionFolder, unrelatedFolder],
+          terminalWorkspaceId: 'folder:folder-1',
+          coordinator: { runId: run.id, generation: run.consumer_generation }
+        }),
+        executionWorkspace
+      )
+    ).resolves.toMatchObject({
+      kind: 'coordinator',
+      workspace: {
+        execution_host_id: 'local',
+        workspace_key: 'folder:folder-2',
+        run_id: run.id
+      }
+    })
+
+    await expect(
+      resolveMaestroPrincipal(
+        rpcContext(db, {
+          folders: [FOLDER_WORKSPACE, executionFolder, unrelatedFolder],
+          terminalWorkspaceId: 'folder:folder-3',
+          coordinator: { runId: run.id, generation: run.consumer_generation }
+        }),
+        executionWorkspace
+      )
+    ).rejects.toMatchObject({
+      code: 'unauthorized',
+      data: {
+        requested: { workspaceKey: 'folder:folder-2' },
+        caller: { workspaceKey: 'folder:folder-3' }
+      }
+    })
     db.close()
   })
 

@@ -22,9 +22,9 @@ import {
   taskResourceState,
   terminalCleanupResource,
   terminalResourceDetail,
-  terminalResourceLiveness,
   terminalResourceState
 } from './maestro-run-resource-state'
+import type { MaestroTerminalLiveness } from './maestro-run-resource-state'
 
 type ProjectedTask = { task: TaskRow; title: string; outcome: TaskProgressOutcome }
 type ProviderExecution = { dispatchId: string; session: ExactWorkerProviderSession }
@@ -42,6 +42,7 @@ export type MaestroRunResourceProjectionInput = {
   workspaceKey: string
   recoveredAuthority: boolean
   browserSurfaceKeys: ReadonlyMap<string, string>
+  terminalLiveness: ReadonlyMap<string, MaestroTerminalLiveness>
 }
 
 export function projectMaestroRunResources(
@@ -164,6 +165,7 @@ export function projectMaestroRunResources(
     }
     const task = lease.taskId ? taskById.get(lease.taskId) : undefined
     const surfaceKey = terminalSurfaceKey(input, lease)
+    const liveness = input.terminalLiveness.get(lease.id) ?? 'unverifiable'
     resources.push({
       kind: 'terminal',
       reference: lease.id,
@@ -173,14 +175,14 @@ export function projectMaestroRunResources(
         lease.role === 'coordinator'
           ? 'Coordinator terminal'
           : `${task?.title ?? 'Worker'} terminal`,
-      detail: terminalResourceDetail(lease),
+      detail: terminalResourceDetail(lease, liveness),
       state: terminalResourceState(lease),
       ...(surfaceKey ? { surface_key: surfaceKey } : {}),
       ...(lease.terminalHandle ? { terminal_handle: lease.terminalHandle } : {}),
-      liveness: terminalResourceLiveness(lease)
+      liveness
     })
     if (lease.role === 'worker') {
-      resources.push(terminalCleanupResource(lease, task?.title ?? 'Worker'))
+      resources.push(terminalCleanupResource(lease, task?.title ?? 'Worker', liveness))
     }
   }
 
@@ -219,6 +221,9 @@ function coordinatorResource(input: MaestroRunResourceProjectionInput): MaestroR
         lease.coordinatorGeneration === input.run.consumer_generation &&
         (!input.run.coordinator_handle || lease.terminalHandle === input.run.coordinator_handle)
     )
+  const liveness = currentLease
+    ? (input.terminalLiveness.get(currentLease.id) ?? 'unverifiable')
+    : undefined
   return {
     kind: 'coordinator',
     reference: `coordinator:${input.run.id}:g${input.run.consumer_generation}`,
@@ -238,7 +243,7 @@ function coordinatorResource(input: MaestroRunResourceProjectionInput): MaestroR
           ? terminalResourceState(currentLease)
           : 'unverifiable',
     ...(currentLease?.terminalHandle ? { terminal_handle: currentLease.terminalHandle } : {}),
-    ...(currentLease ? { liveness: terminalResourceLiveness(currentLease) } : {})
+    ...(liveness ? { liveness } : {})
   }
 }
 

@@ -1,5 +1,8 @@
-import { MANAGED_CLI_CONTEXT_ENV, type ManagedCliContext } from '../../shared/managed-cli-context'
-import { managedCliContextToEnv } from '../../shared/managed-cli-context'
+import {
+  MANAGED_CLI_CONTEXT_ENV,
+  managedCliContextToEnv,
+  type ManagedCliContext
+} from '../../shared/managed-cli-context'
 
 const MANAGED_CLI_CONTEXT_ENV_KEYS = new Set(Object.values(MANAGED_CLI_CONTEXT_ENV))
 

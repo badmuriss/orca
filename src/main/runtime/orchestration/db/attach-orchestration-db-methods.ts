@@ -41,6 +41,7 @@ import { attachOrchestrationReset } from './reset/orchestration-reset'
 import { attachRunBinding } from './runs/run-binding'
 import { attachRunCoordinatorMailRouting } from './runs/run-coordinator-mail-routing'
 import { attachRunCreate } from './runs/run-create'
+import { attachRunCompletion } from './runs/run-completion'
 import { attachRunDelivery } from './runs/run-delivery'
 import { attachRunLookup } from './runs/run-lookup'
 import { attachLegacyCoordinatorMailTakeover } from './runs/legacy-coordinator-mail-takeover'
@@ -99,6 +100,7 @@ export function attachOrchestrationDbMethods(ctor: { prototype: object }): void 
   attachLegacyQuestionLookup(ctor)
   attachLegacyReplyOperation(ctor)
   attachRunCreate(ctor)
+  attachRunCompletion(ctor)
   attachRunBinding(ctor)
   attachRunLookup(ctor)
   attachRunCoordinatorMailRouting(ctor)

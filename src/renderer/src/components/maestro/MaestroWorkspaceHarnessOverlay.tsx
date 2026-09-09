@@ -26,6 +26,8 @@ import {
   type MaestroRunProgressPresentation
 } from './maestro-run-progress-presentation'
 import { maestroStateTone } from './maestro-window-model'
+import { maestroRunTechnicalEntries } from './maestro-run-technical-entries'
+import { MaestroRunCompletionSummary } from './MaestroRunCompletionSummary'
 
 type OverlayProps = {
   progress: MaestroRunProgressPresentation
@@ -47,12 +49,12 @@ export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.E
         'Run progress'
       )
   const state = humanProgress
-    ? humanProgress.execution.state
+    ? (humanProgress.completion?.state ?? humanProgress.execution.state)
     : legacyProgress
       ? legacyProgress.summary.state
       : 'outcome_unknown'
   const stateLabel = humanProgress
-    ? V2_STATE_LABELS[humanProgress.execution.state]()
+    ? V2_STATE_LABELS[humanProgress.completion?.state ?? humanProgress.execution.state]()
     : legacyProgress
       ? legacyStateLabel(legacyProgress)
       : V2_STATE_LABELS.outcome_unknown()
@@ -76,7 +78,11 @@ export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.E
         <span className="shrink-0 text-[10px] text-muted-foreground">{stateLabel}</span>
         {urgentReviews > 0 ? (
           <Badge variant="outline" className="shrink-0">
-            {urgentReviews} review
+            {translate(
+              'auto.components.maestro.MaestroWorkspaceHarnessOverlay.reviewItems',
+              '{{value0}} review',
+              { value0: urgentReviews }
+            )}
           </Badge>
         ) : null}
         {urgent ? <span className="sr-only">{stateLabel}</span> : null}
@@ -115,6 +121,7 @@ export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.E
   const rows = humanProgress ? humanProgressRows(humanProgress) : null
   const resourceRows = humanProgress ? humanResourceRows(humanProgress) : []
   const compactDetail =
+    humanProgress?.completion?.summary ??
     rows?.blocked[0]?.detail ??
     rows?.current[0]?.detail ??
     rows?.recent[0]?.detail ??
@@ -155,7 +162,11 @@ export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.E
         </Badge>
         {urgentReviews > 0 ? (
           <Badge variant="outline" className="shrink-0">
-            {urgentReviews} review
+            {translate(
+              'auto.components.maestro.MaestroWorkspaceHarnessOverlay.reviewItems',
+              '{{value0}} review',
+              { value0: urgentReviews }
+            )}
           </Badge>
         ) : null}
         <RunPanelControl
@@ -178,23 +189,11 @@ export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.E
     )
   }
 
-  const technicalEntries = humanProgress
-    ? [
-        { label: 'Run', value: humanProgress.technical.run_id },
-        { label: 'Host', value: humanProgress.technical.execution_host_id },
-        { label: 'Workspace', value: humanProgress.technical.workspace_key },
-        { label: 'Revision', value: String(humanProgress.technical.revision) },
-        ...(inspectedReference ? [{ label: 'Reference', value: inspectedReference }] : [])
-      ]
-    : legacyProgress
-      ? [
-          { label: 'Run', value: legacyProgress.authority.runId },
-          { label: 'Host', value: legacyProgress.authority.workspace.executionHostId },
-          { label: 'Workspace', value: legacyProgress.authority.workspace.workspaceKey },
-          { label: 'Revision', value: String(legacyProgress.authority.revision) },
-          ...(inspectedReference ? [{ label: 'Reference', value: inspectedReference }] : [])
-        ]
-      : []
+  const technicalEntries = maestroRunTechnicalEntries({
+    humanProgress,
+    legacyProgress,
+    inspectedReference
+  })
 
   return (
     <aside
@@ -235,7 +234,12 @@ export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.E
         {humanProgress?.deliverables ? (
           <div className="space-y-1.5">
             <div className="flex items-baseline justify-between gap-3 text-[11px]">
-              <span className="font-medium text-foreground">Deliverable readiness</span>
+              <span className="font-medium text-foreground">
+                {translate(
+                  'auto.components.maestro.MaestroWorkspaceHarnessOverlay.deliverableReadiness',
+                  'Deliverable readiness'
+                )}
+              </span>
               <span className="tabular-nums text-muted-foreground">
                 {humanProgress.deliverables.completed}/{humanProgress.deliverables.total}
               </span>
@@ -245,11 +249,22 @@ export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.E
         ) : null}
         {humanProgress?.operational_reliability ? (
           <p className="text-[11px] text-muted-foreground">
-            <span className="font-medium text-foreground">Reliability</span>{' '}
-            {humanProgress.operational_reliability.successful} successful ·{' '}
-            {humanProgress.operational_reliability.failed} failed ·{' '}
-            {humanProgress.operational_reliability.superseded} superseded ·{' '}
-            {humanProgress.operational_reliability.unverifiable} unverifiable
+            <span className="font-medium text-foreground">
+              {translate(
+                'auto.components.maestro.MaestroWorkspaceHarnessOverlay.reliability',
+                'Reliability'
+              )}
+            </span>{' '}
+            {translate(
+              'auto.components.maestro.MaestroWorkspaceHarnessOverlay.reliabilitySummary',
+              '{{value0}} successful · {{value1}} failed · {{value2}} superseded · {{value3}} unverifiable',
+              {
+                value0: humanProgress.operational_reliability.successful,
+                value1: humanProgress.operational_reliability.failed,
+                value2: humanProgress.operational_reliability.superseded,
+                value3: humanProgress.operational_reliability.unverifiable
+              }
+            )}
           </p>
         ) : null}
         <div className="flex items-baseline justify-between gap-3">
@@ -270,6 +285,9 @@ export function MaestroWorkspaceHarnessOverlay(props: OverlayProps): React.JSX.E
       <div className="mt-3 space-y-3">
         {humanProgress && rows ? (
           <>
+            {humanProgress.completion ? (
+              <MaestroRunCompletionSummary completion={humanProgress.completion} />
+            ) : null}
             <RunProgressSection
               label={translate(
                 'auto.components.maestro.MaestroWorkspaceHarnessOverlay.runResources',

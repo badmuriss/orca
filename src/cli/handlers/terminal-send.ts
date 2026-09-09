@@ -24,6 +24,7 @@ export const terminalSendHandler: CommandHandler = async ({ flags, client, cwd, 
     }
   }
   const promptCandidate = !!text && enter && !interrupt
+  const promptDeliveryCandidate = promptCandidate && !leaseInput
   const retryRequest = readRetryRequestFlag(flags)
   const waitSubmitSeconds = getOptionalPositiveIntegerFlag(flags, 'wait-submit')
   if ((retryRequest || waitSubmitSeconds) && !promptCandidate) {
@@ -38,7 +39,7 @@ export const terminalSendHandler: CommandHandler = async ({ flags, client, cwd, 
   const waitSubmitMs = waitSubmitSeconds ? waitSubmitSeconds * 1000 : undefined
   let promptDeliverySupported = false
   let promptDeliveryRuntimeId: string | null = null
-  if (promptCandidate) {
+  if (promptDeliveryCandidate) {
     const status = await client.getCliStatus()
     if (!status.result.runtime.reachable) {
       throw new RuntimeClientError(
@@ -83,14 +84,14 @@ export const terminalSendHandler: CommandHandler = async ({ flags, client, cwd, 
         ...(retryRequest ? { orchestrationRequestId: retryRequest } : {}),
         ...(waitSubmitMs ? { timeoutMs: waitSubmitMs + 10_000 } : {})
       }
-    : promptCandidate
+    : promptDeliveryCandidate
       ? { legacyTerminalPrompt: true as const }
       : undefined
   const result = options
     ? await client.call<TerminalSendResult>('terminal.send', params, options)
     : await client.call<TerminalSendResult>('terminal.send', params)
   const missingPromptReceipt =
-    promptCandidate && result.result.send.accepted && !result.result.send.prompt
+    promptDeliveryCandidate && result.result.send.accepted && !result.result.send.prompt
   if (missingPromptReceipt && promptDeliverySupported) {
     throw attachUnverifiedTerminalPromptRecovery(
       new RuntimeClientError(

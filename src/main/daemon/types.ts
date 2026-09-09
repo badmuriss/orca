@@ -22,6 +22,8 @@ import type {
   AgentSessionSurfaceBinding
 } from '../../shared/agent-session-host-authority'
 import type * as HistorySeedProtocol from './terminal-history-seed-transfer-protocol'
+import type { KillRequest } from './daemon-kill-protocol'
+export type { KillRequest } from './daemon-kill-protocol'
 export type { TerminalModes } from './terminal-modes'
 import type { TerminalSnapshot } from './terminal-snapshot'
 export type { TerminalSnapshot } from './terminal-snapshot'
@@ -160,16 +162,6 @@ export type SetSessionBackgroundRequest = {
   payload: {
     sessionId: string
     background: boolean
-  }
-}
-
-export type KillRequest = {
-  id: string
-  type: 'kill'
-  payload: {
-    sessionId: string
-    immediate?: boolean
-    expectedIncarnationId?: string
   }
 }
 

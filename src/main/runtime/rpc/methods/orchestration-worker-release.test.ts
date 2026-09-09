@@ -247,7 +247,7 @@ describe('orchestration worker release', () => {
   })
 
   it.each(['stopped', 'abandoned'] as const)(
-    'retains a %s worker without closing a process',
+    'releases an exact %s worker terminal',
     async (state) => {
       setup()
       const { dispatchId } = await startWorker()
@@ -261,11 +261,11 @@ describe('orchestration worker release', () => {
 
       await expect(
         call('orchestration.workerRelease', { dispatch: dispatchId })
-      ).resolves.toMatchObject({ state: 'retained', reason: 'identity_unproven' })
-      expect(runtime.closeTerminal).not.toHaveBeenCalled()
+      ).resolves.toMatchObject({ state: 'released' })
+      expect(runtime.closeTerminal).toHaveBeenCalledWith('term_worker')
       expect(db.getWorkerTerminalResourceByOwner(dispatchId)).toMatchObject({
-        ownership_state: 'owned',
-        release_state: 'not_requested'
+        ownership_state: 'released',
+        release_state: 'released'
       })
     }
   )
@@ -812,7 +812,7 @@ describe('orchestration worker release', () => {
     })
   })
 
-  it('reports abandoned workers as retained instead of reclaimable', async () => {
+  it('reports abandoned workers as retained until explicit release', async () => {
     setup()
     const { dispatchId } = await startWorker()
     await call('orchestration.workerAbandon', { dispatch: dispatchId })
@@ -827,11 +827,10 @@ describe('orchestration worker release', () => {
     await expect(
       call('orchestration.workerRelease', { dispatch: dispatchId })
     ).resolves.toMatchObject({
-      state: 'retained',
-      reason: 'identity_unproven',
-      processAction: 'none'
+      state: 'released',
+      processAction: 'closed_agent_terminal'
     })
-    expect(runtime.closeTerminal).not.toHaveBeenCalled()
+    expect(runtime.closeTerminal).toHaveBeenCalledWith('term_worker')
   })
 
   it('worker-show exposes the terminal resource', async () => {

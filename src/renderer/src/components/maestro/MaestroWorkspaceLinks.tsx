@@ -303,7 +303,10 @@ export const MaestroWorkspaceLinks = memo(function MaestroWorkspaceLinks({
             data-link-selected={incident ? 'true' : undefined}
             aria-hidden
           >
-            <title>{presentation.label ?? 'Coordinates'}</title>
+            <title>
+              {presentation.label ??
+                translate('auto.components.maestro.links.coordinates', 'Coordinates')}
+            </title>
             <MaestroWorkspaceLinkArtwork
               kind={link.kind}
               geometry={geometry}

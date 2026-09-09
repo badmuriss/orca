@@ -1,4 +1,3 @@
-// @ts-nocheck -- extends the mechanically split runtime class chain with OMR coordination.
 import type { ExecutionHostId } from '../../shared/execution-host'
 import { parseExecutionHostId } from '../../shared/execution-host'
 import type { MaestroBrowserSurfaceReceipt } from '../../shared/maestro-browser-surface'
@@ -16,6 +15,8 @@ import {
   resolveWorktreeRemovalRepoOwner
 } from '../worktree-removal-repo-owner'
 import { createHeadlessMaestroAnnotationSnapshot } from './maestro-workspace-headless-annotation'
+import { getHeadlessMobileSessionGroupId } from './mobile-session-layout-projection'
+import type { RuntimeCommandSurfaceHost } from './orca-runtime-core'
 import {
   createMaestroBrowserSurfaceReconciliationHost,
   reconcileMaestroBrowserSurfaces
@@ -71,7 +72,7 @@ export class OrcaRuntimeWithOmr extends OrcaRuntimeWithResolveWaiter {
       filePath: command.filePath,
       relativePath: command.relativePath,
       title: command.title ?? 'Workspace note',
-      fallbackGroupId: this.getHeadlessMobileSessionGroupId(command.worktreeId)
+      fallbackGroupId: getHeadlessMobileSessionGroupId(command.worktreeId)
     })
     this.mobileSessionTabsByWorktree.set(command.worktreeId, result.snapshot)
     this.emitMobileSessionTabsSnapshot(result.snapshot)
@@ -84,7 +85,7 @@ export class OrcaRuntimeWithOmr extends OrcaRuntimeWithResolveWaiter {
     }
     this.browserSurfaceReconciliation = reconcileMaestroBrowserSurfaces(
       this._orchestrationDb,
-      createMaestroBrowserSurfaceReconciliationHost(this)
+      createMaestroBrowserSurfaceReconciliationHost(this as RuntimeCommandSurfaceHost<this>)
     )
       .then(() => undefined)
       .catch((error) => {
@@ -184,7 +185,7 @@ export class OrcaRuntimeWithOmr extends OrcaRuntimeWithResolveWaiter {
     if (worktrees.some((worktree) => areWorktreePathsEqual(worktree.path, target.path))) {
       throw new Error(`Worktree remains registered after removal: ${target.path}`)
     }
-    if (!(await isRuntimeWorktreePathMissing(repo, target.path, localOptions))) {
+    if (!(await isRuntimeWorktreePathMissing(executionHostId, target.path, localOptions))) {
       throw new Error(`Worktree absence is unverifiable after removal: ${target.path}`)
     }
     if (resolveWorktreeRemovalMetadata(store, target.repoId, target.id, executionHostId)) {

@@ -312,6 +312,35 @@ describe('MaestroWorkspaceHarnessOverlay', () => {
     expect(screen.getByText(/Cleanup is unverifiable/)).not.toBeNull()
   })
 
+  it('presents explicit completion without hiding waived work or cleanup health', () => {
+    renderOverlay({
+      progress: {
+        ...activeProgress,
+        completion: {
+          state: 'completed',
+          summary: 'Accepted the verified implementation.',
+          evidence: ['Focused suite passed.'],
+          waivers: [{ task_id: 'task_next_id', reason: 'Deferred to a follow-up.' }],
+          completed_at: '2026-09-08T12:00:00.000Z',
+          completed_by: { handle: 'term_coord', generation: 7 }
+        },
+        cleanup_health: {
+          state: 'unverifiable',
+          count: 1,
+          warning: 'One resource remains unverifiable.'
+        }
+      }
+    })
+
+    expect(screen.getByText('Completed')).not.toBeNull()
+    expect(screen.getByText('Accepted the verified implementation.')).not.toBeNull()
+    expect(screen.getByText('Completed by term_coord, coordinator generation 7')).not.toBeNull()
+    expect(screen.getByText('Focused suite passed.')).not.toBeNull()
+    expect(screen.getByText(/Deferred to a follow-up/)).not.toBeNull()
+    expect(screen.getByText('One resource remains unverifiable.')).not.toBeNull()
+    expect(screen.getByText('1 of 3 tasks')).not.toBeNull()
+  })
+
   it('separates deliverable readiness from operational reliability', () => {
     renderOverlay({
       progress: {

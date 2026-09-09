@@ -71,7 +71,7 @@ describe('TabsSlice', () => {
 
       const result = store.getState().reconcileWorktreeTabModel(WT)
 
-      expect(result.renderableTabCount).toBe(1)
+      expect(result.renderableTabCount).toBe(0)
       const maestro = store.getState().unifiedTabsByWorktree[WT][0]
       expect(maestro).toMatchObject({ contentType: 'maestro', systemRole: 'workspace-maestro' })
       expect(store.getState().groupsByWorktree[WT][0].tabOrder).toEqual([maestro.id])
@@ -114,7 +114,7 @@ describe('TabsSlice', () => {
       expect(state.unifiedTabsByWorktree[WT].map((tab) => tab.entityId)).toContain(
         'reconnecting-terminal'
       )
-      expect(result.renderableTabCount).toBe(2)
+      expect(result.renderableTabCount).toBe(1)
     })
 
     it('restores a marker-only terminal when the host loss omitted its unified row', () => {
@@ -143,7 +143,7 @@ describe('TabsSlice', () => {
       const result = store.getState().reconcileWorktreeTabModel(WT)
       const state = store.getState()
 
-      expect(result.renderableTabCount).toBe(2)
+      expect(result.renderableTabCount).toBe(1)
       expect(state.unifiedTabsByWorktree[WT]?.[0]).toMatchObject({
         contentType: 'maestro',
         systemRole: 'workspace-maestro'
@@ -293,7 +293,7 @@ describe('TabsSlice', () => {
       const result = store.getState().reconcileWorktreeTabModel(WT)
       const state = store.getState()
 
-      expect(result.renderableTabCount).toBe(3)
+      expect(result.renderableTabCount).toBe(2)
       expect(result.activeRenderableTabId).toBe('simulator-1')
       const maestroId = state.unifiedTabsByWorktree[WT][0].id
       expect(state.unifiedTabsByWorktree[WT].map((tab) => tab.id)).toEqual([
@@ -378,7 +378,7 @@ describe('TabsSlice', () => {
       const maestroId = state.unifiedTabsByWorktree[WT][0].id
 
       expect(result).toEqual({
-        renderableTabCount: 3,
+        renderableTabCount: 2,
         activeRenderableTabId: 'structured-session-1'
       })
       expect(state.unifiedTabsByWorktree[WT].map((tab) => tab.id)).toEqual([
@@ -470,7 +470,7 @@ describe('TabsSlice', () => {
       const result = store.getState().reconcileWorktreeTabModel(WT)
       const state = store.getState()
 
-      expect(result.renderableTabCount).toBe(2)
+      expect(result.renderableTabCount).toBe(1)
       expect(result.activeRenderableTabId).toBe('terminal-1')
       const maestroId = state.unifiedTabsByWorktree[WT][0].id
       expect(state.groupsByWorktree[WT]).toEqual([
@@ -518,7 +518,7 @@ describe('TabsSlice', () => {
       const restoredGroup = state.groupsByWorktree[WT]?.[0]
       const maestroId = state.unifiedTabsByWorktree[WT][0].id
 
-      expect(result.renderableTabCount).toBe(2)
+      expect(result.renderableTabCount).toBe(1)
       expect(result.activeRenderableTabId).toBe(runtimeTerminalId)
       expect(restoredTab).toMatchObject({
         id: runtimeTerminalId,
@@ -580,7 +580,7 @@ describe('TabsSlice', () => {
       const result = store.getState().reconcileWorktreeTabModel(WT)
       const restoredGroup = store.getState().groupsByWorktree[WT]?.[0]
 
-      expect(result.renderableTabCount).toBe(3)
+      expect(result.renderableTabCount).toBe(2)
       expect(result.activeRenderableTabId).toBe(secondTerminalId)
       expect(restoredGroup?.activeTabId).toBe(secondTerminalId)
     })
@@ -592,7 +592,7 @@ describe('TabsSlice', () => {
         .createTab(WT, undefined, undefined, { pendingActivationSpawn: true })
       store.getState().updateTabPtyId(tab.id, 'pty-died')
       // First reconcile promotes the legacy runtime tab into the unified model.
-      expect(store.getState().reconcileWorktreeTabModel(WT).renderableTabCount).toBe(2)
+      expect(store.getState().reconcileWorktreeTabModel(WT).renderableTabCount).toBe(1)
 
       // The newborn PTY exits: pty-connection clears the binding but keeps the pane.
       store.getState().clearTabPtyId(tab.id, 'pty-died')
@@ -601,7 +601,7 @@ describe('TabsSlice', () => {
       expect(clearedTab?.ptyId ?? null).toBeNull()
 
       const result = store.getState().reconcileWorktreeTabModel(WT)
-      expect(result.renderableTabCount).toBe(2)
+      expect(result.renderableTabCount).toBe(1)
       expect(result.activeRenderableTabId).toBe(tab.id)
     })
   })

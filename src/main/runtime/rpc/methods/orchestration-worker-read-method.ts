@@ -1,18 +1,16 @@
 import { z } from 'zod'
-import {
-  ORCHESTRATION_WORKER_READ_SOURCES,
-  type OrchestrationWorkerReadResult
-} from '../../../../shared/orchestration-worker-output'
+import { ORCHESTRATION_WORKER_READ_SOURCES } from '../../../../shared/orchestration-worker-output'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import { defineMethod, type RpcMethod } from '../core'
 import { OptionalFiniteNumber, requiredString } from '../schemas'
 import {
   inspectWorkerTerminal,
+  projectFleetWorker,
   resolvePinnedFederatedServer
 } from './orchestration/worker/worker-observation'
 import { readArchivedWorkerOutput } from './orchestration/worker/worker-archive-read'
-import { readLegacyFederatedTerminal } from './orchestration/worker/worker-legacy-federated-read'
 import { readExactWorkerOutput } from './orchestration/worker/worker-output'
+import { readFederatedWorkerOutput } from './orchestration/federation/federated-worker-read'
 
 const WorkerReadParams = z.object({
   dispatch: requiredString('Missing --dispatch'),
@@ -30,38 +28,16 @@ export const WORKER_READ_METHOD: RpcMethod = defineMethod({
     const federated = db.getFederatedDispatch(params.dispatch)
     if (federated) {
       const server = resolvePinnedFederatedServer(runtime, federated)
-      try {
-        const remote = (await runtime.callOrchestrationWorkerServer(
-          server.environmentId,
-          'orchestration.federationReadOutput',
-          {
-            dispatchId: params.dispatch,
-            cursor: params.cursor,
-            limit: params.limit,
-            source: params.source
-          },
-          15_000
-        )) as { runtimeEpoch: string; output: OrchestrationWorkerReadResult }
-        return {
-          ...remote.output,
-          server: { environmentId: server.environmentId, name: server.name },
-          remoteRuntimeEpoch: remote.runtimeEpoch
-        }
-      } catch (error) {
-        if (!(error instanceof OrchestrationError) || error.code !== 'method_not_found') {
-          throw error
-        }
-        return readLegacyFederatedTerminal({
-          runtime,
-          server,
-          federated,
-          workerState: db.getWorkerDispatch(params.dispatch)?.state ?? 'unknown',
-          dispatchId: params.dispatch,
-          source: params.source,
-          cursor: params.cursor,
-          limit: params.limit
-        })
-      }
+      return readFederatedWorkerOutput({
+        runtime,
+        db,
+        server,
+        federated,
+        dispatchId: params.dispatch,
+        source: params.source,
+        cursor: params.cursor,
+        limit: params.limit
+      })
     }
     const dispatch = db.getDispatchContextById(params.dispatch)
     const worker = db.getWorkerDispatch(params.dispatch)
@@ -84,7 +60,7 @@ export const WORKER_READ_METHOD: RpcMethod = defineMethod({
         resource.release_state === 'releasing'
           ? await inspectWorkerTerminal(runtime, db, params.dispatch)
           : null
-      return readArchivedWorkerOutput({
+      const archived = await readArchivedWorkerOutput({
         db,
         dispatchId: params.dispatch,
         workerState: worker?.state ?? 'unsupervised',
@@ -97,6 +73,7 @@ export const WORKER_READ_METHOD: RpcMethod = defineMethod({
         cursor: params.cursor,
         limit: params.limit
       })
+      return { ...archived, projection: projectFleetWorker(runtime, db, params.dispatch) }
     }
     const observation = await inspectWorkerTerminal(runtime, db, params.dispatch)
     if (!observation.exact) {
@@ -134,6 +111,6 @@ export const WORKER_READ_METHOD: RpcMethod = defineMethod({
         `Worker Dispatch ${params.dispatch} changed process while output was read.`
       )
     }
-    return output
+    return { ...output, projection: projectFleetWorker(runtime, db, params.dispatch) }
   }
 })

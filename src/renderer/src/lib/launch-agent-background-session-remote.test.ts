@@ -234,10 +234,7 @@ describe('launchAgentBackgroundSession remote runtime and SSH startup delivery',
       dataSidecar('\x1b]777;orca-shell-ready\x07user@remote repo % ')
       vi.advanceTimersByTime(50)
 
-      expect(mockWrite).toHaveBeenCalledWith(
-        'pty-1',
-        "codex '--dangerously-bypass-approvals-and-sandbox'\r"
-      )
+      expect(mockWrite).toHaveBeenCalledWith('pty-1', "codex '--yolo'\r")
     } finally {
       vi.useRealTimers()
     }
@@ -255,10 +252,7 @@ describe('launchAgentBackgroundSession remote runtime and SSH startup delivery',
       dataSidecar('user@remote repo % ')
       vi.advanceTimersByTime(50)
 
-      expect(mockWrite).toHaveBeenCalledWith(
-        'pty-1',
-        "codex '--dangerously-bypass-approvals-and-sandbox'\r"
-      )
+      expect(mockWrite).toHaveBeenCalledWith('pty-1', "codex '--yolo'\r")
     } finally {
       vi.useRealTimers()
     }

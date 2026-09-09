@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import type { WorkspaceCanvasManualLink } from '../../../../shared/maestro-document-contract'
 import type { MaestroWorkspaceCanvasResource } from '@/hooks/useMaestroWorkspaceCanvas'
 import { maestroWorkspaceMutationKey } from './maestro-workspace-mutation-key'
@@ -42,20 +42,14 @@ export function useMaestroWorkspaceSelection({
   onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => void
 } {
   const [selection, setSelection] = useState<MaestroWorkspaceSelection>(null)
-  const selectedSurfaceKey = selection?.kind === 'surface' ? selection.surfaceKey : null
-  const selectedManualLinkId = selection?.kind === 'manual-link' ? selection.linkId : null
-
-  useEffect(() => {
-    if (selectedSurfaceKey && !surfaceKeys.includes(selectedSurfaceKey)) {
-      setSelection(null)
-    }
-  }, [selectedSurfaceKey, surfaceKeys])
-
-  useEffect(() => {
-    if (selectedManualLinkId && !manualLinks.some((link) => link.id === selectedManualLinkId)) {
-      setSelection(null)
-    }
-  }, [manualLinks, selectedManualLinkId])
+  const selectedSurfaceKey =
+    selection?.kind === 'surface' && surfaceKeys.includes(selection.surfaceKey)
+      ? selection.surfaceKey
+      : null
+  const selectedManualLinkId =
+    selection?.kind === 'manual-link' && manualLinks.some((link) => link.id === selection.linkId)
+      ? selection.linkId
+      : null
 
   const deleteManualLink = useCallback(
     (linkId: string): void => {

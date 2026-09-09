@@ -305,7 +305,8 @@ export function projectWorktreeTabModelReconciliation(
   const finalActiveGroupId = patch.activeGroupIdByWorktree?.[worktreeId] ?? nextActiveGroupId
   return {
     patch,
-    renderableTabCount: finalTabs.length,
+    // The fixed Maestro tab is chrome, not proof that requested terminal/editor work exists.
+    renderableTabCount: finalTabs.filter((tab) => tab.contentType !== 'maestro').length,
     activeRenderableTabId:
       finalGroups.find((group) => group.id === finalActiveGroupId)?.activeTabId ??
       finalGroups.find((group) => group.activeTabId !== null)?.activeTabId ??

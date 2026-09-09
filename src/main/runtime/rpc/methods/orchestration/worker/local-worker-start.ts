@@ -70,8 +70,8 @@ export async function startLocalWorker(args: {
     coordinatorGeneration: run.consumer_generation,
     hasDurableMutation: Boolean(orchestrationMutation)
   })
-  const { requestedWorktree, creationWorktree, agent, agentDiscovery, launch, retryPreflight } =
-    prepared
+  const { requestedWorktree, creationWorktree, agent, agentDiscovery } = prepared
+  const { launch, retryPreflight, terminalLeaseRetryOf } = prepared
   let { resolvedWorktree } = prepared
 
   const started = beginLocalWorkerDispatch({
@@ -164,7 +164,7 @@ export async function startLocalWorker(args: {
       terminalAuthority,
       retryPreflight,
       effects,
-      retryOf: params.retryOf,
+      retryOf: terminalLeaseRetryOf,
       dispatchId: started.dispatch.id,
       worktreeId: resolvedWorktree.id,
       setupState: setupReceipt.state,
@@ -185,7 +185,7 @@ export async function startLocalWorker(args: {
       canDispatchSubWorkers: started.dispatch.depth < runtime.getNestedWorkerMaxDepth(),
       coordinatorGeneration: run.consumer_generation,
       dispatchId: started.dispatch.id,
-      retryOf: params.retryOf,
+      retryOf: terminalLeaseRetryOf,
       mutation: orchestrationMutation,
       preflightExecutable: prepared.preflightExecutable,
       retryResourceId: retryPreflight?.resourceId,

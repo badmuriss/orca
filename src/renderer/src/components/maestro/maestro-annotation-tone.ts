@@ -7,38 +7,44 @@ type MaestroAnnotationToneEntry = { tone: MaestroAnnotationTone; label: string; 
 const ANNOTATION_TONE_ORDER: readonly {
   tone: MaestroAnnotationTone
   labelKey: string
-  label: string
-  hint: string
+  fallbackLabel: string
+  hintKey: string
+  fallbackHint: string
 }[] = [
   {
     tone: 'observation',
     labelKey: 'auto.components.maestro.maestro.annotation.tone.39ef8efa3f',
-    label: 'Observation',
-    hint: 'Context worth keeping, nothing pending'
+    fallbackLabel: 'Observation',
+    hintKey: 'auto.components.maestro.maestro.annotation.tone.observationHint',
+    fallbackHint: 'Context worth keeping, nothing pending'
   },
   {
     tone: 'highlight',
     labelKey: 'auto.components.maestro.maestro.annotation.tone.c87ad9fa13',
-    label: 'Post-it',
-    hint: 'Pinned for attention'
+    fallbackLabel: 'Post-it',
+    hintKey: 'auto.components.maestro.maestro.annotation.tone.highlightHint',
+    fallbackHint: 'Pinned for attention'
   },
   {
     tone: 'decision',
     labelKey: 'auto.components.maestro.maestro.annotation.tone.2af310a116',
-    label: 'Decision',
-    hint: 'Settled, act on it'
+    fallbackLabel: 'Decision',
+    hintKey: 'auto.components.maestro.maestro.annotation.tone.decisionHint',
+    fallbackHint: 'Settled, act on it'
   },
   {
     tone: 'warning',
     labelKey: 'auto.components.maestro.maestro.annotation.tone.d052036308',
-    label: 'Warning',
-    hint: 'Needs a human before it moves'
+    fallbackLabel: 'Warning',
+    hintKey: 'auto.components.maestro.maestro.annotation.tone.warningHint',
+    fallbackHint: 'Needs a human before it moves'
   },
   {
     tone: 'blocker',
     labelKey: 'auto.components.maestro.maestro.annotation.tone.b4f98f49a1',
-    label: 'Blocker',
-    hint: 'Work is stopped here'
+    fallbackLabel: 'Blocker',
+    hintKey: 'auto.components.maestro.maestro.annotation.tone.blockerHint',
+    fallbackHint: 'Work is stopped here'
   }
 ]
 
@@ -46,8 +52,8 @@ const ANNOTATION_TONE_ORDER: readonly {
 export function maestroAnnotationTones(): MaestroAnnotationToneEntry[] {
   return ANNOTATION_TONE_ORDER.map((entry) => ({
     tone: entry.tone,
-    label: translate(entry.labelKey, entry.label),
-    hint: entry.hint
+    label: translate(entry.labelKey, entry.fallbackLabel),
+    hint: translate(entry.hintKey, entry.fallbackHint)
   }))
 }
 

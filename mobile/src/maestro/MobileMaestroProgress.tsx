@@ -145,6 +145,7 @@ export function MobileMaestroProgressDetails({
         )}
         <Text style={styles.countsLabel}>{model.countsLabel}</Text>
       </View>
+      <ProgressSection title="Run completion" entries={model.runCompletion} styles={styles} />
       <ProgressSection title="Current work" entries={model.current} styles={styles} />
       <ProgressSection title="Recently completed" entries={model.completed} styles={styles} />
       <ProgressSection title="Blocked" entries={model.blocked} styles={styles} />

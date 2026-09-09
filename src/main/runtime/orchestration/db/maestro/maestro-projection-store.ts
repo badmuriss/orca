@@ -227,12 +227,36 @@ function resolveSnapshot(
     throw new Error('AgentGraphView snapshot revision is stale for this Run.')
   }
   if (incoming.revision === existing.view.revision) {
-    if (JSON.stringify(incoming) !== JSON.stringify(existing.view)) {
+    if (
+      JSON.stringify(incoming) !== JSON.stringify(existing.view) &&
+      !sameProjectionContentAcrossCoordinatorTakeover(existing.view, incoming)
+    ) {
       throw new Error('AgentGraphView revision was reused with different projection content.')
     }
-    return existing.view
+    return incoming
   }
   return incoming
+}
+
+function sameProjectionContentAcrossCoordinatorTakeover(
+  existing: AgentGraphView,
+  incoming: AgentGraphView
+): boolean {
+  if (
+    existing.run_id !== incoming.run_id ||
+    existing.coordinator.generation === incoming.coordinator.generation
+  ) {
+    return false
+  }
+  const normalizedIncoming = {
+    ...incoming,
+    coordinator: existing.coordinator,
+    workspace_scope: {
+      ...incoming.workspace_scope,
+      coordinator_generation: existing.workspace_scope.coordinator_generation
+    }
+  }
+  return JSON.stringify(normalizedIncoming) === JSON.stringify(existing)
 }
 
 function sameBootstrapBinding(left: AgentGraphView, right: AgentGraphView): boolean {

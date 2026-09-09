@@ -15,7 +15,10 @@ import { exposeWorkerTerminalResource } from './worker-release-completion'
 import { showFederatedWorker } from '../federation/federated-worker-show'
 
 import { WORKER_READ_METHOD } from '../../orchestration-worker-read-method'
-const WorkerDispatchParams = z.object({ dispatch: requiredString('Missing --dispatch') })
+const WorkerDispatchParams = z.object({
+  dispatch: requiredString('Missing --dispatch'),
+  run: z.string().min(1).optional()
+})
 
 export const ORCHESTRATION_WORKER_CONTROL_METHODS: RpcMethod[] = [
   defineMethod({
@@ -29,6 +32,13 @@ export const ORCHESTRATION_WORKER_CONTROL_METHODS: RpcMethod[] = [
         throw new OrchestrationError(
           'dispatch_not_found',
           `Worker Dispatch ${params.dispatch} was not found.`
+        )
+      }
+      if (params.run && dispatch.run_id !== params.run) {
+        throw new OrchestrationError(
+          'request_mismatch',
+          `Worker Dispatch ${params.dispatch} belongs to Run ${dispatch.run_id}, not requested Run ${params.run}.`,
+          { dispatchId: params.dispatch, expectedRunId: params.run, observedRunId: dispatch.run_id }
         )
       }
       const federated = db.getFederatedDispatch(params.dispatch)

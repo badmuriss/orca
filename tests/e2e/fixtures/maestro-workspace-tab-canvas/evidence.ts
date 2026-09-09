@@ -116,7 +116,7 @@ export async function createCanvasResource(
     .dispatchEvent('click')
 }
 
-export async function createAnnotation(page: Page, tone: string, text: string): Promise<void> {
+export async function createAnnotation(page: Page, text: string): Promise<void> {
   const surfaces = page.locator('[data-maestro-workspace-surface]')
   const before = await surfaces.count()
   const existingKeys = await surfaces.evaluateAll((nodes) =>
@@ -137,20 +137,17 @@ export async function createAnnotation(page: Page, tone: string, text: string): 
     })
     .toBeGreaterThanOrEqual(0)
   const annotation = surfaces.nth(annotationIndex)
-  await annotation.getByRole('button', { name: 'Rename tab' }).click()
-  const inspector = page.locator('aside').filter({ has: page.getByLabel('Tab title') })
-  await inspector.getByLabel('Tab title').fill(text)
-  await inspector.getByRole('button', { name: 'Rename', exact: true }).click()
-  await page.locator('aside').getByRole('button', { name: 'Close', exact: true }).click()
+  await page.getByLabel('Fit resources').click()
+  const rename = annotation.getByRole('button', { name: 'Rename tab' })
+  await expect(rename).toBeVisible()
+  await rename.click()
+  const titleInput = annotation.getByRole('textbox', { name: 'Tab title' })
+  await titleInput.fill(text)
+  await titleInput.press('Enter')
+  await expect(titleInput).toBeHidden()
   const editor = annotation.getByLabel('Edit annotation')
   await editor.fill(`${text}\n\nEditable directly in Canvas.`)
-  await annotation
-    .getByRole('button', { name: new RegExp(`^Set annotation color to ${tone}$`, 'i') })
-    .click()
   await expect(annotation).toContainText('Editable directly in Canvas.', { timeout: 30_000 })
-  await expect(annotation.locator(`[data-annotation-tone="${tone.toLowerCase()}"]`)).toBeVisible({
-    timeout: 30_000
-  })
 }
 
 export async function startProofPage(): Promise<{ server: Server; url: string; decoyUrl: string }> {

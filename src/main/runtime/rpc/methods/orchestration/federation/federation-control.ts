@@ -8,7 +8,10 @@ import { mapWithConcurrency } from '../../../../../../shared/map-with-concurrenc
 import { readExactWorkerOutput } from '../worker/worker-output'
 import { describeUnconfirmedAgentStop } from '../../../../../../shared/pty-liveness-verdict'
 import { inspectRemoteAttachment, requireHomeAttachment } from './federation-attachment-observation'
-import { readRemoteAttachmentArchive } from './federated-worker-release-host'
+import {
+  readRemoteAttachmentArchive,
+  releaseRemoteAttachment
+} from './federated-worker-release-host'
 
 const FederationDispatchParams = z.object({
   dispatchId: requiredString('Missing Dispatch ID')
@@ -70,10 +73,10 @@ export const ORCHESTRATION_FEDERATION_CONTROL_METHODS: RpcMethod[] = [
           `Remote Dispatch ${params.dispatchId} was not found for this Run home.`
         )
       }
-      const release = await releaseFederatedAttachment(runtime, params.dispatchId)
+      const observation = await inspectRemoteAttachment(runtime, params.dispatchId)
+      const release = await releaseRemoteAttachment({ runtime, attachment, observation })
       const runtimeEpoch = runtime.getRuntimeId()
       return {
-        dispatchId: params.dispatchId,
         runtimeEpoch,
         servingRuntimeEpoch: runtimeEpoch,
         ...release,
@@ -298,4 +301,3 @@ function exposeRemoteAttachment(attachment: RemoteDispatchAttachmentRow) {
     residualResources: JSON.parse(attachment.residual_resources) as unknown[]
   }
 }
-import { releaseFederatedAttachment } from '../../../../orchestration/federation-lifecycle-settlement'

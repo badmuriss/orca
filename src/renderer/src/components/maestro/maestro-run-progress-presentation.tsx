@@ -159,30 +159,70 @@ export function humanProgressRows(progress: MaestroRunProgressV2): {
 
 const RESOURCE_KIND_LABELS: Record<
   NonNullable<MaestroRunProgressV2['resources']>[number]['kind'],
-  string
+  () => string
 > = {
-  coordinator: 'Coordinator',
-  task: 'Task',
-  attempt: 'Attempt',
-  dispatch: 'Dispatch',
-  provider: 'Provider',
-  terminal: 'Terminal',
-  browser: 'Browser',
-  cleanup: 'Cleanup'
+  coordinator: () =>
+    translate(
+      'auto.components.maestro.MaestroWorkspaceHarnessOverlay.resourceCoordinator',
+      'Coordinator'
+    ),
+  task: () =>
+    translate('auto.components.maestro.MaestroWorkspaceHarnessOverlay.resourceTask', 'Task'),
+  attempt: () =>
+    translate('auto.components.maestro.MaestroWorkspaceHarnessOverlay.resourceAttempt', 'Attempt'),
+  dispatch: () =>
+    translate(
+      'auto.components.maestro.MaestroWorkspaceHarnessOverlay.resourceDispatch',
+      'Dispatch'
+    ),
+  provider: () =>
+    translate(
+      'auto.components.maestro.MaestroWorkspaceHarnessOverlay.resourceProvider',
+      'Provider'
+    ),
+  terminal: () =>
+    translate(
+      'auto.components.maestro.MaestroWorkspaceHarnessOverlay.resourceTerminal',
+      'Terminal'
+    ),
+  browser: () =>
+    translate('auto.components.maestro.MaestroWorkspaceHarnessOverlay.resourceBrowser', 'Browser'),
+  cleanup: () =>
+    translate('auto.components.maestro.MaestroWorkspaceHarnessOverlay.resourceCleanup', 'Cleanup')
 }
 
 const RESOURCE_STATE_LABELS: Record<
   NonNullable<MaestroRunProgressV2['resources']>[number]['state'],
-  string
+  () => string
 > = {
-  loading: 'Loading',
-  active: 'Active',
-  input_required: 'Input required',
-  blocked: 'Blocked',
-  recovered: 'Recovered',
-  unverifiable: 'Unverifiable',
-  completed: 'Completed',
-  error: 'Error'
+  loading: () =>
+    translate('auto.components.maestro.MaestroWorkspaceHarnessOverlay.resourceLoading', 'Loading'),
+  active: () =>
+    translate('auto.components.maestro.MaestroWorkspaceHarnessOverlay.resourceActive', 'Active'),
+  input_required: () =>
+    translate(
+      'auto.components.maestro.MaestroWorkspaceHarnessOverlay.resourceInputRequired',
+      'Input required'
+    ),
+  blocked: () =>
+    translate('auto.components.maestro.MaestroWorkspaceHarnessOverlay.resourceBlocked', 'Blocked'),
+  recovered: () =>
+    translate(
+      'auto.components.maestro.MaestroWorkspaceHarnessOverlay.resourceRecovered',
+      'Recovered'
+    ),
+  unverifiable: () =>
+    translate(
+      'auto.components.maestro.MaestroWorkspaceHarnessOverlay.resourceUnverifiable',
+      'Unverifiable'
+    ),
+  completed: () =>
+    translate(
+      'auto.components.maestro.MaestroWorkspaceHarnessOverlay.resourceCompleted',
+      'Completed'
+    ),
+  error: () =>
+    translate('auto.components.maestro.MaestroWorkspaceHarnessOverlay.resourceError', 'Error')
 }
 
 export function humanResourceDetail(resource: MaestroRunResource): string {
@@ -219,10 +259,10 @@ export function humanResourceRows(progress: MaestroRunProgressV2): MaestroRunPro
       key: `resource:${resource.kind}:${resource.reference}`,
       reference: resource.surface_key ?? resource.activation_reference ?? resource.reference,
       title: resource.title,
-      workerLabel: RESOURCE_KIND_LABELS[resource.kind],
+      workerLabel: RESOURCE_KIND_LABELS[resource.kind](),
       detail: humanResourceDetail(resource),
       state: resource.state,
-      meta: RESOURCE_STATE_LABELS[resource.state],
+      meta: RESOURCE_STATE_LABELS[resource.state](),
       depth
     })
     for (const child of children.get(resource.reference) ?? []) {

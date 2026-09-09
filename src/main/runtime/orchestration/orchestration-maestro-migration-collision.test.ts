@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import Database from '../../sqlite/sync-database'
 import { OrchestrationDb } from './db'
+import { SCHEMA_VERSION } from './db/contract-constants'
 import { resolveOrchestrationMigrationStartVersion } from './orchestration-schema-version-skew'
 
 describe('Maestro and upstream migration history reconciliation', () => {
@@ -57,11 +58,15 @@ describe('Maestro and upstream migration history reconciliation', () => {
         .prepare('SELECT * FROM worker_terminal_resources WHERE id = ?')
         .get('resource_sentinel')
       expect(
-        resolveOrchestrationMigrationStartVersion(raw, lineage === 'maestro-v36' ? 36 : 38, 44)
+        resolveOrchestrationMigrationStartVersion(
+          raw,
+          lineage === 'maestro-v36' ? 36 : 38,
+          SCHEMA_VERSION
+        )
       ).toBe(lineage === 'maestro-v36' ? 30 : 38)
       raw.close()
       const migrated = new OrchestrationDb(path)
-      expect(migrated.db.pragma('user_version', { simple: true })).toBe(44)
+      expect(migrated.db.pragma('user_version', { simple: true })).toBe(SCHEMA_VERSION)
       expect(
         migrated.db.prepare('SELECT objective FROM runs WHERE id = ?').get('run_sentinel')
       ).toEqual(before)
@@ -75,6 +80,11 @@ describe('Maestro and upstream migration history reconciliation', () => {
       expect(migrated.getWorkerTerminalResource('resource_sentinel')).toMatchObject(resource!)
       expect(migrated.hasColumn('worker_terminal_resources', 'endpoint_incarnation')).toBe(true)
       expect(migrated.hasColumn('worker_terminal_resources', 'retention_owner')).toBe(true)
+      expect(
+        migrated.db
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = ?")
+          .get('trg_runs_forget_completion')
+      ).toEqual({ name: 'trg_runs_forget_completion' })
       expect(migrated.db.pragma('foreign_key_check')).toEqual([])
       expect(migrated.db.pragma('integrity_check', { simple: true })).toBe('ok')
       const finalResource = migrated.getWorkerTerminalResource('resource_sentinel')
@@ -100,7 +110,7 @@ describe('Maestro and upstream migration history reconciliation', () => {
     initial.close()
     const repaired = new OrchestrationDb(path)
     databases.push(repaired)
-    expect(repaired.db.pragma('user_version', { simple: true })).toBe(44)
+    expect(repaired.db.pragma('user_version', { simple: true })).toBe(SCHEMA_VERSION)
     expect(repaired.hasColumn('tasks', 'operational_outcome')).toBe(true)
     expect(repaired.hasColumn('tasks', 'successor_task_id')).toBe(true)
     expect(repaired.hasColumn('worker_terminal_resources', 'review_id')).toBe(true)

@@ -46,6 +46,8 @@ export type {
   WorkerReportOutcome,
   WorkerReportSettlement,
   RunRow,
+  RunCompletion,
+  RunCompletionWaiver,
   DeliveryRow,
   DeliveryStatus,
   LegacyAdoptionRow,

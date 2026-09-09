@@ -18,6 +18,7 @@ export const ORCHESTRATION_LEGACY_RUN_ID = 'run_legacy_local'
 const ORCHESTRATION_MUTATION_METHODS = new Set([
   'orchestration.runCreate',
   'orchestration.runUse',
+  'orchestration.runComplete',
   'orchestration.send',
   'orchestration.reply',
   'orchestration.taskCreate',

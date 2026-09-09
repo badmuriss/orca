@@ -1,5 +1,5 @@
 import {
-  isResumableRelease,
+  isResumableOrchestrationMutation,
   isRetryableFederatedRelease,
   isRetryableFederatedReleaseResult,
   attestFederatedReleaseReplay
@@ -139,12 +139,12 @@ export class OrchestrationMutationExecutor {
             return { disposition: row.state, row }
           })()
         : db.beginMutationReceipt(identity)
-    const resumableRelease = isResumableRelease(request.method)
+    const resumableMutation = isResumableOrchestrationMutation(request.method)
     const resumedPendingWorkerDone =
       begun.disposition === 'pending' &&
       isResumablePendingWorkerDone(request.method, params, begun.row.receipt)
     const resumedPendingMutation =
-      begun.disposition === 'pending' && (resumableRelease || resumedPendingWorkerDone)
+      begun.disposition === 'pending' && (resumableMutation || resumedPendingWorkerDone)
 
     if (begun.disposition === 'completed') {
       const active = this.inFlight.get(key)
@@ -206,7 +206,7 @@ export class OrchestrationMutationExecutor {
           { requestId }
         )
       }
-      if (!resumableRelease && !resumedPendingWorkerDone) {
+      if (!resumableMutation && !resumedPendingWorkerDone) {
         const recovery = getPendingWorkerStartRecovery(request.method, begun.row.receipt)
         if (recovery?.transferRequestId) {
           const transfer = db.getMaestroWorkerLeaseTransferReceiptByMutationRequest(identity)

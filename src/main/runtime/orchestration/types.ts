@@ -1,4 +1,5 @@
 import type { TerminalExitCause } from '../../../shared/terminal-exit-cause'
+export type { RunCompletion, RunCompletionWaiver } from './run-completion-types'
 export const MESSAGE_TYPES = [
   'status',
   'dispatch',

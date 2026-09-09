@@ -147,6 +147,14 @@ async function completeWorkerTerminalReleaseOnce(
     orchestrationTimestampToMs(worker.created_at)
   )
   const archive = db.getWorkerTerminalArchive(dispatchId)
+  if (archive && archive.resource_id !== resource.id) {
+    return identityMismatchReceipt(
+      db,
+      dispatchId,
+      resource,
+      'The archived release receipt belongs to a different worker resource.'
+    )
+  }
   let archiveSource = resource.archive_source as 'transcript' | 'terminal' | null
   let archiveStatus: WorkerTerminalArchiveStatus | null = resource.archive_status
   let capturedArchive: { kind: 'transcript_pin' | 'terminal_tail'; content: string } | undefined

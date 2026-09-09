@@ -114,8 +114,15 @@ async function fitAndWaitForAuthority(
   const before = await canvasRevision(client, scope)
   expect(before).not.toBeNull()
   await page.getByLabel('Zoom in').click()
+  await expect
+    .poll(() => canvasRevision(client, scope), { timeout: 30_000 })
+    .toBeGreaterThan(before ?? -1)
+  const zoomed = await canvasRevision(client, scope)
+  expect(zoomed).not.toBeNull()
   await page.getByLabel('Fit resources').click()
-  await expect.poll(() => canvasRevision(client, scope)).toBeGreaterThan(before ?? -1)
+  await expect
+    .poll(() => canvasRevision(client, scope), { timeout: 30_000 })
+    .toBeGreaterThan(zoomed ?? -1)
 }
 
 test.describe('Maestro workspace Canvas visual refinement', () => {
@@ -139,6 +146,10 @@ test.describe('Maestro workspace Canvas visual refinement', () => {
       const runtimeClient = new RuntimeClient(userDataDir, 30_000, null, null)
       await removeWorkspaceResources(orcaPage)
       await expect(orcaPage.getByText('No workspace resources yet')).toBeVisible()
+      await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
+      await expect(
+        orcaPage.getByText('Workspace board moved to the bottom bar', { exact: true })
+      ).toBeHidden({ timeout: 10_000 })
       const canvasBackground = orcaPage.locator(
         '[data-maestro-workspace-canvas] [data-slot="context-menu-trigger"]'
       )
@@ -160,29 +171,24 @@ test.describe('Maestro workspace Canvas visual refinement', () => {
       await expect(surfaces).toHaveCount(1, { timeout: 30_000 })
       const terminal = surfaces.first()
       await terminal.locator('header').click()
-      const inspector = orcaPage.locator('aside').filter({
-        has: orcaPage.getByLabel('Tab title')
-      })
-      await expect(inspector).toBeHidden()
       await terminal.getByRole('button', { name: 'Rename tab' }).click()
-      await expect(inspector).toBeVisible()
+      const titleInput = terminal.getByRole('textbox', { name: 'Tab title' })
+      await expect(titleInput).toBeVisible()
       await expectInsideCanvas(orcaPage, terminal)
-      const [terminalBox, inspectorBox] = await Promise.all([
+      const [terminalBox, titleBox] = await Promise.all([
         terminal.boundingBox(),
-        inspector.boundingBox()
+        titleInput.boundingBox()
       ])
       expect(terminalBox).not.toBeNull()
-      expect(inspectorBox).not.toBeNull()
-      expect(
-        terminalBox !== null &&
-          inspectorBox !== null &&
-          terminalBox.x < inspectorBox.x + inspectorBox.width &&
-          terminalBox.x + terminalBox.width > inspectorBox.x &&
-          terminalBox.y < inspectorBox.y + inspectorBox.height &&
-          terminalBox.y + terminalBox.height > inspectorBox.y
-      ).toBe(false)
-      await inspector.getByRole('button', { name: 'Close', exact: true }).click()
-      await expect(inspector).toBeHidden()
+      expect(titleBox).not.toBeNull()
+      expect(titleBox?.x).toBeGreaterThanOrEqual(terminalBox?.x ?? Number.POSITIVE_INFINITY)
+      expect((titleBox?.x ?? 0) + (titleBox?.width ?? 0)).toBeLessThanOrEqual(
+        (terminalBox?.x ?? 0) + (terminalBox?.width ?? 0)
+      )
+      await titleInput.fill('Visual terminal')
+      await titleInput.press('Enter')
+      await expect(titleInput).toBeHidden()
+      await expect(terminal).toContainText('Visual terminal', { timeout: 30_000 })
       await setTheme(orcaPage, 'dark')
       await capture(orcaPage, 'terminal-focused', notebook)
       await setEvidenceProfile(orcaPage, desktop)
@@ -193,7 +199,8 @@ test.describe('Maestro workspace Canvas visual refinement', () => {
       await createCanvasResource(orcaPage, 'browser')
       await expect(surfaces).toHaveCount(2, { timeout: 30_000 })
       const browser = await surfaceForContentType(orcaPage, 'browser')
-      await expectInsideCanvas(orcaPage, browser)
+      await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
+      await expect(browser.locator('header')).toBeVisible()
       await browser.getByRole('button', { name: 'Focus exact tab' }).click()
       await waitForExactBrowserTab(orcaPage, browser)
       const addressBar = orcaPage.locator('[data-orca-browser-address-bar="true"]')
@@ -225,11 +232,11 @@ test.describe('Maestro workspace Canvas visual refinement', () => {
       }
       await openMaestro(orcaPage, true)
       const projectedBrowser = await surfaceForContentType(orcaPage, 'browser')
+      await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
       await expect(projectedBrowser.locator('img[data-browser-page-id]')).toBeVisible({
         timeout: 30_000
       })
       await expectInsideCanvas(orcaPage, projectedBrowser)
-      await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
       await capture(orcaPage, 'browser-rendered', notebook)
       await setEvidenceProfile(orcaPage, desktop)
       await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
@@ -250,9 +257,9 @@ test.describe('Maestro workspace Canvas visual refinement', () => {
       await expect(content).toContainText('Workspace-owned recognizable content.', {
         timeout: 30_000
       })
-      await expectInsideCanvas(orcaPage, content)
       await setTheme(orcaPage, 'dark')
       await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
+      await expectInsideCanvas(orcaPage, content)
       await expect(content).toContainText('Workspace-owned recognizable content.', {
         timeout: 30_000
       })
@@ -263,16 +270,16 @@ test.describe('Maestro workspace Canvas visual refinement', () => {
       await setEvidenceProfile(orcaPage, notebook)
       await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
 
-      await createAnnotation(orcaPage, 'decision', 'Decision: preserve exact workspace tabs')
-      await createAnnotation(orcaPage, 'warning', 'Warning: receipt identity must remain exact')
-      await createAnnotation(orcaPage, 'blocked', 'Blocked: authority conflict requires retry')
-      await createAnnotation(orcaPage, 'observation', 'Observation: exact surfaces remain live')
+      await createAnnotation(orcaPage, 'Decision: preserve exact workspace tabs')
+      await createAnnotation(orcaPage, 'Warning: receipt identity must remain exact')
+      await createAnnotation(orcaPage, 'Blocked: authority conflict requires retry')
+      await createAnnotation(orcaPage, 'Observation: exact surfaces remain live')
       await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
       await setTheme(orcaPage, 'light')
-      await capture(orcaPage, 'annotation-tones', notebook)
+      await capture(orcaPage, 'annotations', notebook)
       await setEvidenceProfile(orcaPage, desktop)
       await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
-      await capture(orcaPage, 'annotation-tones', desktop)
+      await capture(orcaPage, 'annotations', desktop)
       await setEvidenceProfile(orcaPage, notebook)
       await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
 
@@ -328,27 +335,40 @@ test.describe('Maestro workspace Canvas visual refinement', () => {
       })
       await orcaPage.getByLabel('Fit resources').click()
       const refreshedBrowser = await surfaceForContentType(orcaPage, 'browser')
-      await refreshedBrowser.getByRole('button', { name: 'Rename tab' }).click()
-      const suggestions = inspector.locator('.rounded-md').filter({ hasText: 'Suggestion' })
-      await expect(suggestions).toHaveCount(0)
-      await inspector.getByRole('button', { name: 'Close', exact: true }).dispatchEvent('click')
-      await expect(inspector).toBeHidden()
+      await expect(refreshedBrowser).toBeVisible()
+      await expect(orcaPage.getByText('Suggestion', { exact: true })).toHaveCount(0)
       await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
+      await orcaPage.getByRole('button', { name: 'Hide Run panel' }).click()
+      await expect(orcaPage.getByLabel('Restore Run progress panel')).toBeVisible()
       await capture(orcaPage, 'links-manual-automatic', notebook)
       await setEvidenceProfile(orcaPage, desktop)
       await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
       await capture(orcaPage, 'links-manual-automatic', desktop)
       await setEvidenceProfile(orcaPage, notebook)
       await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
+      await orcaPage.getByLabel('Restore Run progress panel').click()
+      await orcaPage.getByRole('button', { name: 'Expand Run panel' }).click()
 
-      const progress = orcaPage.getByRole('complementary', {
-        name: new RegExp(`Harness run ${harness.runId}`)
-      })
-      await expect(progress).toContainText('MWC-BLOCKED')
-      await capture(orcaPage, 'progress-all-states', notebook)
+      const progress = orcaPage.getByRole('complementary', { name: 'Run progress' })
+      await expect(progress).toContainText('Pending exact workspace evidence')
+      await expect(progress).toContainText('Worker terminal is live.')
+      await capture(orcaPage, 'progress-active', notebook)
       await setEvidenceProfile(orcaPage, desktop)
       await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
-      await capture(orcaPage, 'progress-all-states', desktop)
+      await capture(orcaPage, 'progress-active', desktop)
+      await setEvidenceProfile(orcaPage, notebook)
+      await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
+
+      await harness.complete()
+      await expect(progress).toContainText('Verified Maestro Canvas handoff is complete.')
+      await expect(progress).toContainText('Focused orchestration and Canvas checks passed.')
+      await expect(progress).toContainText(
+        'The live coordinator resource remains available for visual inspection.'
+      )
+      await capture(orcaPage, 'progress-completed-waiver', notebook)
+      await setEvidenceProfile(orcaPage, desktop)
+      await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
+      await capture(orcaPage, 'progress-completed-waiver', desktop)
       await setEvidenceProfile(orcaPage, notebook)
       await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
 
@@ -356,10 +376,11 @@ test.describe('Maestro workspace Canvas visual refinement', () => {
       await expect(
         orcaPage.getByText('Authority unavailable. Last-known resources remain unverifiable.')
       ).toBeVisible({ timeout: 30_000 })
+      await expect(progress).toContainText('Verified Maestro Canvas handoff is complete.')
       await setTheme(orcaPage, 'dark')
-      await capture(orcaPage, 'unavailable', notebook)
+      await capture(orcaPage, 'completed-unavailable', notebook)
       await setEvidenceProfile(orcaPage, desktop)
-      await capture(orcaPage, 'unavailable', desktop)
+      await capture(orcaPage, 'completed-unavailable', desktop)
     } finally {
       await cleanupHarness()
       rmSync(FAULT_FILE, { force: true })

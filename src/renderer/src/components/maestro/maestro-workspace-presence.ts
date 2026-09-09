@@ -15,6 +15,13 @@ export type MaestroWorkspacePresenceItem = {
 const ENTER_DURATION_MS = 180
 const EXIT_DURATION_MS = 160
 
+function schedulePresenceSettlement(
+  duration: number,
+  settle: () => void
+): ReturnType<typeof setTimeout> {
+  return setTimeout(settle, duration)
+}
+
 export function reconcileMaestroWorkspacePresence(
   current: readonly MaestroWorkspacePresenceItem[],
   snapshot: WorkspaceSurfaceSnapshot,
@@ -124,23 +131,19 @@ export function useMaestroWorkspacePresence(
         continue
       }
       const duration = phase === 'entering' ? ENTER_DURATION_MS : EXIT_DURATION_MS
-      const timer = setTimeout(() => {
+      const timer = schedulePresenceSettlement(duration, () => {
         activeTimers.delete(surfaceKey)
         setItems((current) => settleMaestroWorkspacePresence(current, surfaceKey, phase))
-      }, duration)
+      })
       activeTimers.set(surfaceKey, { phase, timer })
     }
-  }, [items, renderableSurfaceKeys])
-
-  useEffect(
-    () => () => {
-      for (const entry of timers.current.values()) {
+    return () => {
+      for (const entry of activeTimers.values()) {
         clearTimeout(entry.timer)
       }
-      timers.current.clear()
-    },
-    []
-  )
+      activeTimers.clear()
+    }
+  }, [items, renderableSurfaceKeys])
 
   return items
 }

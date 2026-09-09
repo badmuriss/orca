@@ -97,25 +97,27 @@ describe('Maestro workspace window layout', () => {
   it('tracks additions across Canvas remounts without treating the first snapshot as new', () => {
     const tracker = createMaestroSurfaceAdditionTracker()
 
-    expect(tracker.observe('local:workspace', ['terminal'])).toEqual([])
-    expect(tracker.observe('local:workspace', ['browser', 'terminal'])).toEqual(['browser'])
-    expect(tracker.observe('remote:workspace', ['content'])).toEqual([])
+    expect(tracker.takeAdditions('local:workspace', ['terminal'])).toEqual([])
+    expect(tracker.takeAdditions('local:workspace', ['browser', 'terminal'])).toEqual(['browser'])
+    expect(tracker.takeAdditions('remote:workspace', ['content'])).toEqual([])
   })
 
   it('defers consuming additions until the Canvas viewport is measurable', () => {
     const tracker = createMaestroSurfaceAdditionTracker()
 
-    expect(tracker.observe('local:workspace', ['terminal'])).toEqual([])
-    expect(tracker.observe('local:workspace', ['browser', 'terminal'], false)).toEqual([])
-    expect(tracker.observe('local:workspace', ['browser', 'terminal'], true)).toEqual(['browser'])
+    expect(tracker.takeAdditions('local:workspace', ['terminal'])).toEqual([])
+    expect(tracker.takeAdditions('local:workspace', ['browser', 'terminal'], false)).toEqual([])
+    expect(tracker.takeAdditions('local:workspace', ['browser', 'terminal'], true)).toEqual([
+      'browser'
+    ])
   })
 
   it('keeps the first unmeasured snapshot as the placement baseline', () => {
     const tracker = createMaestroSurfaceAdditionTracker()
 
-    expect(tracker.observe('local:workspace', [], false)).toEqual([])
-    expect(tracker.observe('local:workspace', ['browser', 'terminal'], false)).toEqual([])
-    expect(tracker.observe('local:workspace', ['browser', 'terminal'], true)).toEqual([
+    expect(tracker.takeAdditions('local:workspace', [], false)).toEqual([])
+    expect(tracker.takeAdditions('local:workspace', ['browser', 'terminal'], false)).toEqual([])
+    expect(tracker.takeAdditions('local:workspace', ['browser', 'terminal'], true)).toEqual([
       'browser',
       'terminal'
     ])

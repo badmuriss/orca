@@ -134,7 +134,7 @@ describe('PtyHandler', () => {
         `PTY "${PTY_1}" not found`
       )
       // The relay now answers a shutdown with its process-tree stop receipt.
-      await expect(shutdown).resolves.toMatchObject({ ptyId: 'pty-1' })
+      await expect(shutdown).resolves.toMatchObject({ ptyId: PTY_1 })
     } finally {
       aliveSpy.mockRestore()
     }

@@ -4,6 +4,7 @@ import { join, posix } from 'node:path'
 import { getBundledLauncherPath } from '../cli/bundled-cli-launcher-path'
 import { resolveWindowsShellLaunchArgs } from '../providers/windows-shell-args'
 import { createPtyStopReceipt, type PtyStopReceipt } from '../../shared/pty-stop-receipt'
+import type { ExecutionHostId } from '../../shared/execution-host'
 
 /** The narrow slice of vitest's test API these suites use; keeps `it`/`it.skip` interchangeable. */
 export type PlatformGatedTest = (
@@ -73,12 +74,16 @@ export const TEST_PTY_INCARNATION = '11111111-1111-4111-8111-111111111111'
 
 export function exitedPtyStopReceipt(
   ptyId: string,
-  opts?: { expectedIncarnationId?: string }
+  opts?: {
+    expectedIncarnationId?: string
+    executionHostId?: ExecutionHostId
+    terminalHandle?: string
+  }
 ): PtyStopReceipt {
   const root = { pid: 1, parentPid: null, processGroupId: 1, startedAt: 'test' }
   return createPtyStopReceipt({
-    executionHostId: 'local',
-    terminalHandle: ptyId,
+    executionHostId: opts?.executionHostId ?? 'local',
+    terminalHandle: opts?.terminalHandle ?? ptyId,
     ptyId,
     ptyIncarnation: opts?.expectedIncarnationId ?? TEST_PTY_INCARNATION,
     root,

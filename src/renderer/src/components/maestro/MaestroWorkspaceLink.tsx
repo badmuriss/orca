@@ -177,7 +177,9 @@ export function MaestroWorkspaceManualLink({
         <ContextMenuItem variant="destructive" onSelect={onDelete}>
           <Trash2 />
           {translate('auto.components.maestro.links.remove', 'Remove link')}
-          <ContextMenuShortcut>Delete</ContextMenuShortcut>
+          <ContextMenuShortcut>
+            {translate('auto.components.maestro.links.deleteShortcut', 'Delete')}
+          </ContextMenuShortcut>
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

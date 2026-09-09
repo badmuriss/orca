@@ -19,7 +19,7 @@ export function addedMaestroSurfaceKeys(
 export function createMaestroSurfaceAdditionTracker() {
   const observedByScope = new Map<string, readonly string[]>()
   return {
-    observe(scope: string, current: readonly string[], viewportReady = true): string[] {
+    takeAdditions(scope: string, current: readonly string[], viewportReady = true): string[] {
       const previous = observedByScope.get(scope)
       if (previous && !viewportReady) {
         return []

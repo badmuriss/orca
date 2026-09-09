@@ -71,7 +71,7 @@ export function useMaestroWorkspaceAutomaticPlacement({
       return
     }
     const scopeKey = `${scope.execution_host_id}:${scope.workspace_key}`
-    const additions = surfaceAdditionTracker.observe(scopeKey, surfaceKeys, viewportReady)
+    const additions = surfaceAdditionTracker.takeAdditions(scopeKey, surfaceKeys, viewportReady)
     for (const surfaceKey of automaticallyPlacedSurfaceKeys.current) {
       if (!result.snapshot.surfaces[surfaceKey]) {
         automaticallyPlacedSurfaceKeys.current.delete(surfaceKey)

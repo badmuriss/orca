@@ -11,6 +11,7 @@ import type { RuntimeRpcResponse } from '../../shared/runtime-rpc-envelope'
 import type { ClientHostedBrowserRowsEvent } from '../../shared/client-hosted-browser-rows'
 import { TERMINAL_FIT_RESTORE_DEADLINE_MS } from '../../shared/terminal-fit-restore-deadline'
 import {
+  MAESTRO_RUN_COMPLETION_RUNTIME_CAPABILITY,
   MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY,
   CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
   STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
@@ -22,7 +23,8 @@ import { DesktopRuntimeSenderLifecycle } from './desktop-runtime-sender-lifecycl
 const LOCAL_RUNTIME_CLIENT_CAPABILITIES = [
   CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
   STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
-  MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY
+  MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY,
+  MAESTRO_RUN_COMPLETION_RUNTIME_CAPABILITY
 ] as const
 
 function boundTerminalFitRestore(pending: Promise<boolean>): Promise<boolean> {

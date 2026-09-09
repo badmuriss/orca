@@ -15,6 +15,7 @@ import { assertFederationAttachmentRequest } from './orchestration-federation-at
 import type { FederationAttachStartInput } from './orchestration/federation/federation-start-schema'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import { provisionFederatedWorkerWorkspace } from './orchestration-federation-provision'
+import { assertWorkerStartTaskSpecWithinPromptBudget } from './orchestration/worker/worker-start-prompt-budget'
 import {
   prepareFederatedAttachmentRuntime,
   type OrchestrationMutation
@@ -33,6 +34,7 @@ export async function attachFederatedWorker({
   orchestrationMutation
 }: AttachArgs) {
   assertFederationAttachmentRequest(params, orchestrationMutation)
+  await assertWorkerStartTaskSpecWithinPromptBudget(params.taskSpec)
   const createsWorktree = params.worktree === 'new-top-level'
   const { agent, launch } = prepareFederationAttachmentWorkerStart({
     params,
@@ -127,7 +129,8 @@ export async function attachFederatedWorker({
       worktreeId: worktree.id,
       terminalHandle,
       setupState: setup.state,
-      effects
+      effects,
+      terminalOwnership: params.terminal ? 'external' : 'created'
     })
     failedStage = 'dispatch_input'
     if (!attemptBound || !workerLease) {

@@ -234,6 +234,7 @@ export class OrcaRuntimeWithCreateTerminal extends OrcaRuntimeWithTerminalCreate
             pty.launchToken = launchToken ?? null
             pty.launchIncarnationId = launchToken ? pty.incarnationId : null
             pty.launchAgent = launchOpts.launchAgent ?? null
+            this.resetPtyLaunchAuthorityCommandFence(result.id)
           }
           pty.tabId = tabId
           pty.paneKey = paneKey

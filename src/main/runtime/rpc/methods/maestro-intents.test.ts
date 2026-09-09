@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { FolderWorkspace } from '../../../../shared/folder-workspace-types'
 import { OrchestrationDb } from '../../orchestration/db/orchestration-db'
-import { applyMaestroProjection } from '../../orchestration/db/maestro/maestro-projection-store'
+import {
+  applyMaestroProjection,
+  getMaestroProjection
+} from '../../orchestration/db/maestro/maestro-projection-store'
 import type { RpcContext, RpcMethod } from '../core'
 import { MAESTRO_INTENT_METHODS } from './maestro-intents'
 import { getMaestroDelegationCatalogSnapshot } from './maestro-delegation-catalog'
@@ -80,6 +83,7 @@ function seedHarnessLineage(
   generation: number,
   statuses = { task: 'running', attempt: 'running' }
 ): void {
+  const revision = (getMaestroProjection.call(db, workspace, runId)?.revision ?? 0) + 1
   applyMaestroProjection.call(
     db,
     { ...workspace, run_id: runId },
@@ -140,7 +144,7 @@ function seedHarnessLineage(
       edges: [],
       removed_node_ids: [],
       removed_edge_ids: [],
-      revision: 1,
+      revision,
       cursor: null,
       from_cursor: null,
       reset_required: false,

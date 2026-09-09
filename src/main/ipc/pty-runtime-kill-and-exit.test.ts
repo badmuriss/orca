@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { spawnMock } from './pty-ipc-mock-registry'
-import { makeDeferred } from './pty-ipc-test-constants'
+import { exitedPtyStopReceipt, makeDeferred, TEST_PTY_INCARNATION } from './pty-ipc-test-constants'
 import { setupPtyIpcSuite } from './pty-ipc-test-harness'
 import { LOCAL_EXECUTION_HOST_ID, toSshExecutionHostId } from '../../shared/execution-host'
 import {
@@ -13,7 +13,6 @@ import {
   restorePtyIncarnation,
   getLocalPtyProvider
 } from './pty'
-import { TEST_PTY_INCARNATION, exitedPtyStopReceipt } from './pty-ipc-test-constants'
 import type { PtyStopReceipt } from '../../shared/pty-stop-receipt'
 
 vi.mock('electron', () => import('./pty-ipc-mock-registry').then((m) => m.electronModuleMock()))

@@ -209,6 +209,7 @@ Terminal rules:
 - A default send observes for 0 seconds, so a receipt that stops at `input_accepted` is expected and its warning means "unproven", not "failed". Pass `--wait-submit` when you need proof of submission.
 - `--wait-submit <seconds>` only observes the same accepted prompt. A timeout returns queued/input-accepted truth without resending; after an ambiguous transport failure, repeat the exact command with the reported `--retry-request <id>`. Both text and `--json` receipts carry the same `warnings`.
 - An older host reports a legacy `old-host` fallback for an ordinary send and refuses `--wait-submit` or `--retry-request` before input, because it cannot provide durable replay.
+- Agent input to an orchestration-owned terminal requires the exact `--lease-input` envelope from the owning receipt. A non-ready input surface returns `accepted: false` with `input_surface_not_ready`; Orca does not retain or silently queue the payload. Authenticated desktop and mobile interaction remains a separate human-input path.
 - For structured coordination, invoke the `orchestration` skill; it uses `orca orchestration ...` commands for messages, handoffs, task DAGs, dispatches, inbox/reply flows, and coordinator loops. A receiving agent can run `orca orchestration check --peek --format --json` to render its unread mail in agent-readable form; this checks the caller's inbox and does not remotely deliver input to another terminal.
 - Use `terminal create --worktree active --command "<agent>"` for a fresh agent in the current worktree. Use `worktree create --agent <agent>` only for a separate checkout (agent in the first terminal — do not also `terminal create` the same agent).
 - Use `terminal wait --for tui-idle` for agent CLIs such as Claude Code, Gemini, Codex, OMP, Pi, and Grok; always pass `--timeout-ms`.
@@ -403,6 +404,26 @@ ORCA maestro coordinator-handoff --payload <request-json> --json
 `watch` emits bounded compact NDJSON. Start from the returned revision on the next request. Use `--once` for one bounded read. Do not poll for progress that a model wrote itself.
 
 `open` focuses the exact native Maestro Canvas. It does not create a terminal, launch a worker, or open a browser page. Use `show` or `index` for bounded data, then open the exact task, attempt, or finding in the Canvas when its detail is needed.
+
+`show` distinguishes the accepted graph from what this workspace materializes.
+Read `materialization.accepted`, `materialization.materialized`, and the
+`excludedNodes` / `excludedEdges` reasons before treating a smaller visible
+graph as data loss. Superseded Attempts remain history, and resources owned by
+another execution workspace are intentionally omitted from this Canvas.
+
+Tasks are durable work items; Attempts are execution tries. A successful retry
+updates its Task without erasing earlier Attempt history or creating an extra
+failed Task in the default progress view. Canvas liveness uses `live`,
+`unverifiable`, or `exited`: absence from a client, a disconnected SSH host, or
+an optional field omitted by an older peer is `unverifiable`, never proof of
+exit.
+
+Harness Run completion is an explicit coordinator receipt, not a Task/resource
+aggregate. `orchestration run-complete` records the coordinator summary, evidence,
+generation, and any reasoned Task waivers. Resource health stays separate:
+`unverifiable` remains visible without implying exit or preventing completion by
+itself. Older peers may omit the optional completion record; absence is not proof
+that a Run is active.
 
 Browser surfaces are owned orchestration resources. Submit their typed request through Maestro; do not substitute `tab create`, a guessed browser command, or an unfenced page id.
 

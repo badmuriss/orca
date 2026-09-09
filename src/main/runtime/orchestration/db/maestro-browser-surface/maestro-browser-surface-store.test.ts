@@ -6,6 +6,7 @@ import {
   MaestroBrowserProfileConsentGrantRequestSchema,
   MaestroBrowserSurfaceRequestSchema
 } from '../../../../../shared/maestro-browser-surface'
+import { SCHEMA_VERSION } from '../contract-constants'
 import { OrchestrationDb } from '../orchestration-db'
 
 const request = MaestroBrowserSurfaceRequestSchema.parse({
@@ -99,7 +100,7 @@ describe('Maestro browser surface store', () => {
     database.db.pragma('user_version = 35')
     database.close()
     database = new OrchestrationDb(databasePath)
-    expect(database.db.pragma('user_version', { simple: true })).toBe(36)
+    expect(database.db.pragma('user_version', { simple: true })).toBe(SCHEMA_VERSION)
     const grantRequest = MaestroBrowserProfileConsentGrantRequestSchema.parse({
       schema_version: 1,
       protocol: 'maestro-browser-profile-consent/v1',

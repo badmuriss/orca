@@ -164,9 +164,9 @@ export function migrateOutstandingDelivery(
   this.db
     .prepare(
       `UPDATE deliveries SET consumer_generation = ?
-       WHERE run_id = ? AND status = 'outstanding'`
+       WHERE run_id = ? AND mailbox_handle = ? AND status = 'outstanding'`
     )
-    .run(consumerGeneration, runId)
+    .run(consumerGeneration, runId, `run:${runId}`)
 }
 
 export type RunLookupMethods = {

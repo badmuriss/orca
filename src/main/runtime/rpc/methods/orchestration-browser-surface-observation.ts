@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { app, nativeImage } from 'electron'
+import { getAppEnvironment } from '../../../../shared/app-environment'
+import { readRasterImageDimensions } from '../../../../shared/raster-image-dimensions'
 import type {
   MaestroBrowserFocusReceipt,
   MaestroBrowserPanePaint,
@@ -14,6 +15,26 @@ import {
 } from '../../orchestration/maestro-browser-surface-worktree-identity'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import type { RpcContext } from '../core'
+
+type BrowserSurfaceIdentity = {
+  browserPageId: string | null
+  worktreeId: string | null
+  profileId: string | null
+}
+
+export function browserSurfaceIdentityMismatch(
+  expected: BrowserSurfaceIdentity,
+  observed: BrowserSurfaceIdentity
+): OrchestrationError {
+  const differences = (['browserPageId', 'worktreeId', 'profileId'] as const).filter(
+    (field) => expected[field] !== observed[field]
+  )
+  return new OrchestrationError(
+    'browser_surface_identity_mismatch',
+    `The native Browser page differs from the reserved surface in: ${differences.join(', ')}.`,
+    { expected, observed, differences }
+  )
+}
 
 export function requireExactSurface(
   request: MaestroBrowserSurfaceActionRequest,
@@ -109,9 +130,13 @@ export async function showExactSurface(
     )
   }
   if (page !== record.receipt.browser_page_id) {
-    throw new OrchestrationError(
-      'browser_surface_identity_mismatch',
-      'The Browser interaction returned a different page than the reserved surface.'
+    throw browserSurfaceIdentityMismatch(
+      {
+        browserPageId: record.receipt.browser_page_id,
+        worktreeId: browserSurfaceWorktreeId(record.receipt.workspace_key),
+        profileId: record.receipt.profile_id
+      },
+      { browserPageId: page, worktreeId: null, profileId: null }
     )
   }
   const worktreeId = browserSurfaceWorktreeId(request.workspace.workspace_key)
@@ -124,9 +149,17 @@ export async function showExactSurface(
     (shown.tab.worktreeId !== null && shown.tab.worktreeId !== worktreeId) ||
     (shown.tab.profileId ?? null) !== record.receipt.profile_id
   ) {
-    throw new OrchestrationError(
-      'browser_surface_identity_mismatch',
-      'The native Browser page does not match the reserved workspace, page, and profile.'
+    throw browserSurfaceIdentityMismatch(
+      {
+        browserPageId: record.receipt.browser_page_id,
+        worktreeId,
+        profileId: record.receipt.profile_id
+      },
+      {
+        browserPageId: shown.tab.browserPageId,
+        worktreeId: shown.tab.worktreeId ?? null,
+        profileId: shown.tab.profileId ?? null
+      }
     )
   }
   return { page: shown.tab.browserPageId, record, shown }
@@ -141,8 +174,19 @@ export function fileErrorCode(error: unknown): string | null {
 
 export async function persistMaestroBrowserEvidence(data: string, format: 'png' | 'jpeg') {
   const bytes = Buffer.from(data, 'base64')
+  const dimensions = readRasterImageDimensions(bytes)
+  if (!dimensions) {
+    throw new OrchestrationError(
+      'browser_surface_capture_invalid',
+      'The native Browser capture did not contain a valid image.'
+    )
+  }
   const hash = createHash('sha256').update(bytes).digest('hex')
-  const directory = join(app.getPath('userData'), 'maestro-browser-evidence', 'sha256')
+  const directory = join(
+    getAppEnvironment().getPath('userData'),
+    'maestro-browser-evidence',
+    'sha256'
+  )
   const filename = `${hash}.${format === 'jpeg' ? 'jpg' : 'png'}`
   await mkdir(directory, { recursive: true, mode: 0o700 })
   try {
@@ -152,17 +196,10 @@ export async function persistMaestroBrowserEvidence(data: string, format: 'png' 
       throw error
     }
   }
-  const size = nativeImage.createFromBuffer(bytes).getSize()
-  if (size.width < 1 || size.height < 1) {
-    throw new OrchestrationError(
-      'browser_surface_capture_invalid',
-      'The native Browser capture did not contain a valid image.'
-    )
-  }
   return {
     artifactRef: `artifact:maestro-browser-evidence/sha256/${filename}`,
     artifactHash: `sha256:${hash}` as const,
-    width: size.width,
-    height: size.height
+    width: dimensions.width,
+    height: dimensions.height
   }
 }

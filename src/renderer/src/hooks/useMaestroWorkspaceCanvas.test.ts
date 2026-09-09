@@ -328,4 +328,105 @@ describe('useMaestroWorkspaceCanvas', () => {
     await act(async () => oldResponse.promise)
     expect(resource?.result?.snapshot.workspace_key).toBe(newScope.workspace_key)
   })
+
+  it('ignores a late mutation result after the workspace changes', async () => {
+    const oldScope = { ...scope, workspace_key: 'folder:old' }
+    const newScope = { ...scope, workspace_key: 'folder:new' }
+    const oldMutation = deferred<{
+      status: 'outcome_unknown'
+      authority_revision: number
+      reason: string
+    }>()
+    query
+      .mockResolvedValueOnce(available(1, oldScope))
+      .mockResolvedValueOnce(available(1, newScope))
+    mutate.mockReturnValueOnce(oldMutation.promise)
+
+    await act(async () => {
+      root?.render(createElement(ScopedProbe, { exactScope: oldScope }))
+      await Promise.resolve()
+    })
+    let pendingMutation!: Promise<void>
+    act(() => {
+      pendingMutation = resource!.mutate({
+        action: 'create',
+        surface_type: 'terminal',
+        idempotency_key: 'old-workspace-mutation'
+      })
+    })
+    await Promise.resolve()
+    await act(async () => {
+      root?.render(createElement(ScopedProbe, { exactScope: newScope }))
+      await Promise.resolve()
+    })
+
+    oldMutation.resolve({
+      status: 'outcome_unknown',
+      authority_revision: 1,
+      reason: 'old workspace command failed'
+    })
+    await act(async () => pendingMutation)
+
+    expect(resource?.result?.snapshot.workspace_key).toBe(newScope.workspace_key)
+    expect(resource?.mutation).toBeNull()
+  })
+
+  it('does not start a queued mutation after unmount', async () => {
+    const firstMutation = deferred<{
+      status: 'applied'
+      authority_revision: number
+    }>()
+    query.mockResolvedValueOnce(available(1))
+    mutate.mockReturnValueOnce(firstMutation.promise)
+    await act(async () => {
+      root?.render(createElement(Probe))
+      await Promise.resolve()
+    })
+
+    let first!: Promise<void>
+    let queued!: Promise<void>
+    act(() => {
+      first = resource!.mutate({
+        action: 'create',
+        surface_type: 'terminal',
+        idempotency_key: 'first-before-unmount'
+      })
+      queued = resource!.mutate({
+        action: 'create',
+        surface_type: 'terminal',
+        idempotency_key: 'queued-before-unmount'
+      })
+    })
+    await Promise.resolve()
+    act(() => root?.unmount())
+    firstMutation.resolve({ status: 'applied', authority_revision: 2 })
+    await act(async () => Promise.all([first, queued]))
+
+    expect(mutate).toHaveBeenCalledOnce()
+  })
+
+  it('does not retry a stale mutation after unmount', async () => {
+    const staleRefresh = deferred<ReturnType<typeof available>>()
+    query.mockResolvedValueOnce(available(1)).mockReturnValueOnce(staleRefresh.promise)
+    mutate.mockResolvedValueOnce({ status: 'stale', authority_revision: 2 })
+    await act(async () => {
+      root?.render(createElement(Probe))
+      await Promise.resolve()
+    })
+
+    let pending!: Promise<void>
+    act(() => {
+      pending = resource!.mutate({
+        action: 'create',
+        surface_type: 'terminal',
+        idempotency_key: 'stale-before-unmount'
+      })
+    })
+    await Promise.resolve()
+    act(() => root?.unmount())
+    staleRefresh.resolve(available(2))
+    await act(async () => pending)
+
+    expect(mutate).toHaveBeenCalledOnce()
+  })
 })

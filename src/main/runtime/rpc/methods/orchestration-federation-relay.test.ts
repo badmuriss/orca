@@ -38,12 +38,16 @@ describe('orchestration federation relay', () => {
         payload: JSON.stringify({
           taskId: task.id,
           dispatchId: dispatch.id,
+          attemptId: 'attempt_windows_worker',
           outcome: 'succeeded',
           filesModified: []
         })
       }
     })
-    expect(sent).toMatchObject({ ok: true, result: { lifecycle: { action: 'completed' } } })
+    expect(sent).toMatchObject({
+      ok: true,
+      result: { lifecycle: { action: 'completed' } }
+    })
     expect(peers.homeDb.getTask(task.id)?.status).toBe('completed')
 
     await peers.homeRuntime.syncOrchestrationFederation()
@@ -352,13 +356,23 @@ describe('orchestration federation relay', () => {
     const oldEpoch = peers.homeDb.getFederatedDispatch(dispatch.id)?.remote_runtime_epoch
     peers.restartWorkerRuntime()
 
-    const shown = await peers.homeDispatcher.dispatch({
+    const changedEpoch = await peers.homeDispatcher.dispatch({
       id: 'rpc_worker_restart_show',
       authToken: 'coordinator-token',
       method: 'orchestration.workerShow',
       params: { dispatch: dispatch.id }
     })
+    const shown = await peers.homeDispatcher.dispatch({
+      id: 'rpc_worker_restart_show_current',
+      authToken: 'coordinator-token',
+      method: 'orchestration.workerShow',
+      params: { dispatch: dispatch.id }
+    })
 
+    expect(changedEpoch).toMatchObject({
+      ok: true,
+      result: { observation: { status: 'unverifiable', exactWorker: false } }
+    })
     expect(shown).toMatchObject({
       ok: true,
       result: { observation: { status: 'live', exactWorker: true } }
@@ -397,8 +411,15 @@ describe('orchestration federation relay', () => {
       connected: false,
       writable: false
     } as never)
-    const shown = await peers.homeDispatcher.dispatch({
+    vi.mocked(peers.workerRuntime.getTerminalLivenessVerdict).mockReturnValue({ status: 'exited' })
+    await peers.homeDispatcher.dispatch({
       id: 'rpc_remote_show_after_stop',
+      authToken: 'coordinator-token',
+      method: 'orchestration.workerShow',
+      params: { dispatch: dispatch.id }
+    })
+    const shown = await peers.homeDispatcher.dispatch({
+      id: 'rpc_remote_show_after_stop_current',
       authToken: 'coordinator-token',
       method: 'orchestration.workerShow',
       params: { dispatch: dispatch.id }
@@ -492,8 +513,14 @@ describe('orchestration federation relay', () => {
     const task = peers.createHomeTask()
     await peers.homeDispatcher.dispatch(startRequest(task.id))
     const dispatch = peers.homeDb.getDispatchContext(task.id)!
-    vi.spyOn(peers.homeRuntime, 'callOrchestrationWorkerServer').mockRejectedValueOnce(
-      new Error('connection lost')
+    const callWorker = peers.homeRuntime.callOrchestrationWorkerServer.bind(peers.homeRuntime)
+    vi.spyOn(peers.homeRuntime, 'callOrchestrationWorkerServer').mockImplementation(
+      async (...args) => {
+        if (args[1] === 'orchestration.federationStop') {
+          throw new Error('connection lost')
+        }
+        return callWorker(...args)
+      }
     )
 
     const stopped = await peers.homeDispatcher.dispatch({

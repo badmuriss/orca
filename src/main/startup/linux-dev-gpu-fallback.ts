@@ -60,7 +60,7 @@ export function installLinuxDevGpuFailureWatch(dependencies: LinuxDevGpuWatchDep
       )
     } catch (error) {
       warn(
-        `[gpu-fallback] failed to persist marker: ${error instanceof Error ? error.message : error}`
+        `[gpu-fallback] failed to persist marker: ${error instanceof Error ? error.message : String(error)}`
       )
       return
     }

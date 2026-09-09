@@ -48,10 +48,7 @@ describe('orchestration worker release inventory', () => {
       reason: 'ownership_transferred',
       processAction: 'none'
     })
-    expect(h.inspectProcessLiveness).toHaveBeenCalledWith(
-      'runtime_test:term_worker:1',
-      JSON.stringify({ kind: 'local', hostId: 'local' })
-    )
+    expect(h.inspectProcessLiveness).not.toHaveBeenCalled()
     expect(h.runtime.closeTerminal).not.toHaveBeenCalled()
     expect(h.db.getWorkerTerminalResourceByOwner(second.dispatchId)?.release_state).not.toBe(
       'released'
@@ -158,7 +155,7 @@ describe('orchestration worker release inventory', () => {
     })
   })
 
-  it('reports abandoned workers as retained instead of reclaimable', async () => {
+  it('releases an abandoned worker whose exact terminal remains live', async () => {
     h.setup()
     const { dispatchId } = await h.startWorker()
     await h.call('orchestration.workerAbandon', { dispatch: dispatchId })
@@ -172,12 +169,8 @@ describe('orchestration worker release inventory', () => {
     )
     await expect(
       h.call('orchestration.workerRelease', { dispatch: dispatchId })
-    ).resolves.toMatchObject({
-      state: 'retained',
-      reason: 'identity_unproven',
-      processAction: 'none'
-    })
-    expect(h.runtime.closeTerminal).not.toHaveBeenCalled()
+    ).resolves.toMatchObject({ state: 'released', processAction: 'closed_agent_terminal' })
+    expect(h.runtime.closeTerminal).toHaveBeenCalledWith('term_worker')
   })
 
   it('worker-show exposes the terminal resource', async () => {

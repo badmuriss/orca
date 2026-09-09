@@ -41,6 +41,7 @@ import type { OrchestrationResetMethods } from './reset/orchestration-reset'
 import type { RunBindingMethods } from './runs/run-binding'
 import type { RunCoordinatorMailRoutingMethods } from './runs/run-coordinator-mail-routing'
 import type { RunCreateMethods } from './runs/run-create'
+import type { RunCompletionMethods } from './runs/run-completion'
 import type { RunDeliveryMethods } from './runs/run-delivery'
 import type { RunLookupMethods } from './runs/run-lookup'
 import type { LegacyCoordinatorMailTakeoverMethods } from './runs/legacy-coordinator-mail-takeover'
@@ -98,6 +99,7 @@ export type OrchestrationDbMethods = AttemptObservationStoreMethods &
   LegacyQuestionLookupMethods &
   LegacyReplyOperationMethods &
   RunCreateMethods &
+  RunCompletionMethods &
   RunBindingMethods &
   RunLookupMethods &
   RunCoordinatorMailRoutingMethods &

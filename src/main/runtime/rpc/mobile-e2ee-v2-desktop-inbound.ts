@@ -40,7 +40,7 @@ export function handleDesktopMobileE2EEV2Inbound(args: {
   }
 }
 
-function runtimeClientCapabilities(plaintext: string): unknown | null {
+function runtimeClientCapabilities(plaintext: string): unknown {
   let value: unknown
   try {
     value = parseRemoteRuntimeJsonText(plaintext)

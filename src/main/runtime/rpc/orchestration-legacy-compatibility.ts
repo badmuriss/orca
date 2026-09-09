@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import type { LegacyCoordinatorAuthorityProof, RpcRequest } from './core'
 import type { OrcaRuntimeService, OrchestrationCompatibilityCallerAuthority } from '../orca-runtime'
 import { CURRENT_CONTRACT_VERSION } from '../orchestration/db'
@@ -14,6 +13,10 @@ import type {
 } from './orchestration-legacy-operation'
 import { LegacyCoordinatorAuthority } from './orchestration-legacy-coordinator-authority'
 import { resolveCurrentRunUseAuthority } from './orchestration-current-run-use-authority'
+import {
+  legacyCoordinatorMutationCallerFingerprint,
+  resolveLegacyRunUseReplay
+} from './orchestration-legacy-run-use-replay'
 
 const COORDINATOR_PREFLIGHT_METHODS = new Set([
   'orchestration.taskCreate',
@@ -69,6 +72,14 @@ export class OrchestrationLegacyCompatibility {
       return { handled: false }
     }
     const values = params as Record<string, unknown>
+    const legacyRunUseReplay = resolveLegacyRunUseReplay(this.runtime, request, values)
+    if (legacyRunUseReplay) {
+      return {
+        handled: false,
+        params: { ...values, run: legacyRunUseReplay.runId },
+        legacyCoordinatorAuthority: legacyRunUseReplay
+      }
+    }
     if (CURRENT_AUTHORITY_PREFLIGHT_METHODS.has(request.method)) {
       const callerAuthority = this.resolveCurrentAuthority(request, values)
       if (callerAuthority) {
@@ -264,18 +275,6 @@ export class OrchestrationLegacyCompatibility {
     }
     return undefined
   }
-}
-
-function legacyCoordinatorMutationCallerFingerprint(
-  authority: LegacyCoordinatorAuthorityProof
-): string {
-  return createHash('sha256')
-    .update(
-      ['legacy-coordinator-v1', authority.runId, authority.terminalHandle, authority.paneKey].join(
-        '\0'
-      )
-    )
-    .digest('hex')
 }
 
 function stringValue(value: unknown): string | undefined {

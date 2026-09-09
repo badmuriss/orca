@@ -76,7 +76,7 @@ describe('orchestration RPC methods', () => {
 
   it('registers all expected methods', () => {
     const registry = buildRegistry(ORCHESTRATION_METHODS)
-    expect(registry.size).toBe(44)
+    expect(registry.size).toBe(45)
     expect(registry.has('orchestration.coordinatorHandoff')).toBe(true)
     expect(registry.has('orchestration.workerRelease')).toBe(true)
     expect(registry.has('orchestration.workerRetain')).toBe(true)
@@ -89,6 +89,7 @@ describe('orchestration RPC methods', () => {
     expect(registry.has('orchestration.runList')).toBe(true)
     expect(registry.has('orchestration.runShow')).toBe(true)
     expect(registry.has('orchestration.runSettle')).toBe(true)
+    expect(registry.has('orchestration.runComplete')).toBe(true)
     expect(registry.has('orchestration.send')).toBe(true)
     expect(registry.has('orchestration.check')).toBe(true)
     expect(registry.has('orchestration.reply')).toBe(true)
@@ -144,6 +145,128 @@ describe('orchestration RPC methods', () => {
       await expect(
         call('orchestration.runSettle', { id: 'run_foreign', from: 'term_coord' })
       ).rejects.toMatchObject({ code: 'run_not_found' })
+    })
+
+    it('completes explicitly and replays the same completion idempotently', async () => {
+      setup()
+      const run = db.getCurrentRunForPane(coordinatorPaneKey)!
+      const task = db.createTask({ spec: 'Ship the required change' })
+      db.updateTaskStatus(task.id, 'completed', 'Verified')
+      const params = {
+        id: run.id,
+        from: 'term_coord',
+        summary: 'Shipped the verified change.',
+        evidence: ['pnpm test: passed']
+      }
+
+      const first = (await call('orchestration.runComplete', params)) as {
+        completion: { completed_by_generation: number }
+        duplicate: boolean
+      }
+      const replay = (await call('orchestration.runComplete', params)) as {
+        duplicate: boolean
+      }
+      const shown = (await call('orchestration.runShow', { id: run.id })) as {
+        run: { completion?: { summary: string } }
+      }
+
+      expect(first).toMatchObject({
+        duplicate: false,
+        completion: { completed_by_generation: run.consumer_generation }
+      })
+      expect(replay.duplicate).toBe(true)
+      expect(shown.run.completion?.summary).toBe('Shipped the verified change.')
+    })
+
+    it('blocks unresolved required work unless every Task has a reasoned waiver', async () => {
+      setup()
+      const run = db.getCurrentRunForPane(coordinatorPaneKey)!
+      const required = db.createTask({ spec: 'Required review' })
+      db.createTask({ spec: 'Optional cleanup probe', purpose: 'operational' })
+      const base = {
+        id: run.id,
+        from: 'term_coord',
+        summary: 'Closed with an explicit scope decision.',
+        evidence: ['Reviewed the remaining scope.']
+      }
+
+      await expect(call('orchestration.runComplete', base)).rejects.toMatchObject({
+        code: 'run_incomplete',
+        data: { blockingTaskIds: [required.id], effectsApplied: false }
+      })
+      const result = await call('orchestration.runComplete', {
+        ...base,
+        waivers: [{ task_id: required.id, reason: 'Owner deferred it to a follow-up.' }]
+      })
+
+      expect(result).toMatchObject({
+        completion: {
+          waivers: [{ task_id: required.id, reason: 'Owner deferred it to a follow-up.' }]
+        }
+      })
+      expect(db.getTask(required.id)?.status).toBe('ready')
+    })
+
+    it('completes while preserving an unverifiable resource as a separate warning', async () => {
+      setup()
+      const run = db.getCurrentRunForPane(coordinatorPaneKey)!
+      const required = db.createTask({ spec: 'Verified deliverable' })
+      db.updateTaskStatus(required.id, 'completed', 'Passed')
+      const lease = db.reserveMaestroTerminalLease({
+        requestId: 'worker:unverifiable',
+        executionHostId: 'ssh:worker-host',
+        workspaceKey: 'folder:remote',
+        runId: run.id,
+        taskId: required.id,
+        attemptId: 'attempt:unverifiable',
+        role: 'worker',
+        title: 'Unverifiable worker',
+        launchProfile: {
+          agent: 'codex',
+          model: null,
+          effort: null,
+          permissionMode: 'default',
+          routeRef: null
+        },
+        spawnedBy: 'coordinator',
+        ownerPrincipal: 'dispatch:unverifiable',
+        retentionPolicy: 'auto_release'
+      })
+      db.db
+        .prepare(
+          "UPDATE maestro_terminal_leases SET lifecycle_state = 'outcome_unknown' WHERE id = ?"
+        )
+        .run(lease.id)
+
+      await expect(
+        call('orchestration.runComplete', {
+          id: run.id,
+          from: 'term_coord',
+          summary: 'Required work is complete.',
+          evidence: ['Deliverable test passed.']
+        })
+      ).resolves.toMatchObject({ duplicate: false })
+      expect(db.getMaestroTerminalLease(lease.id)?.lifecycleState).toBe('outcome_unknown')
+    })
+
+    it('rejects a stale coordinator generation without persisting completion', async () => {
+      setup()
+      const run = db.getCurrentRunForPane(coordinatorPaneKey)!
+      db.bindRun({
+        runId: run.id,
+        coordinatorHandle: 'term_replacement',
+        coordinatorPaneKey: 'tab_replacement:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+      })
+
+      await expect(
+        call('orchestration.runComplete', {
+          id: run.id,
+          from: 'term_coord',
+          summary: 'Stale completion.',
+          evidence: ['No current authority.']
+        })
+      ).rejects.toMatchObject({ code: 'consumer_fenced' })
+      expect(db.getRunCompletion(run.id)).toBeUndefined()
     })
 
     it('creates and binds a Run to the runtime-resolved caller pane', async () => {

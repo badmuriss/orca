@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OrcaRuntimeService } from '../orca-runtime'
 import { OrchestrationDb } from '../orchestration/db'
 import { OrchestrationMutationExecutor } from './orchestration-mutation-executor'
@@ -227,7 +227,6 @@ describe('worker-start transfer mutation recovery', () => {
     db.close()
   })
 })
-import { afterEach } from 'vitest'
 
 const promptParams = {
   terminal: 'term-prompt',

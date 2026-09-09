@@ -83,7 +83,7 @@ export function MaestroWorkspaceBrowserPreview({
   const addressBarRef = useRef<HTMLInputElement | null>(null)
   const latestTarget = useRef(target)
   const addressEditing = useRef(false)
-  const inputQueue = useRef<Promise<unknown>>(Promise.resolve())
+  const inputQueue = useRef<Promise<unknown> | null>(null)
   const pendingWheel = useRef<(MaestroBrowserPreviewPoint & { dx: number; dy: number }) | null>(
     null
   )
@@ -189,7 +189,7 @@ export function MaestroWorkspaceBrowserPreview({
   )
 
   const enqueueInput = (operation: () => Promise<unknown>): void => {
-    const next = inputQueue.current.catch(() => {}).then(operation)
+    const next = (inputQueue.current ?? Promise.resolve()).catch(() => {}).then(operation)
     inputQueue.current = next.catch(() => {})
   }
   const callBrowser = useCallback(

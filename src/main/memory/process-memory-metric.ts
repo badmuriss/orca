@@ -1,14 +1,12 @@
 import os from 'node:os'
-import { exec } from 'node:child_process'
-import { promisify } from 'node:util'
 import type { ProcessMemoryMetric } from '../../shared/process-stats-types'
+import { runProcess } from '../../shared/child-process/run-process'
 import {
   getProcessOutputFields,
   iterateProcessOutputLines
 } from '../../shared/process-output-field-scanner'
 import { enumerateWindowsProcessResources } from './windows-process-resource-collector'
 
-const execAsync = promisify(exec)
 const PROCESS_QUERY_TIMEOUT_MS = 5_000
 const PROCESS_QUERY_MAX_BUFFER = 10 * 1024 * 1024
 
@@ -51,12 +49,17 @@ export async function enumerateHostProcessResources(): Promise<HostProcessResour
 
 async function enumerateUnixProcessResources(): Promise<HostProcessResourceRow[]> {
   try {
-    const { stdout } = await execAsync('ps -eo pid=,ppid=,pcpu=,rss=', {
-      maxBuffer: PROCESS_QUERY_MAX_BUFFER,
-      timeout: PROCESS_QUERY_TIMEOUT_MS,
+    const result = await runProcess({
+      program: 'ps',
+      args: ['-eo', 'pid=,ppid=,pcpu=,rss='],
+      maxOutputBytes: PROCESS_QUERY_MAX_BUFFER,
+      timeoutMs: PROCESS_QUERY_TIMEOUT_MS,
       env: { ...process.env, LC_ALL: 'C', LANG: 'C' }
     })
-    return parsePsOutput(stdout)
+    if (result.code !== 0 || result.timedOut) {
+      throw new Error(result.stderr || `ps exited with code ${result.code ?? 'unknown'}`)
+    }
+    return parsePsOutput(result.stdout)
   } catch (error) {
     console.warn('[memory] ps enumeration failed', error)
     return []

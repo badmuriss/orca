@@ -120,6 +120,7 @@ describe('OrcaRuntimeService', () => {
 
       runtime.setAgentBrowserBridge({
         tabSwitch: tabSwitchMock,
+        getActivePageId: vi.fn(() => 'page-1'),
         getRegisteredTabs: vi.fn(() => new Map([['page-1', 1]])),
         tabList: vi.fn(() => ({
           tabs: [{ browserPageId: 'page-1', index: 0, url: 'about:blank', title: '', active: true }]
@@ -128,7 +129,13 @@ describe('OrcaRuntimeService', () => {
 
       await expect(runtime.browserTabSwitch({ page: 'page-1', focus: true })).resolves.toEqual({
         switched: 0,
-        browserPageId: 'page-1'
+        browserPageId: 'page-1',
+        focusReceipt: {
+          requested: true,
+          exactPageSelected: true,
+          nativePanePaint: 'unobserved',
+          observedAt: null
+        }
       })
       // Bridge is unchanged — focus is delivered to the renderer via IPC, not threaded through bridge state.
       expect(tabSwitchMock).toHaveBeenCalledWith(undefined, undefined, 'page-1')
@@ -248,7 +255,9 @@ describe('OrcaRuntimeService', () => {
         attach: vi.fn(),
         write: vi.fn(),
         resize: vi.fn(),
-        shutdown: vi.fn().mockResolvedValue(undefined),
+        shutdown: vi.fn(async (id: string, opts: { expectedIncarnationId?: string }) =>
+          exitedPtyStopReceipt(id, opts)
+        ),
         sendSignal: vi.fn(),
         getCwd: vi.fn(),
         getInitialCwd: vi.fn(),

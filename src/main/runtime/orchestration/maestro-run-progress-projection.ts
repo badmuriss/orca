@@ -2,7 +2,6 @@ import type { MaestroTerminalLease } from '../../../shared/maestro-terminal-leas
 import type { MaestroBrowserSurfaceReceipt } from '../../../shared/maestro-browser-surface'
 import {
   MAESTRO_RUN_PROGRESS_LIST_LIMIT,
-  MAESTRO_RUN_PROGRESS_TEXT_MAX_LENGTH,
   MaestroRunProgressV2Schema,
   type MaestroRunProgressV2
 } from '../../../shared/maestro-run-progress'
@@ -10,7 +9,14 @@ import type { OrchestrationNestedAgentActivity } from '../../../shared/orchestra
 import type { ExactWorkerProviderSession } from '../../../shared/orchestration-worker-output'
 import { projectMaestroRunResources } from './maestro-run-resource-projection'
 import { latestAcceptedDispatchMessage, parseProgressPayload } from './maestro-run-progress-message'
-import type { DispatchContextRow, MessageRow, RunRow, TaskRow, WorkerDispatchRow } from './types'
+import type {
+  DispatchContextRow,
+  MessageRow,
+  RunCompletion,
+  RunRow,
+  TaskRow,
+  WorkerDispatchRow
+} from './types'
 import {
   projectOperationalTaskOutcome,
   projectTaskProgressOutcome,
@@ -18,8 +24,9 @@ import {
 } from './db/tasks/task-progress-outcome'
 import { disambiguateTaskProgressTitles } from './db/tasks/task-progress-title'
 import { selectCurrentTaskDispatches } from './maestro-current-task-dispatch'
-
-type CreatedRow = { created_at: string; id: string }
+import type { MaestroTerminalLiveness } from './maestro-run-resource-state'
+import { projectMaestroRunCompletion } from './maestro-run-completion-projection'
+import { boundedText, compareCreatedRows } from './maestro-run-progress-text'
 
 export type MaestroRunProgressProjectionInput = {
   run: RunRow
@@ -38,6 +45,8 @@ export type MaestroRunProgressProjectionInput = {
   cleanupHealth: MaestroRunProgressV2['cleanup_health']
   recoveredAuthority: boolean
   browserSurfaceKeys: ReadonlyMap<string, string>
+  terminalLiveness: ReadonlyMap<string, MaestroTerminalLiveness>
+  completion?: RunCompletion
 }
 
 type TaskProjection = {
@@ -209,6 +218,7 @@ export function projectMaestroRunProgress(
         state: activity.state,
         activity_summary: boundedText(activity.description, activity.type)
       })),
+    ...projectMaestroRunCompletion(input.completion),
     resources: projectMaestroRunResources({
       run: input.run,
       tasks,
@@ -221,7 +231,8 @@ export function projectMaestroRunProgress(
       executionHostId: input.executionHostId,
       workspaceKey: input.workspaceKey,
       recoveredAuthority: input.recoveredAuthority,
-      browserSurfaceKeys: input.browserSurfaceKeys
+      browserSurfaceKeys: input.browserSurfaceKeys,
+      terminalLiveness: input.terminalLiveness
     }),
     technical: {
       execution_host_id: input.executionHostId,
@@ -285,16 +296,4 @@ function acceptedTaskResult(result: string | null): string | undefined {
     }
   }
   return undefined
-}
-
-function compareCreatedRows(left: CreatedRow, right: CreatedRow): number {
-  return left.created_at.localeCompare(right.created_at) || left.id.localeCompare(right.id)
-}
-
-function boundedText(value: string, fallback: string): string {
-  const normalized = value.trim().replace(/\s+/g, ' ')
-  const selected = normalized || fallback
-  return selected.length <= MAESTRO_RUN_PROGRESS_TEXT_MAX_LENGTH
-    ? selected
-    : selected.slice(0, MAESTRO_RUN_PROGRESS_TEXT_MAX_LENGTH).trimEnd()
 }

@@ -1,5 +1,9 @@
 import { LOCAL_EXECUTION_HOST_ID, type ExecutionHostId } from '../../shared/execution-host'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
+import {
+  persistExitedWorkerTerminalRetirement as persistExitedWorkerRetirement,
+  type ExitedWorkerTerminalRetirement
+} from './exited-worker-terminal-retirement-persistence'
 import { retireTerminalSurfaceFromPersistence } from './mobile-session-terminal-persistence-retirement'
 import type { OrchestrationDb } from './orchestration/db'
 import {
@@ -228,6 +232,16 @@ export class RuntimeLegacyWorkerTerminalRecoveryPersistence {
       })
       return new Set()
     }
+  }
+
+  async persistExitedWorkerTerminalRetirement(
+    retirement: ExitedWorkerTerminalRetirement
+  ): Promise<boolean> {
+    return persistExitedWorkerRetirement({
+      retirement,
+      store: this.getStore(),
+      getHostId: this.getHostId
+    })
   }
 
   reconcileMissing(candidate: LegacyWorkerRecoveryCandidate): boolean {

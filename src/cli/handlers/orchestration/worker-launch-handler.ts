@@ -39,34 +39,6 @@ export function formatWorkerStartReceipt(worker: WorkerStartCliReceipt): string 
 }
 
 export const ORCHESTRATION_WORKER_LAUNCH_HANDLER: Record<string, CommandHandler> = {
-  'orchestration replace-worker': async ({ flags, client, cwd, json }) => {
-    const result = await callOrchestrationMutation<{
-      runId: string
-      taskId: string
-      dispatchId: string
-      state: string
-      failedStage?: string
-      lastError?: string
-      warning?: string
-    }>(client, flags, 'orchestration.workerStart', {
-      task: getRequiredStringFlag(flags, 'task'),
-      replacementOf: getRequiredStringFlag(flags, 'predecessor'),
-      run: getOptionalStringFlag(flags, 'run'),
-      from: await resolveCoordinatorTerminalHandle(flags, cwd, client),
-      devMode: isDevCliInvocation()
-    })
-    if (result.result.state !== 'ready') {
-      process.exitCode = 1
-    }
-    printResult(result, json, (worker) => {
-      const base = `Worker ${worker.dispatchId} [${worker.state}] for ${worker.taskId}`
-      return worker.lastError
-        ? `${base}\n${worker.failedStage ?? 'start'}: ${worker.lastError}`
-        : worker.warning
-          ? `${base}\nWarning: ${worker.warning}`
-          : base
-    })
-  },
   'orchestration worker-start': async ({ flags, client, cwd, json }) => {
     const model = getOptionalStringFlag(flags, 'model')
     const effort = getOptionalStringFlag(flags, 'effort')
@@ -139,5 +111,33 @@ export const ORCHESTRATION_WORKER_LAUNCH_HANDLER: Record<string, CommandHandler>
         }
       : result
     printResult(renderedResult, json, formatWorkerStart)
+  },
+  'orchestration replace-worker': async ({ flags, client, cwd, json }) => {
+    const result = await callOrchestrationMutation<{
+      runId: string
+      taskId: string
+      dispatchId: string
+      state: string
+      failedStage?: string
+      lastError?: string
+      warning?: string
+    }>(client, flags, 'orchestration.workerStart', {
+      task: getRequiredStringFlag(flags, 'task'),
+      replacementOf: getRequiredStringFlag(flags, 'predecessor'),
+      run: getOptionalStringFlag(flags, 'run'),
+      from: await resolveCoordinatorTerminalHandle(flags, cwd, client),
+      devMode: isDevCliInvocation()
+    })
+    if (result.result.state !== 'ready') {
+      process.exitCode = 1
+    }
+    printResult(result, json, (worker) => {
+      const base = `Worker ${worker.dispatchId} [${worker.state}] for ${worker.taskId}`
+      return worker.lastError
+        ? `${base}\n${worker.failedStage ?? 'start'}: ${worker.lastError}`
+        : worker.warning
+          ? `${base}\nWarning: ${worker.warning}`
+          : base
+    })
   }
 }

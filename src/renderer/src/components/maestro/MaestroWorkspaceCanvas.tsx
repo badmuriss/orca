@@ -125,16 +125,13 @@ export function MaestroWorkspaceCanvas({
     )
   }, [result?.canvas.document.manual_links])
 
-  useEffect(() => {
-    if (
-      resource.mutation?.status === 'stale' ||
-      resource.mutation?.status === 'cancelled' ||
-      resource.mutation?.status === 'unavailable' ||
-      resource.mutation?.status === 'outcome_unknown'
-    ) {
-      setOptimisticManualLinks([])
-    }
-  }, [resource.mutation?.status])
+  const visibleOptimisticManualLinks =
+    resource.mutation?.status === 'stale' ||
+    resource.mutation?.status === 'cancelled' ||
+    resource.mutation?.status === 'unavailable' ||
+    resource.mutation?.status === 'outcome_unknown'
+      ? []
+      : optimisticManualLinks
 
   const selection = useMaestroWorkspaceSelection({
     surfaceKeys,
@@ -366,7 +363,7 @@ export function MaestroWorkspaceCanvas({
         snapshot={snapshot}
         document={document}
         placements={placements}
-        optimisticManualLinks={optimisticManualLinks}
+        optimisticManualLinks={visibleOptimisticManualLinks}
         selectedSurfaceKey={selection.selectedSurfaceKey}
         selectedManualLinkId={selection.selectedManualLinkId}
         onManualLinkSelect={selection.selectManualLink}

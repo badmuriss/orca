@@ -5,11 +5,10 @@ import {
   openCodeClearPtyMock,
   piClearPtyMock
 } from './pty-ipc-mock-registry'
-import { posixOnlyIt, makeDisposable } from './pty-ipc-test-constants'
+import { exitedPtyStopReceipt, makeDisposable, posixOnlyIt } from './pty-ipc-test-constants'
 import { setupPtyIpcSuite } from './pty-ipc-test-harness'
 import * as livePtyGate from '../claude-accounts/live-pty-gate'
 import { registerPtyHandlers, setLocalPtyProvider, getLocalPtyProvider } from './pty'
-import { exitedPtyStopReceipt } from './pty-ipc-test-constants'
 import { join } from 'node:path'
 // Why resolved rather than hardcoded: the wrapper tree is content-addressed.
 import { getShellReadyWrapperRoot } from '../providers/local-pty-shell-ready-wrapper-root'

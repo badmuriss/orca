@@ -1,10 +1,7 @@
 import {
   getRepoExecutionHostId,
   getWorktreeExecutionHostId,
-  isRuntimeOwnedSshTargetId,
   normalizeExecutionHostId,
-  RUNTIME_OWNED_SSH_TARGET_ID_PREFIX,
-  toRuntimeExecutionHostId,
   toSshExecutionHostId
 } from '../../../shared/execution-host'
 import type {
@@ -13,21 +10,18 @@ import type {
   MaestroWorkspaceAnchor
 } from '../../../shared/maestro-contract'
 import type { MaestroPrincipal } from '../../../shared/maestro-actor'
-import { getPtyExecutionHost } from '../../../shared/terminal-execution-host'
 import {
   folderWorkspaceKey,
   parseWorkspaceKey,
   worktreeWorkspaceKey
 } from '../../../shared/workspace-scope'
 import { OrchestrationError } from '../orchestration/orchestration-error'
-import type { OrchestrationCompatibilityTerminalAuthority } from '../orca-runtime'
 import type { RpcContext } from './core'
-
-type ResolvedMaestroWorkspace = {
-  repository_id: string | null
-  execution_host_id: string
-  workspace_key: string
-}
+import {
+  maestroWorkspaceAuthorityMismatch,
+  terminalMatchesMaestroWorkspace,
+  type ResolvedMaestroWorkspace
+} from './maestro-terminal-workspace-authority'
 
 function stablePrincipalId(value: string | undefined, fallback: string): string {
   const normalized = value?.replace(/[^A-Za-z0-9._-]/g, '-')
@@ -139,37 +133,6 @@ export async function resolveMaestroLayoutPrincipal(
   }
 }
 
-function terminalWorkspaceKey(worktreeId: string): string {
-  return parseWorkspaceKey(worktreeId) ? worktreeId : worktreeWorkspaceKey(worktreeId)
-}
-
-function runtimeOwnedSshHostIds(targetId: string): string[] {
-  if (!isRuntimeOwnedSshTargetId(targetId)) {
-    return [toSshExecutionHostId(targetId)]
-  }
-  const runtimeId = targetId.slice(RUNTIME_OWNED_SSH_TARGET_ID_PREFIX.length)
-  return runtimeId
-    ? [toSshExecutionHostId(targetId), toRuntimeExecutionHostId(runtimeId)]
-    : [toSshExecutionHostId(targetId)]
-}
-
-function terminalExecutionHostIds(terminal: OrchestrationCompatibilityTerminalAuthority): string[] {
-  const ptyHost = getPtyExecutionHost(terminal.ptyId)
-  if (ptyHost === 'foreign') {
-    return []
-  }
-  if (ptyHost?.startsWith('ssh:')) {
-    const parsedTargetId = decodeURIComponent(ptyHost.slice('ssh:'.length))
-    return runtimeOwnedSshHostIds(parsedTargetId)
-  }
-  if (ptyHost) {
-    return [ptyHost]
-  }
-  return terminal.hostScope.kind === 'ssh'
-    ? runtimeOwnedSshHostIds(terminal.hostScope.targetId)
-    : ['local']
-}
-
 function principalWorkspace(
   resolved: ResolvedMaestroWorkspace,
   runId: string
@@ -205,11 +168,12 @@ export async function resolveMaestroPrincipal(
       !terminal ||
       terminal.paneKey !== legacyCoordinator.paneKey ||
       run.coordinator_handle !== legacyCoordinator.terminalHandle ||
-      run.coordinator_pane_key !== legacyCoordinator.paneKey ||
-      !terminalExecutionHostIds(terminal).includes(resolvedWorkspace.execution_host_id) ||
-      terminalWorkspaceKey(terminal.worktreeId) !== resolvedWorkspace.workspace_key
+      run.coordinator_pane_key !== legacyCoordinator.paneKey
     ) {
       throw new OrchestrationError('unauthorized', 'Maestro coordinator authority is stale.')
+    }
+    if (!terminalMatchesMaestroWorkspace(context, terminal, resolvedWorkspace, run.id, true)) {
+      throw maestroWorkspaceAuthorityMismatch(terminal, resolvedWorkspace)
     }
     return {
       actor_id: stablePrincipalId(
@@ -237,14 +201,9 @@ export async function resolveMaestroPrincipal(
     if (
       !terminal ||
       terminal.paneKey !== callerAuthority.paneKey ||
-      terminal.processIncarnation !== callerAuthority.processIncarnation ||
-      !terminalExecutionHostIds(terminal).includes(resolvedWorkspace.execution_host_id) ||
-      terminalWorkspaceKey(terminal.worktreeId) !== resolvedWorkspace.workspace_key
+      terminal.processIncarnation !== callerAuthority.processIncarnation
     ) {
-      throw new OrchestrationError(
-        'unauthorized',
-        'The authenticated terminal is not bound to this Maestro workspace.'
-      )
+      throw new OrchestrationError('unauthorized', 'Maestro terminal authority is stale.')
     }
     const dispatch = db.getActiveDispatchForIdentity(
       callerAuthority.terminalHandle,
@@ -259,6 +218,11 @@ export async function resolveMaestroPrincipal(
     const isCoordinator =
       run.coordinator_handle === callerAuthority.terminalHandle &&
       run.coordinator_pane_key === callerAuthority.paneKey
+    if (
+      !terminalMatchesMaestroWorkspace(context, terminal, resolvedWorkspace, run.id, isCoordinator)
+    ) {
+      throw maestroWorkspaceAuthorityMismatch(terminal, resolvedWorkspace)
+    }
     if (!dispatch && !isCoordinator) {
       throw new OrchestrationError(
         'unauthorized',
@@ -287,4 +251,17 @@ export async function resolveMaestroPrincipal(
     session_id: caller,
     workspace: principalWorkspace(resolvedWorkspace, run.id)
   }
+}
+
+export async function resolveMaestroWorkspacePrincipal(
+  context: RpcContext,
+  requested: MaestroDocumentReadScope & { run_id: string }
+): Promise<MaestroPrincipal> {
+  const resolved = await resolveRuntimeWorkspace(context, requested)
+  return resolveMaestroPrincipal(context, {
+    repository_id: resolved.repository_id ?? requested.workspace_key,
+    execution_host_id: requested.execution_host_id,
+    workspace_key: requested.workspace_key,
+    run_id: requested.run_id
+  })
 }

@@ -71,6 +71,30 @@ export function createFederationPeers() {
         'tab_worker:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
       )
       vi.spyOn(runtime, 'getTerminalProcessIncarnation').mockReturnValue('windows_runtime:pty:1')
+      vi.spyOn(runtime, 'getTerminalLivenessVerdict').mockReturnValue({
+        status: 'live',
+        ptyIds: ['pty-windows-worker']
+      })
+      vi.spyOn(runtime, 'getExactWorkerProviderSession').mockReturnValue({
+        paneKey: 'tab_worker:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        processIncarnation: 'windows_runtime:pty:1',
+        connectionId: null,
+        agent: 'codex',
+        providerSession: { key: 'session_id', id: 'windows-lead-session' },
+        observedAt: Date.now(),
+        statusObservedAt: Date.now(),
+        subagents: [],
+        actorAttestation: {
+          authorityId: 'agent-hook-main:test',
+          incarnation: 1,
+          revision: 1,
+          observedAt: Date.now(),
+          provider: 'codex',
+          role: 'lead',
+          eventName: 'PreToolUse',
+          providerSessionId: 'windows-lead-session'
+        }
+      } as never)
       vi.spyOn(runtime, 'getTerminalOrchestrationCliCommand').mockReturnValue('orca')
       vi.spyOn(runtime, 'preflightWorktreeManagedCliExecutable').mockReturnValue('orca')
       vi.spyOn(runtime, 'assertTerminalManagedCliAvailable').mockImplementation(() => {})
@@ -96,6 +120,8 @@ export function createFederationPeers() {
       vi.spyOn(runtime, 'readTerminal').mockResolvedValue({
         handle: 'term_windows_worker',
         status: 'running',
+        tail: ['remote output'],
+        truncated: false,
         entries: [{ cursor: 1, text: 'remote output' }],
         nextCursor: '1',
         limited: false

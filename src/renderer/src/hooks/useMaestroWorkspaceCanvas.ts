@@ -81,16 +81,17 @@ export function useMaestroWorkspaceCanvas(
   const stateRef = useRef(state)
   const requestSequence = useRef(0)
   const appliedSequence = useRef(0)
-  const mutationQueue = useRef<Promise<void>>(Promise.resolve())
+  const mutationQueue = useRef<Promise<void> | null>(null)
   const identityRef = useRef('')
   const generationRef = useRef(0)
+  const activeGenerationRef = useRef<number | null>(null)
   const identity = `${target?.kind ?? 'none'}:${target?.kind === 'environment' ? target.environmentId : ''}:${scope?.execution_host_id ?? ''}:${scope?.workspace_key ?? ''}`
   if (identityRef.current !== identity) {
     identityRef.current = identity
     generationRef.current += 1
     requestSequence.current = 0
     appliedSequence.current = 0
-    mutationQueue.current = Promise.resolve()
+    mutationQueue.current = null
   }
   const renderGeneration = generationRef.current
   stateRef.current = state
@@ -128,18 +129,15 @@ export function useMaestroWorkspaceCanvas(
 
   useEffect(() => {
     let active = true
-    let timer: ReturnType<typeof setTimeout> | undefined
+    let polling = false
     const generation = renderGeneration
+    activeGenerationRef.current = generation
     applyState(() => INITIAL_MAESTRO_WORKSPACE_CANVAS_STATE)
-    if (!target || !scope) {
-      applyState((current) => ({
-        ...current,
-        status: 'unavailable',
-        unavailableReason: 'scope-unavailable'
-      }))
-      return
-    }
     const poll = async (): Promise<void> => {
+      if (!target || !scope || polling) {
+        return
+      }
+      polling = true
       const sequence = ++requestSequence.current
       try {
         const incoming = await getRuntimeMaestroWorkspaceCanvas(target, scope)
@@ -151,23 +149,34 @@ export function useMaestroWorkspaceCanvas(
           applyState((current) => reconcileMaestroWorkspaceCanvasQuery(current, incoming))
         }
       } finally {
-        if (active && generation === generationRef.current) {
-          timer = setTimeout(() => void poll(), 1_500)
-        }
+        polling = false
       }
     }
-    void poll()
+    if (!target || !scope) {
+      applyState((current) => ({
+        ...current,
+        status: 'unavailable',
+        unavailableReason: 'scope-unavailable'
+      }))
+    } else {
+      void poll()
+    }
+    const timer = setInterval(() => void poll(), 1_500)
     return () => {
       active = false
-      if (timer) {
-        clearTimeout(timer)
+      if (activeGenerationRef.current === generation) {
+        activeGenerationRef.current = null
       }
+      clearInterval(timer)
     }
   }, [applyState, renderGeneration, scope, target])
 
   const performMutation = useCallback(
     async (input: MutationInput): Promise<void> => {
-      if (renderGeneration !== generationRef.current) {
+      if (
+        renderGeneration !== generationRef.current ||
+        activeGenerationRef.current !== renderGeneration
+      ) {
         return
       }
       const current = stateRef.current.result
@@ -180,13 +189,20 @@ export function useMaestroWorkspaceCanvas(
         target,
         buildMutationRequest(input, scope, mutationBase)
       )
+      if (generation !== generationRef.current || activeGenerationRef.current !== generation) {
+        return
+      }
       for (let staleRetry = 0; result.status === 'stale' && staleRetry < 2; staleRetry += 1) {
-        if (generation !== generationRef.current) {
+        if (generation !== generationRef.current || activeGenerationRef.current !== generation) {
           return
         }
         const sequence = ++requestSequence.current
         const incoming = await getRuntimeMaestroWorkspaceCanvas(target, scope)
-        if (generation !== generationRef.current || sequence < appliedSequence.current) {
+        if (
+          generation !== generationRef.current ||
+          activeGenerationRef.current !== generation ||
+          sequence < appliedSequence.current
+        ) {
           return
         }
         appliedSequence.current = sequence
@@ -197,12 +213,15 @@ export function useMaestroWorkspaceCanvas(
             target,
             buildMutationRequest(input, scope, mutationBase)
           )
-          if (generation !== generationRef.current) {
+          if (generation !== generationRef.current || activeGenerationRef.current !== generation) {
             return
           }
         } else {
           break
         }
+      }
+      if (generation !== generationRef.current || activeGenerationRef.current !== generation) {
+        return
       }
       applyState((previous) => reconcileMaestroWorkspaceCanvasMutation(previous, result))
       if (result.status === 'applied' || result.status === 'replayed') {
@@ -214,7 +233,7 @@ export function useMaestroWorkspaceCanvas(
 
   const mutate = useCallback(
     (input: MutationInput): Promise<void> => {
-      const queued = mutationQueue.current.then(() => performMutation(input))
+      const queued = (mutationQueue.current ?? Promise.resolve()).then(() => performMutation(input))
       mutationQueue.current = queued.catch(() => undefined)
       return queued
     },

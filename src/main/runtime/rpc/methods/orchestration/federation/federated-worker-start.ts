@@ -133,6 +133,7 @@ export async function startFederatedWorker(args: {
   })
   const createdTask = started.task
   const taskForRemote = task ?? createdTask
+  const attemptId = params.attemptId ?? started.dispatch.id
   db.recordWorkerStage({ dispatchId: started.dispatch.id, stage: 'remote_attach_requested' })
   try {
     const remote = parseRemoteFederatedWorkerStartReceipt(
@@ -144,7 +145,7 @@ export async function startFederatedWorker(args: {
           taskId: taskForRemote.id,
           ...(attemptBoundTransfer
             ? {
-                attemptId: params.attemptId,
+                attemptId,
                 runId,
                 coordinatorGeneration: run.consumer_generation
               }

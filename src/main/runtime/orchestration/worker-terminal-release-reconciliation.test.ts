@@ -73,7 +73,13 @@ function releaseFixture(
     })),
     getTerminalPaneKey: vi.fn(() => PANE_KEY),
     getTerminalProcessIncarnation: vi.fn(() => PROCESS_INCARNATION),
-    getTerminalLivenessVerdict: vi.fn(() => null),
+    getTerminalLivenessVerdict: vi.fn(() =>
+      options.liveness === 'live'
+        ? { status: 'live' as const }
+        : options.liveness === 'unverifiable'
+          ? { status: 'unverifiable' as const, reason: 'owning host unavailable' }
+          : { status: 'exited' as const }
+    ),
     getOrchestrationDispatchAuthority: vi.fn(() =>
       options.liveDispatchAuthority === false
         ? null
@@ -94,6 +100,8 @@ function releaseFixture(
       nextCursor: null
     })),
     inspectTerminalProcessIncarnationLiveness: vi.fn(async () => options.liveness ?? 'exited'),
+    persistExitedWorkerTerminalRetirement: vi.fn(async () => true),
+    notifyExitedWorkerTerminalRetirement: vi.fn(),
     closeTerminal: vi.fn(),
     notifyMessageArrived: vi.fn()
   } as unknown as OrcaRuntimeService
@@ -205,27 +213,44 @@ describe('worker terminal release reconciliation', () => {
     expect(fixture.settleWorkerTerminalRelease).not.toHaveBeenCalled()
   })
 
-  it.each(['live', 'unverifiable'] as const)(
-    'keeps an exited-looking terminal unknown when host evidence is %s',
-    async (liveness) => {
-      const fixture = releaseFixture({ liveness })
+  it('uses live host evidence over an exited-looking terminal record', async () => {
+    const fixture = releaseFixture({ liveness: 'live' })
 
-      await expect(
-        completeWorkerTerminalRelease({
-          runtime: fixture.runtime,
-          db: fixture.db,
-          dispatchId: DISPATCH_ID,
-          resource: workerResource()
-        })
-      ).resolves.toMatchObject({
-        state: 'release_unknown',
-        processAction: 'none',
-        recovery: expect.stringContaining('exact host evidence')
+    await expect(
+      completeWorkerTerminalRelease({
+        runtime: fixture.runtime,
+        db: fixture.db,
+        dispatchId: DISPATCH_ID,
+        resource: workerResource()
       })
-      expect(fixture.runtime.closeTerminal).not.toHaveBeenCalled()
-      expect(fixture.settleWorkerTerminalRelease).not.toHaveBeenCalled()
-    }
-  )
+    ).resolves.toMatchObject({
+      state: 'release_unknown',
+      processAction: 'none',
+      recovery: expect.stringContaining('worker-show')
+    })
+    expect(fixture.runtime.closeTerminal).toHaveBeenCalledOnce()
+    expect(fixture.settleWorkerTerminalRelease).not.toHaveBeenCalled()
+  })
+
+  it('keeps an exited-looking terminal unknown when host evidence is unverifiable', async () => {
+    const liveness = 'unverifiable' as const
+    const fixture = releaseFixture({ liveness })
+
+    await expect(
+      completeWorkerTerminalRelease({
+        runtime: fixture.runtime,
+        db: fixture.db,
+        dispatchId: DISPATCH_ID,
+        resource: workerResource()
+      })
+    ).resolves.toMatchObject({
+      state: 'release_unknown',
+      processAction: 'none',
+      recovery: expect.stringContaining('worker-show')
+    })
+    expect(fixture.runtime.closeTerminal).not.toHaveBeenCalled()
+    expect(fixture.settleWorkerTerminalRelease).not.toHaveBeenCalled()
+  })
 
   it.each([
     {

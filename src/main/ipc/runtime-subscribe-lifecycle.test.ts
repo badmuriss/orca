@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
+  MAESTRO_RUN_COMPLETION_RUNTIME_CAPABILITY,
   MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY,
   STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
 } from '../../shared/protocol-version'
@@ -337,8 +339,10 @@ describe('runtime:subscribe renderer lifecycle cleanup', () => {
     subscribe(harness.sender, 'sub-capabilities')
 
     const expectedCapabilities = [
+      CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
       STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
-      MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY
+      MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY,
+      MAESTRO_RUN_COMPLETION_RUNTIME_CAPABILITY
     ]
     expect(unaryCapabilities).toEqual([expectedCapabilities])
     expect(streamFor('sub-capabilities').clientCapabilities).toEqual(expectedCapabilities)

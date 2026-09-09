@@ -22,7 +22,7 @@ import {
   MobileE2EEV2PhysicalChannel,
   type MobileE2EEV2Socket
 } from './mobile-e2ee-v2-physical-channel'
-import { MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY } from '../../../src/shared/protocol-version'
+import { MOBILE_RUNTIME_CLIENT_CAPABILITIES } from './mobile-runtime-client-capabilities'
 
 const desktop = nacl.box.keyPair.fromSecretKey(new Uint8Array(32).fill(1))
 const client = nacl.box.keyPair.fromSecretKey(new Uint8Array(32).fill(2))
@@ -129,7 +129,7 @@ describe('mobile E2EE v2 physical channel', () => {
     })
     expect(JSON.parse(new TextDecoder().decode(capabilities!))).toEqual({
       type: 'runtime_client_capabilities',
-      clientCapabilities: [MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY]
+      clientCapabilities: MOBILE_RUNTIME_CLIENT_CAPABILITIES
     })
     expect(ctx.onAuthenticated).toHaveBeenCalledOnce()
     expect(ctx.onError).not.toHaveBeenCalled()

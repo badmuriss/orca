@@ -188,6 +188,35 @@ describe('MobileMaestroProgress', () => {
     expect(text).toContain('Cleanup is unverifiable for 1 worker resource.')
   })
 
+  it('shows coordinator completion while retaining pending Tasks and health warnings', () => {
+    const text = renderProgress(
+      progressV2({
+        completion: {
+          state: 'completed',
+          summary: 'Accepted the mobile implementation.',
+          evidence: ['Mobile tests passed.'],
+          waivers: [{ task_id: 'task-next', reason: 'Deferred with owner approval.' }],
+          completed_at: '2026-09-08T12:00:00.000Z',
+          completed_by: { handle: 'term_coord', generation: 4 }
+        },
+        cleanup_health: {
+          state: 'unverifiable',
+          count: 1,
+          warning: 'One terminal remains unverifiable.'
+        }
+      })
+    )
+
+    expect(text).toContain('Completed')
+    expect(text).toContain('Run completion')
+    expect(text).toContain('Accepted the mobile implementation.')
+    expect(text).toContain('Completed by term_coord · coordinator generation 4 · 1 evidence item')
+    expect(text).toContain('Mobile tests passed.')
+    expect(text).toContain('Deferred with owner approval.')
+    expect(text).toContain('One terminal remains unverifiable.')
+    expect(text).toContain('33% · 1/3 tasks')
+  })
+
   it('renders blocked reasons without relying on semantic color alone', () => {
     const text = renderProgress(
       progressV2({

@@ -9,7 +9,7 @@ import {
   Workflow,
   X
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { WorkspaceSurface } from '../../../../shared/maestro-workspace-canvas'
 import { Button } from '@/components/ui/button'
 import {
@@ -92,11 +92,10 @@ export function MaestroWorkspaceWindow({
   const [focusTerminalOnMount, setFocusTerminalOnMount] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [closeRequested, setCloseRequested] = useState(false)
-  useEffect(() => {
-    if (!selected) {
-      setFocusTerminalOnMount(false)
-    }
-  }, [selected])
+  const selectWithoutTerminalFocus = (): void => {
+    setFocusTerminalOnMount(false)
+    onSelect()
+  }
   const Icon = SURFACE_ICON[surface.content_type]
   const normalizedFunction = agentFunctionLabel?.trim()
   const visibleTitle = resolveMaestroWorkspaceSurfaceTitle(
@@ -121,7 +120,7 @@ export function MaestroWorkspaceWindow({
     void onClose().catch(() => setCloseRequested(false))
   }
   return (
-    <ContextMenu onOpenChange={(open) => open && onSelect()}>
+    <ContextMenu onOpenChange={(open) => open && selectWithoutTerminalFocus()}>
       <ContextMenuTrigger asChild>
         <article
           className="maestro-workspace-window absolute flex overflow-visible rounded-xl border bg-card shadow-xs outline-none transition-[border-color,box-shadow] focus-visible:ring-2 focus-visible:ring-ring"
@@ -158,12 +157,12 @@ export function MaestroWorkspaceWindow({
           tabIndex={0}
           onFocus={(event) => {
             if (event.target === event.currentTarget) {
-              onSelect()
+              selectWithoutTerminalFocus()
             }
           }}
           onPointerDown={(event) => {
             if (event.target === event.currentTarget) {
-              onSelect()
+              selectWithoutTerminalFocus()
             }
           }}
         >
@@ -174,7 +173,7 @@ export function MaestroWorkspaceWindow({
             <header
               className="flex h-12 shrink-0 cursor-move items-center gap-2 border-b border-border/80 bg-muted/35 px-2.5"
               onPointerDown={(event) => {
-                onSelect()
+                selectWithoutTerminalFocus()
                 startMaestroWorkspaceWindowGesture(
                   event,
                   worldZoom,
@@ -228,7 +227,7 @@ export function MaestroWorkspaceWindow({
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => {
                       event.stopPropagation()
-                      onSelect()
+                      selectWithoutTerminalFocus()
                       setRenaming(true)
                     }}
                   >
@@ -311,7 +310,7 @@ export function MaestroWorkspaceWindow({
                 runtimeTarget={runtimeTarget}
                 previewMode={previewMode}
                 selected={selected}
-                focusTerminalOnMount={focusTerminalOnMount}
+                focusTerminalOnMount={selected && focusTerminalOnMount}
                 onRequestTerminalInput={() => {
                   setFocusTerminalOnMount(true)
                   if (!selected) {
@@ -356,7 +355,7 @@ export function MaestroWorkspaceWindow({
               { value0: visibleTitle }
             )}
             onPointerDown={(event) => {
-              onSelect()
+              selectWithoutTerminalFocus()
               startMaestroWorkspaceWindowGesture(
                 event,
                 worldZoom,

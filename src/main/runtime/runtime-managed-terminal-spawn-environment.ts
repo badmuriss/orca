@@ -1,4 +1,3 @@
-// @ts-nocheck -- bridges the mechanically split runtime's protected launch helpers.
 import {
   applyManagedCliContextEnv,
   stripManagedCliContextEnvKeys

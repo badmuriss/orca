@@ -67,8 +67,9 @@ export function useTabGroupTabCloseCommands({
       return
     }
     // Why: split-group closes bypass legacy Terminal.tsx; deselect the emptied worktree here or the window goes blank instead of landing.
-    const { renderableTabCount } = state.reconcileWorktreeTabModel(worktreeId)
-    if (renderableTabCount === 0) {
+    const { renderableTabCount, activeRenderableTabId } =
+      state.reconcileWorktreeTabModel(worktreeId)
+    if (renderableTabCount === 0 && !activeRenderableTabId) {
       setActiveWorktree(null)
     }
   }, [setActiveWorktree, worktreeId])

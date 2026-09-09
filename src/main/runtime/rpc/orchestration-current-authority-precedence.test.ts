@@ -53,7 +53,10 @@ describe('current orchestration authority precedence', () => {
 
     expect(response).toMatchObject({
       ok: true,
-      result: { binding: { consumerGeneration: 1 } }
+      result: {
+        run: { consumer_generation: 1 },
+        mutation: { replayed: false, requestId: 'current-run-use-restart' }
+      }
     })
     expect(harness.db.getCoordinatorLease(run.id, 1)).toMatchObject({
       terminalHandle: CURRENT_COORDINATOR_HANDLE,

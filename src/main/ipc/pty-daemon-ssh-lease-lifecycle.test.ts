@@ -76,6 +76,7 @@ describe('registerPtyHandlers', () => {
         })
         const store = {
           markSshRemotePtyLease: vi.fn(),
+          recordSshRemotePtyKillIntent: vi.fn(),
           clearSshRemotePtyKillIntent: vi.fn()
         }
         registerSshPtyProvider('ssh-1', {
@@ -142,6 +143,7 @@ describe('registerPtyHandlers', () => {
       it('does not tombstone an SSH lease when explicit kill shutdown fails transiently', async () => {
         const store = {
           markSshRemotePtyLease: vi.fn(),
+          recordSshRemotePtyKillIntent: vi.fn(),
           clearSshRemotePtyKillIntent: vi.fn()
         }
         registerSshPtyProvider('ssh-1', {

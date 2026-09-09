@@ -467,6 +467,14 @@ describe('Maestro projection contract', () => {
 
     expect(home.nodes.map((node) => node.id)).toEqual(['task-1', 'portal-1'])
     expect(remote.nodes.map((node) => node.id)).toEqual(['portal-1', 'attempt-1', 'terminal-1'])
+    expect(home.materialization).toMatchObject({
+      accepted: { nodes: 4 },
+      materialized: { nodes: 2 },
+      excludedNodes: [
+        { id: 'attempt-1', reason: 'workspace_mismatch' },
+        { id: 'terminal-1', reason: 'workspace_mismatch' }
+      ]
+    })
     expect(home.nodes.find((node) => node.id === 'portal-1')).toMatchObject({
       portalDirection: 'to-execution',
       destinationExecutionHostId: 'ssh:remote-1',

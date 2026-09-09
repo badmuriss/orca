@@ -22,6 +22,7 @@ import type { LegacyWorkerTerminalRecoveryPlan } from './orchestration/orchestra
 import type { LegacyWorkerTerminalRecoveryResult } from './runtime-legacy-worker-terminal-recovery-types'
 import { makePaneKey } from '../../shared/stable-pane-id'
 import { runtimeWorktreeIdsEqual } from './runtime-worktree-path-identity'
+import type { ExitedWorkerTerminalRetirement } from './exited-worker-terminal-retirement-persistence'
 
 export class OrcaRuntimeWithFenceAutomationOwner extends OrcaRuntimeWithPtyForegroundProcessReads {
   protected fenceAutomationOwner(
@@ -171,6 +172,16 @@ export class OrcaRuntimeWithFenceAutomationOwner extends OrcaRuntimeWithPtyForeg
 
   prepareLegacyWorkerTerminalRecovery(): LegacyWorkerTerminalRecoveryPlan {
     return this.legacyWorkerRecovery.prepare()
+  }
+
+  persistExitedWorkerTerminalRetirement(
+    retirement: ExitedWorkerTerminalRetirement
+  ): Promise<boolean> {
+    return this.legacyWorkerRecoveryPersistence.persistExitedWorkerTerminalRetirement(retirement)
+  }
+
+  notifyExitedWorkerTerminalRetirement(paneKey: string): void {
+    this.notifier?.resolveLegacyWorkerTerminalRecovery?.(paneKey, 'exited')
   }
 
   protected async flushWorkspaceSessionOrThrowAsync(): Promise<void> {

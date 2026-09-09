@@ -4,10 +4,10 @@ Este guia cobre a validação manual e automatizada do Maestro Canvas no desktop
 
 ## Preparação
 
-Use a branch da feature e instale as dependências na raiz do repositório:
+Use a branch da feature e instale as dependências na raiz do repositório. Os
+comandos abaixo partem da raiz; não copie um caminho de máquina de outra pessoa:
 
 ```bash
-cd /home/badmuriss/Documents/orca
 git switch badmuriss/maestro-canvas
 pnpm install
 ```
@@ -17,8 +17,7 @@ pnpm install
 Inicie o Orca:
 
 ```bash
-cd /home/badmuriss/Documents/orca
-pnpm dev
+ORCA_BACKGROUND_LAUNCH=1 pnpm dev
 ```
 
 No Linux, o runner detecta uma sequência fatal de falhas da GPU e reinicia uma única vez com renderização por software. Não é necessário executar `pnpm dev` novamente. Se a retomada também falhar, o runner encerra em vez de entrar em loop.
@@ -36,14 +35,18 @@ Abra um projeto ou workspace e valide:
 9. Uma nova annotation cria um Markdown normal e permite editar conteúdo e cor depois da criação.
 10. O scroll aplica zoom. `Shift+scroll` move na horizontal. `Ctrl+scroll`, ou `Command+scroll` no macOS, move na vertical.
 11. O painel de progresso distingue concluído, ativo, pendente, bloqueado e próximo passo.
+12. Uma Task com retry bem-sucedido mostra o Attempt anterior no histórico, sem manter uma Task falha extra na lista padrão.
+13. Recursos aceitos e não materializados aparecem nos diagnósticos com motivo, em vez de desaparecer silenciosamente.
+14. Perda de contato com runtime local, SSH ou servidor pareado aparece como `unverifiable`, nunca como `exited` inferido.
+15. A conclusão explícita do Run mostra resumo, evidências, geração coordenadora e eventuais dispensas sem esconder Tasks pendentes.
+16. Um recurso `unverifiable` continua como aviso de saúde depois da conclusão e não é apresentado como encerrado.
 
 ## Testes focados do desktop
 
 Rode os testes unitários da superfície atual do Maestro:
 
 ```bash
-cd /home/badmuriss/Documents/orca
-pnpm exec vitest run --config config/vitest.config.ts \
+ORCA_BACKGROUND_LAUNCH=1 pnpm exec vitest run --config config/vitest.config.ts \
   src/renderer/src/components/maestro/MaestroWorkspaceBrowserPreview.test.tsx \
   src/renderer/src/components/maestro/MaestroWorkspaceContentPreview.test.tsx \
   src/renderer/src/components/maestro/MaestroWorkspaceWindow.test.tsx \
@@ -57,7 +60,6 @@ pnpm exec vitest run --config config/vitest.config.ts \
 Valide lint, formatação e whitespace nos arquivos principais:
 
 ```bash
-cd /home/badmuriss/Documents/orca
 pnpm exec oxfmt --check src/renderer/src/components/maestro tests/e2e/maestro-workspace-tab-canvas.spec.ts
 pnpm exec oxlint src/renderer/src/components/maestro tests/e2e/maestro-workspace-tab-canvas.spec.ts
 git diff --check
@@ -72,7 +74,6 @@ O E2E precisa de um build criado com `--mode e2e`. Um build comum não expõe `w
 Este comando prepara o runtime Electron, cria o build correto e executa toda a spec do Maestro com um worker:
 
 ```bash
-cd /home/badmuriss/Documents/orca
 ORCA_E2E_HEADLESS=1 pnpm run test:e2e -- \
   tests/e2e/maestro-workspace-tab-canvas.spec.ts \
   --workers=1 \
@@ -84,14 +85,12 @@ ORCA_E2E_HEADLESS=1 pnpm run test:e2e -- \
 Crie o build uma vez:
 
 ```bash
-cd /home/badmuriss/Documents/orca
-pnpm exec electron-vite build --mode e2e
+ORCA_BACKGROUND_LAUNCH=1 pnpm exec electron-vite build --mode e2e
 ```
 
 Depois rode apenas os cenários de Browser e conteúdo renderizado:
 
 ```bash
-cd /home/badmuriss/Documents/orca
 SKIP_BUILD=1 ORCA_E2E_HEADLESS=1 pnpm exec playwright test \
   tests/e2e/maestro-workspace-tab-canvas.spec.ts \
   --config tests/playwright.config.ts \
@@ -104,7 +103,6 @@ SKIP_BUILD=1 ORCA_E2E_HEADLESS=1 pnpm exec playwright test \
 Capture todos os estados de refinamento visual com o mesmo build:
 
 ```bash
-cd /home/badmuriss/Documents/orca
 SKIP_BUILD=1 ORCA_E2E_HEADLESS=1 pnpm exec playwright test \
   tests/e2e/maestro-workspace-tab-canvas.visual.spec.ts \
   --config tests/playwright.config.ts \
@@ -129,15 +127,14 @@ O mobile precisa do Orca desktop para fornecer o servidor RPC na porta `6768`.
 No primeiro terminal, na raiz do repositório:
 
 ```bash
-cd /home/badmuriss/Documents/orca
-pnpm dev
+ORCA_BACKGROUND_LAUNCH=1 pnpm dev
 lsof -nP -iTCP:6768 -sTCP:LISTEN
 ```
 
 No segundo terminal:
 
 ```bash
-cd /home/badmuriss/Documents/orca/mobile
+cd mobile
 pnpm install
 pnpm start
 ```
@@ -145,7 +142,7 @@ pnpm start
 Para compilar um development client nativo:
 
 ```bash
-cd /home/badmuriss/Documents/orca/mobile
+cd mobile
 pnpm exec expo run:android
 pnpm start --dev-client
 ```
@@ -153,7 +150,7 @@ pnpm start --dev-client
 No macOS com Xcode:
 
 ```bash
-cd /home/badmuriss/Documents/orca/mobile
+cd mobile
 pnpm exec expo run:ios
 pnpm start --dev-client
 ```
@@ -167,13 +164,15 @@ Depois do pareamento, abra um workspace no mobile e valide:
 3. Pan, zoom, seleção, `Fit` e Inspector funcionam em telefone e tablet.
 4. O handoff abre o Terminal ou Browser exato, sem criar uma cópia.
 5. Estados vazio, indisponível e conteúdo populado continuam legíveis.
+6. O primeiro gesto diagonal move os dois eixos; uma pinça parada começa o zoom sem exigir pan prévio.
+7. Selecionar um Terminal carrega somente o preview escolhido e `Fit` enquadra o grafo sem iniciar todos os Terminals.
 
 ## Testes focados do mobile
 
 Execute a partir de `mobile/`:
 
 ```bash
-cd /home/badmuriss/Documents/orca/mobile
+cd mobile
 pnpm exec vitest run src/maestro/mobile-maestro-geometry.test.ts
 pnpm typecheck
 pnpm lint

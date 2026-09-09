@@ -1,5 +1,5 @@
-import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import { runProcessSync } from '../../shared/child-process/run-process'
 
 /**
  * Where an Electron fixture can find a display on this host.
@@ -16,8 +16,11 @@ export type ElectronFixtureLaunch = {
 }
 
 function hasXvfbRun(): boolean {
-  const probe = spawnSync('xvfb-run', ['--help'], { encoding: 'utf8' })
-  return !probe.error
+  try {
+    return runProcessSync({ program: 'xvfb-run', args: ['--help'] }).code === 0
+  } catch {
+    return false
+  }
 }
 
 /** A display is usable only when both the variable and its socket are present. */

@@ -1,17 +1,10 @@
 import { z } from 'zod'
-import {
-  RemoteFederatedWorkerReleaseReceiptSchema,
-  RemoteFederatedWorkerReleaseStatusSchema,
-  matchesFederatedReleaseTarget,
-  unverifiableFederatedReleaseReceipt,
-  type FederatedWorkerReleaseReceipt
-} from '../../orchestration-federated-release-receipt'
 import { defineMethod, type RpcMethod } from '../../../core'
 import { requiredString } from '../../../schemas'
 import { archiveSummary, completeWorkerTerminalRelease } from './worker-release-completion'
 import { OrchestrationError } from '../../../../orchestration/orchestration-error'
 import { resolvePinnedFederatedServer } from './worker-observation'
-import { ORCHESTRATION_FEDERATION_WORKER_RELEASE_RUNTIME_CAPABILITY } from '../../../../../../shared/protocol-version'
+import { releaseFederatedWorker } from '../federation/federated-worker-release'
 
 const WorkerDispatchParams = z.object({ dispatch: requiredString('Missing --dispatch') })
 
@@ -33,15 +26,12 @@ export const ORCHESTRATION_WORKER_RELEASE_METHODS: RpcMethod[] = [
             'Federated worker release requires a durable retry request.'
           )
         }
-        const dispatch = db.getDispatchContextById(params.dispatch)
-        const worker = db.getWorkerDispatch(params.dispatch)
         return releaseFederatedWorker({
           runtime,
+          server: resolvePinnedFederatedServer(runtime, federated),
           dispatchId: params.dispatch,
           federated,
-          dispatch,
-          worker,
-          mutationId: orchestrationMutation.requestId
+          requestId: orchestrationMutation.requestId
         })
       }
       const requested = db.requestWorkerTerminalRelease(params.dispatch)
@@ -133,81 +123,3 @@ export const ORCHESTRATION_WORKER_RELEASE_METHODS: RpcMethod[] = [
     }
   })
 ]
-
-type ReleaseOrchestrationDb = ReturnType<
-  Parameters<RpcMethod['handler']>[1]['runtime']['getOrchestrationDb']
->
-
-async function releaseFederatedWorker(args: {
-  runtime: Parameters<RpcMethod['handler']>[1]['runtime']
-  dispatchId: string
-  federated: NonNullable<ReturnType<ReleaseOrchestrationDb['getFederatedDispatch']>>
-  dispatch: ReturnType<ReleaseOrchestrationDb['getDispatchContextById']>
-  worker: ReturnType<ReleaseOrchestrationDb['getWorkerDispatch']>
-  mutationId: string
-}): Promise<FederatedWorkerReleaseReceipt> {
-  const server = resolvePinnedFederatedServer(args.runtime, args.federated)
-  try {
-    const rawStatus = await args.runtime.callOrchestrationWorkerServer(
-      server.environmentId,
-      'status.get',
-      undefined,
-      15_000
-    )
-    const parsedStatus = RemoteFederatedWorkerReleaseStatusSchema.safeParse(rawStatus)
-    if (!parsedStatus.success) {
-      return unverifiableFederatedReleaseReceipt(
-        args.dispatchId,
-        'The execution host did not provide its current runtime identity.'
-      )
-    }
-    const status = parsedStatus.data
-    if (
-      !status.capabilities?.includes(ORCHESTRATION_FEDERATION_WORKER_RELEASE_RUNTIME_CAPABILITY)
-    ) {
-      return {
-        dispatchId: args.dispatchId,
-        state: 'retained',
-        reason: 'federation_unsupported',
-        processAction: 'none',
-        archive: null,
-        recovery: `Connected server ${server.name} does not support authoritative worker release.`
-      }
-    }
-    const rawRemote = await args.runtime.callOrchestrationWorkerServer(
-      server.environmentId,
-      'orchestration.federationRelease',
-      { dispatchId: args.dispatchId },
-      30_000,
-      { orchestrationRequestId: args.mutationId }
-    )
-    const parsedRemote = RemoteFederatedWorkerReleaseReceiptSchema.safeParse(rawRemote)
-    if (
-      !parsedRemote.success ||
-      !matchesFederatedReleaseTarget(parsedRemote.data, { ...args, runtimeEpoch: status.runtimeId })
-    ) {
-      return unverifiableFederatedReleaseReceipt(
-        args.dispatchId,
-        'The execution host returned an invalid or mismatched worker release receipt.'
-      )
-    }
-    const remote = parsedRemote.data
-    return {
-      dispatchId: args.dispatchId,
-      state: remote.state,
-      ...(remote.reason ? { reason: remote.reason } : {}),
-      processAction: remote.processAction,
-      archive: null,
-      ...(remote.lastError ? { lastError: remote.lastError } : {}),
-      ...(remote.recovery ? { recovery: remote.recovery } : {})
-    }
-  } catch (error) {
-    if (error instanceof OrchestrationError && error.code === 'peer_changed') {
-      throw error
-    }
-    return unverifiableFederatedReleaseReceipt(
-      args.dispatchId,
-      error instanceof Error ? error.message : String(error)
-    )
-  }
-}

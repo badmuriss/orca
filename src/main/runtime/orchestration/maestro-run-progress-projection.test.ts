@@ -164,6 +164,7 @@ function project(overrides: Partial<Parameters<typeof projectMaestroRunProgress>
     cleanupHealth: { state: 'clean', count: 0 },
     recoveredAuthority: false,
     browserSurfaceKeys: new Map(),
+    terminalLiveness: new Map(),
     ...overrides
   })
 }
@@ -214,11 +215,13 @@ describe('Maestro Run progress projection', () => {
       observedAt: Date.parse('2026-08-28T10:02:00.000Z')
     }
 
+    const activeLease = lease(first.id, 'active')
     const result = project({
       tasks: [second, first],
       dispatches: [firstDispatch],
       messages: [rejected, accepted],
-      terminalLeases: [lease(first.id, 'active')],
+      terminalLeases: [activeLease],
+      terminalLiveness: new Map([[activeLease.id, 'live']]),
       workerDispatches: [worker],
       browserSurfaces: [
         browserReceipt({
@@ -335,6 +338,44 @@ describe('Maestro Run progress projection', () => {
     ])
   })
 
+  it('keeps explicit completion stable beside pending waived work and unverifiable resources', () => {
+    const pending = task('task-1', 'ready')
+    const completion = {
+      run_id: run.id,
+      summary: 'Accepted the verified deliverable and deferred one Task.',
+      evidence: ['Focused regressions passed.'],
+      waivers: [{ task_id: pending.id, reason: 'Deferred by the coordinator.' }],
+      completed_by_handle: 'coordinator-1',
+      completed_by_generation: 1,
+      completed_at: '2026-08-28T10:05:00.000Z'
+    }
+
+    const first = project({
+      tasks: [pending],
+      completion,
+      cleanupHealth: {
+        state: 'unverifiable',
+        count: 1,
+        warning: 'One terminal cannot be verified.'
+      }
+    })
+    const refreshed = project({
+      tasks: [pending],
+      completion,
+      cleanupHealth: { state: 'failed', count: 1, warning: 'Cleanup failed.' }
+    })
+
+    expect(first.execution).toMatchObject({ state: 'active', counts: { pending: 1 } })
+    expect(first.completion).toMatchObject({
+      state: 'completed',
+      summary: completion.summary,
+      waivers: completion.waivers
+    })
+    expect(first.cleanup_health.state).toBe('unverifiable')
+    expect(refreshed.completion).toEqual(first.completion)
+    expect(refreshed.cleanup_health.state).toBe('failed')
+  })
+
   it('derives cancellation from an explicit operator-close terminal reason', () => {
     const cancelled = task('task-1', 'failed', { result: 'Cancelled by operator.' })
     const result = project({
@@ -363,6 +404,7 @@ describe('Maestro Run progress projection', () => {
     })
     const successfulRetry = dispatch('dispatch-2', completedTask.id, {
       status: 'completed',
+      retry_of_dispatch_id: failedAttempt.id,
       created_at: '2026-08-28T10:03:00.000Z',
       completed_at: '2026-08-28T10:04:00.000Z'
     })
@@ -379,6 +421,28 @@ describe('Maestro Run progress projection', () => {
     ).toEqual([
       { reference: successfulRetry.id, title: 'Dispatch 2 · Implement progress' },
       { reference: successfulRetry.id, title: 'Attempt 2 · Implement progress' }
+    ])
+  })
+
+  it('selects the retry successor when Dispatch timestamps tie and IDs sort backwards', () => {
+    const completedTask = task('task-1', 'completed')
+    const failedAttempt = dispatch('dispatch-z', completedTask.id, {
+      status: 'failed',
+      created_at: '2026-08-28T10:01:00.000Z'
+    })
+    const successfulRetry = dispatch('dispatch-a', completedTask.id, {
+      status: 'completed',
+      retry_of_dispatch_id: failedAttempt.id,
+      created_at: failedAttempt.created_at
+    })
+
+    const result = project({
+      tasks: [completedTask],
+      dispatches: [successfulRetry, failedAttempt]
+    })
+
+    expect(result.resources?.filter((resource) => resource.kind === 'dispatch')).toEqual([
+      expect.objectContaining({ reference: successfulRetry.id, state: 'completed' })
     ])
   })
 

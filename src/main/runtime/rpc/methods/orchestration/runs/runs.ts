@@ -34,6 +34,23 @@ const RunSettleParams = z.object({
   id: requiredString('Missing --id'),
   from: requiredString('Missing coordinator terminal')
 })
+const RunCompleteParams = z.object({
+  id: requiredString('Missing --id'),
+  from: requiredString('Missing coordinator terminal'),
+  summary: z.string().trim().min(1).max(2_048),
+  evidence: z.array(z.string().trim().min(1).max(2_048)).min(1).max(64),
+  waivers: z
+    .array(
+      z
+        .object({
+          task_id: z.string().trim().min(1).max(512),
+          reason: z.string().trim().min(1).max(2_048)
+        })
+        .strict()
+    )
+    .max(64)
+    .default([])
+})
 
 export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
   ...ORCHESTRATION_COORDINATOR_HANDOFF_METHODS,
@@ -131,7 +148,7 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
       if (priorRun && priorRun.id !== params.id) {
         runtime.cancelMessageWaiters(`run:${priorRun.id}`)
       }
-      return { run: exposeRun(run) }
+      return { run: exposeRun(run, db.getRunCompletion(run.id)) }
     }
   }),
   defineMethod({
@@ -144,7 +161,8 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
         requireStablePane: true
       })
       const run = runtime.getOrchestrationDb().getCurrentRunForPane(paneKey)
-      return { run: run ? exposeRun(run) : null }
+      const db = runtime.getOrchestrationDb()
+      return { run: run ? exposeRun(run, db.getRunCompletion(run.id)) : null }
     }
   }),
   defineMethod({
@@ -152,7 +170,12 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
     params: RunListParams,
     handler: (params, { runtime }) => {
       const listed = runtime.getOrchestrationDb().listRuns(params)
-      return { ...listed, runs: listed.runs.map(exposeRun) }
+      return {
+        ...listed,
+        runs: listed.runs.map((run) =>
+          exposeRun(run, runtime.getOrchestrationDb().getRunCompletion(run.id))
+        )
+      }
     }
   }),
   defineMethod({
@@ -163,7 +186,35 @@ export const ORCHESTRATION_RUN_METHODS: RpcMethod[] = [
       if (!run) {
         throw new OrchestrationError('run_not_found', `Run ${params.id} was not found.`)
       }
-      return { run: exposeRun(run) }
+      return { run: exposeRun(run, runtime.getOrchestrationDb().getRunCompletion(run.id)) }
+    }
+  }),
+  defineMethod({
+    name: 'orchestration.runComplete',
+    params: RunCompleteParams,
+    handler: (params, { legacyCoordinatorRunId, orchestrationCompatibilityEvidence, runtime }) => {
+      const run = resolveRunScope(runtime, {
+        runId: params.id,
+        callerTerminalHandle: params.from,
+        requireCurrentConsumer: true,
+        legacyCoordinatorRunId,
+        callerEvidence: orchestrationCompatibilityEvidence
+      })
+      if (!run.coordinator_pane_key) {
+        throw new OrchestrationError(
+          'stable_pane_required',
+          'The coordinator Run has no stable pane identity.'
+        )
+      }
+      return runtime.getOrchestrationDb().completeRun({
+        runId: run.id,
+        summary: params.summary,
+        evidence: params.evidence,
+        waivers: params.waivers,
+        coordinatorHandle: params.from,
+        coordinatorPaneKey: run.coordinator_pane_key,
+        coordinatorGeneration: run.consumer_generation
+      })
     }
   }),
   defineMethod({

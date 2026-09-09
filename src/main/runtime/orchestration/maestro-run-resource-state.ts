@@ -5,6 +5,8 @@ import type { OrchestrationNestedAgentActivity } from '../../../shared/orchestra
 import type { DispatchContextRow, WorkerDispatchRow } from './types'
 import type { TaskProgressOutcome } from './db/tasks/task-progress-outcome'
 
+export type MaestroTerminalLiveness = 'live' | 'unverifiable' | 'exited'
+
 export function taskResourceState(outcome: TaskProgressOutcome): MaestroRunResource['state'] {
   const states: Record<TaskProgressOutcome, MaestroRunResource['state']> = {
     pending: 'loading',
@@ -114,14 +116,13 @@ export function terminalResourceLiveness(
   if (lease.cleanupReceipt) {
     return lease.cleanupReceipt.verdict
   }
-  if (lease.lifecycleState === 'outcome_unknown') {
-    return 'unverifiable'
-  }
-  return ['released', 'archived', 'superseded'].includes(lease.lifecycleState) ? 'exited' : 'live'
+  return 'unverifiable'
 }
 
-export function terminalResourceDetail(lease: MaestroTerminalLease): string {
-  const liveness = terminalResourceLiveness(lease)
+export function terminalResourceDetail(
+  lease: MaestroTerminalLease,
+  liveness: MaestroTerminalLiveness = terminalResourceLiveness(lease)
+): string {
   if (liveness === 'unverifiable') {
     return 'Terminal liveness is unverifiable.'
   }
@@ -179,9 +180,10 @@ export function nestedResourceState(
 
 export function terminalCleanupResource(
   lease: MaestroTerminalLease,
-  taskTitle: string
+  taskTitle: string,
+  liveness: MaestroTerminalLiveness = terminalResourceLiveness(lease)
 ): MaestroRunResource {
-  const state = terminalCleanupState(lease)
+  const state = terminalCleanupState(lease, liveness)
   return {
     kind: 'cleanup',
     reference: `cleanup:${lease.id}`,
@@ -193,8 +195,12 @@ export function terminalCleanupResource(
   }
 }
 
-function terminalCleanupState(lease: MaestroTerminalLease): MaestroRunResource['state'] {
+function terminalCleanupState(
+  lease: MaestroTerminalLease,
+  liveness: MaestroTerminalLiveness
+): MaestroRunResource['state'] {
   if (
+    liveness === 'unverifiable' ||
     lease.cleanupReceipt?.verdict === 'unverifiable' ||
     lease.lifecycleState === 'outcome_unknown'
   ) {

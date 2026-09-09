@@ -335,13 +335,13 @@ test.describe('Maestro workspace Canvas in Electron', () => {
             await capture(orcaPage, 'content-rendered', profile)
             return
           }
-          await createAnnotation(orcaPage, 'decision', 'Decision: preserve exact workspace tabs')
+          await createAnnotation(orcaPage, 'Decision: preserve exact workspace tabs')
           const beforeCreate = await surfaces.count()
-          await createAnnotation(orcaPage, 'warning', 'Warning: receipt identity must remain exact')
+          await createAnnotation(orcaPage, 'Warning: receipt identity must remain exact')
           await expect(surfaces).toHaveCount(beforeCreate + 1)
           await setTheme(orcaPage, 'light')
-          await createAnnotation(orcaPage, 'blocked', 'Blocked: authority conflict requires retry')
-          await createAnnotation(orcaPage, 'observation', 'Observation: exact surfaces remain live')
+          await createAnnotation(orcaPage, 'Blocked: authority conflict requires retry')
+          await createAnnotation(orcaPage, 'Observation: exact surfaces remain live')
           const annotationInspector = orcaPage.locator('aside').filter({
             has: orcaPage.getByLabel('Tab title')
           })

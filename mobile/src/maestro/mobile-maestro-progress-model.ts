@@ -4,6 +4,7 @@ import type {
 } from '../../../src/shared/maestro-run-progress'
 import { legacyMaestroTaskProgress } from '../../../src/shared/maestro-run-progress'
 import type { MobileMaestroRunProgress } from './mobile-maestro-run-progress'
+import { buildMobileRunCompletion } from './mobile-maestro-run-completion-model'
 
 export type MobileMaestroProgressTone = 'neutral' | 'success' | 'warning' | 'danger'
 
@@ -24,6 +25,7 @@ export type MobileMaestroProgressModel = {
   countsLabel: string
   reliabilityLabel: string
   reliabilityTone: MobileMaestroProgressTone
+  runCompletion: MobileMaestroProgressEntry[]
   current: MobileMaestroProgressEntry[]
   completed: MobileMaestroProgressEntry[]
   blocked: MobileMaestroProgressEntry[]
@@ -93,8 +95,8 @@ function buildV2Model(progress: MaestroRunProgressV2): MobileMaestroProgressMode
   }
   return {
     title: progress.run.title,
-    outcome: V2_OUTCOME_LABELS[execution.state],
-    tone: toneForV2(execution.state),
+    outcome: progress.completion ? 'Completed' : V2_OUTCOME_LABELS[execution.state],
+    tone: progress.completion ? 'success' : toneForV2(execution.state),
     progressPercent: deliverables?.progress_percent ?? execution.progress_percent,
     progressLabel: deliverables
       ? deliverables.progress_percent === undefined
@@ -111,6 +113,7 @@ function buildV2Model(progress: MaestroRunProgressV2): MobileMaestroProgressMode
       reliability && (reliability.failed > 0 || reliability.unverifiable > 0)
         ? 'warning'
         : 'neutral',
+    runCompletion: buildMobileRunCompletion(progress.completion),
     current: progress.current.map((entry) => ({
       key: entry.reference,
       title: entry.title,
@@ -177,6 +180,7 @@ function buildLegacyModel(progress: MaestroRunProgress): MobileMaestroProgressMo
       countsLabel: 'No current progress is available.',
       reliabilityLabel: 'Operational reliability unavailable',
       reliabilityTone: 'warning',
+      runCompletion: [],
       current: [],
       completed: [],
       blocked: [],
@@ -222,6 +226,7 @@ function buildLegacyModel(progress: MaestroRunProgress): MobileMaestroProgressMo
     countsLabel: legacyCountsLabel(taskCounts),
     reliabilityLabel: 'Operational reliability requires a newer Orca host',
     reliabilityTone: 'warning',
+    runCompletion: [],
     current: summary.current_tasks.map((entry, index) => ({
       key: `current-${index}`,
       title: 'Active task',

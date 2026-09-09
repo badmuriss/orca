@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { ORCHESTRATION_CONTRACT_VERSION } from '../../../../src/shared/protocol-version'
 
 export const CODEX_COORDINATOR_LIVE = 'MWC_CODEX_COORDINATOR_LIVE'
 
@@ -24,8 +25,14 @@ setInterval(() => {
     claimed.add(label)
     try {
       const request = JSON.parse(readFileSync(join(dir, entry), 'utf8'))
+      const orchestrationEnvelope = request.method.startsWith('orchestration.') ? {
+        orchestrationContractVersion: ${ORCHESTRATION_CONTRACT_VERSION},
+        orchestrationRequestId: randomUUID()
+      } : {}
       sendRequest(readMetadata(${JSON.stringify(userDataDir)}), request.method, request.params, 30000, {
-        compatibilityInvocationId: randomUUID(), orchestrationCompatibilityEvidence: evidence
+        ...orchestrationEnvelope,
+        compatibilityInvocationId: randomUUID(),
+        orchestrationCompatibilityEvidence: evidence
       }).then((response) => writeFileSync(join(dir, label + '-result.json'), JSON.stringify(response)))
         .catch((error) => writeFileSync(join(dir, label + '-result.json'), JSON.stringify({ ok: false, error: String(error) })))
     } catch (error) { writeFileSync(join(dir, label + '-result.json'), JSON.stringify({ ok: false, error: String(error) })) }
@@ -33,7 +40,9 @@ setInterval(() => {
 }, 100)
 writeFileSync(join(dir, 'coordinator-live.json'), JSON.stringify({
   pid: process.pid,
-  terminalHandle: process.env.ORCA_TERMINAL_HANDLE
+  terminalHandle: process.env.ORCA_TERMINAL_HANDLE,
+  paneKey: process.env.ORCA_PANE_KEY,
+  launchTokenPresent: Boolean(process.env.ORCA_AGENT_LAUNCH_TOKEN)
 }))
 process.stdout.write('MWC_CODEX_COORDINATOR_READY\\n')
 setTimeout(() => process.stdout.write(${JSON.stringify(CODEX_COORDINATOR_LIVE)} + '\\n'), 250)

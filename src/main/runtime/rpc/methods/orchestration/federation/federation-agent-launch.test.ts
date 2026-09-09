@@ -121,7 +121,7 @@ describe('federated worker agent launch', () => {
       'id:folder:remote-workspace',
       expect.objectContaining({
         startupAgent: 'cursor',
-        launchPreferences: { model: 'gpt-5.3-codex', effort: 'high' }
+        launchPreferences: expect.objectContaining({ model: 'gpt-5.3-codex', effort: 'high' })
       })
     )
     expect(createTerminal).toHaveBeenCalledWith(

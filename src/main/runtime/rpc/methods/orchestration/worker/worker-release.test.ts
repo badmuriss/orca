@@ -115,14 +115,11 @@ describe('orchestration worker release', () => {
       reason: 'external_terminal',
       processAction: 'none'
     })
-    expect(h.inspectProcessLiveness).toHaveBeenCalledWith(
-      'runtime_test:term_worker:1',
-      JSON.stringify({ kind: 'local', hostId: 'local' })
-    )
+    expect(h.inspectProcessLiveness).not.toHaveBeenCalled()
     expect(h.runtime.closeTerminal).not.toHaveBeenCalled()
     expect(h.db.getWorkerTerminalResourceByOwner(dispatchId)).toMatchObject({
       ownership_state: 'external',
-      release_state: 'not_requested'
+      release_state: 'retained'
     })
   })
 
@@ -170,10 +167,7 @@ describe('orchestration worker release', () => {
     await expect(
       h.call('orchestration.workerRelease', { dispatch: dispatchId })
     ).resolves.toMatchObject({ state: 'retained', reason: 'user_takeover', processAction: 'none' })
-    expect(h.inspectProcessLiveness).toHaveBeenCalledWith(
-      'runtime_test:term_worker:1',
-      JSON.stringify({ kind: 'local', hostId: 'local' })
-    )
+    expect(h.inspectProcessLiveness).not.toHaveBeenCalled()
     expect(h.runtime.closeTerminal).not.toHaveBeenCalled()
     expect(h.db.getWorkerTerminalResourceByOwner(dispatchId)).toMatchObject({
       ownership_state: 'user_owned',
@@ -195,25 +189,26 @@ describe('orchestration worker release', () => {
         h.db.abandonWorkerDispatch(dispatchId)
       }
       h.inspectProcessLiveness.mockResolvedValue('exited')
+      h.observeWorkerAsExited()
 
       await expect(
         h.call('orchestration.workerRelease', { dispatch: dispatchId })
       ).resolves.toMatchObject({
         state: 'released',
-        processAction: 'none',
-        archive: { status: 'unavailable' }
+        processAction: 'closed_exited_terminal',
+        archive: { status: 'captured' }
       })
       expect(h.runtime.closeTerminal).not.toHaveBeenCalled()
       expect(h.db.getWorkerTerminalResourceByOwner(dispatchId)).toMatchObject({
         ownership_state: 'released',
         release_state: 'released',
-        archive_status: 'unavailable'
+        archive_status: 'captured'
       })
     }
   )
 
   it.each(['stopped', 'abandoned'] as const)(
-    'keeps a dead %s worker retained while its process is still unproven',
+    'keeps an unverifiable %s worker in an unknown release state',
     async (state) => {
       h.setup()
       const { dispatchId } = await h.startWorker()
@@ -223,13 +218,16 @@ describe('orchestration worker release', () => {
       } else {
         h.db.abandonWorkerDispatch(dispatchId)
       }
-      h.inspectProcessLiveness.mockResolvedValue('unverifiable')
+      vi.mocked(h.runtime.getTerminalLivenessVerdict).mockReturnValue({
+        status: 'unverifiable',
+        reason: 'owning host unavailable'
+      })
 
       await expect(
         h.call('orchestration.workerRelease', { dispatch: dispatchId })
       ).resolves.toMatchObject({
-        state: 'retained',
-        reason: 'identity_unproven',
+        state: 'release_unknown',
+        processVerdict: 'unverifiable',
         processAction: 'none'
       })
       expect(h.db.getWorkerTerminalResourceByOwner(dispatchId)?.release_state).not.toBe('released')
@@ -388,8 +386,7 @@ describe('orchestration worker release', () => {
     }
     expect(receipt.state).toBe('release_unknown')
     expect(receipt.recovery).toContain('worker-show')
-    expect(receipt.recovery).toContain('fresh request ID')
-    expect(receipt.recovery).not.toContain('same --retry-request')
+    expect(receipt.recovery).toContain('same retry request')
     expect(h.runtime.closeTerminal).not.toHaveBeenCalled()
 
     vi.mocked(h.runtime.showTerminal).mockImplementation(
@@ -424,7 +421,7 @@ describe('orchestration worker release', () => {
       recovery?: string
     }
     expect(receipt.state).toBe('release_unknown')
-    expect(receipt.recovery).toContain('fresh request ID')
+    expect(receipt.recovery).toContain('same --retry-request')
     expect(h.db.getWorkerTerminalResourceByOwner(dispatchId)?.release_state).toBe('unknown')
   })
 })

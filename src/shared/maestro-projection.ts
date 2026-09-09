@@ -15,6 +15,10 @@ import {
   MaestroBrowserSurfaceReceiptSchema,
   type MaestroBrowserSurfaceReceipt
 } from './maestro-browser-surface'
+import {
+  describeMaestroProjectionMaterialization,
+  type MaestroProjectionMaterialization
+} from './maestro-projection-materialization'
 
 export { AgentGraphProjectionInputSchema }
 export type { ProjectedWorkspace }
@@ -62,6 +66,7 @@ export type MaestroProjection = {
   source: AgentGraphView['kind']
   workspace: ProjectedWorkspace
   runProgress: MaestroRunProgress
+  materialization: MaestroProjectionMaterialization
 }
 export type RuntimeMaestroProjection = Omit<MaestroProjection, 'runProgress'> & {
   runProgress: MaestroRunProgressV2
@@ -256,7 +261,14 @@ export function projectAgentGraphView(
             revision: view.revision
           }
         : null
-    )
+    ),
+    materialization: describeMaestroProjectionMaterialization({
+      acceptedView: view,
+      currentView,
+      nodeWorkspaces,
+      includedIds,
+      targetWorkspace
+    })
   }
 }
 

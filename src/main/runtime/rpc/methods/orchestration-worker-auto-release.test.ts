@@ -22,9 +22,20 @@ const resource = {
 
 function exactRuntime(): OrcaRuntimeService {
   return {
-    showTerminal: vi.fn(async () => ({ handle: 'term-worker', connected: true })),
+    showTerminal: vi.fn(async () => ({
+      handle: 'term-worker',
+      connected: true,
+      worktreeId: 'repo::worktree',
+      ptyId: 'pty-worker',
+      incarnationId: 'incarnation-1',
+      executionHostId: 'local'
+    })),
     getTerminalPaneKey: vi.fn(() => 'tab-worker:leaf-worker'),
     getTerminalProcessIncarnation: vi.fn(() => 'pty-worker:incarnation-1'),
+    getExactWorkerProviderSession: vi.fn(() => null),
+    inspectTerminalProcessIncarnationLiveness: vi.fn(async () => 'live'),
+    persistExitedWorkerTerminalRetirement: vi.fn(async () => true),
+    notifyExitedWorkerTerminalRetirement: vi.fn(),
     getOrchestrationDispatchAuthority: vi.fn(() => ({
       terminalHandle: 'term-worker',
       worktreeId: 'repo::worktree',
@@ -53,7 +64,11 @@ function releaseDatabase(): OrchestrationDb {
     })),
     isDispatchProcessCurrent: vi.fn(() => true),
     workerTerminalResourceHasIdentityConflict: vi.fn(() => false),
-    getWorkerTerminalArchive: vi.fn(() => ({ kind: 'transcript_pin' })),
+    getWorkerTerminalArchive: vi.fn(() => ({
+      dispatch_id: 'ctx-worker',
+      resource_id: 'resource-1',
+      kind: 'transcript_pin'
+    })),
     commitWorkerTerminalArchiveForRelease: vi.fn(() => ({
       ...resource,
       release_state: 'releasing'

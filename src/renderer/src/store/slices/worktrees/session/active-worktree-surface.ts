@@ -6,7 +6,8 @@ export function resolveActivatedWorktreeSurface(
   s: AppState,
   worktreeId: string,
   preferredActiveUnifiedTabId: string | undefined,
-  reconciledActiveTabId: string | null
+  reconciledActiveTabId: string | null,
+  newMaestroFallback?: 'legacy' | 'terminal'
 ): {
   restoredRightSidebarExplorerView: NonNullable<
     AppState['rightSidebarExplorerViewByWorktree']
@@ -29,12 +30,16 @@ export function resolveActivatedWorktreeSurface(
     : null
   const activeUnifiedTabId =
     preferredActiveUnifiedTabId ?? reconciledActiveTabId ?? activeGroup?.activeTabId ?? null
-  const activeUnifiedTab =
+  const resolvedActiveUnifiedTab =
     activeUnifiedTabId != null
       ? ((s.unifiedTabsByWorktree[worktreeId] ?? []).find(
           (tab) => tab.id === activeUnifiedTabId && (!activeGroup || tab.groupId === activeGroup.id)
         ) ?? null)
       : null
+  const activeUnifiedTab =
+    newMaestroFallback && resolvedActiveUnifiedTab?.contentType === 'maestro'
+      ? null
+      : resolvedActiveUnifiedTab
   // Verify the restored file still exists in openFiles
   const fileStillOpen = restoredFileId
     ? s.openFiles.some((f) => f.id === restoredFileId && f.worktreeId === worktreeId)
@@ -44,7 +49,9 @@ export function resolveActivatedWorktreeSurface(
     ? browserTabs.some((tab) => tab.id === restoredBrowserTabId)
     : false
   const hasGroupOwnedSurface =
-    (s.groupsByWorktree[worktreeId]?.length ?? 0) > 0 || Boolean(s.layoutByWorktree[worktreeId])
+    newMaestroFallback === 'legacy'
+      ? false
+      : (s.groupsByWorktree[worktreeId]?.length ?? 0) > 0 || Boolean(s.layoutByWorktree[worktreeId])
 
   // Why: restore from the reconciled tab-group model first; preferring legacy fallbacks can show a blank worktree.
   let activeFileId: string | null

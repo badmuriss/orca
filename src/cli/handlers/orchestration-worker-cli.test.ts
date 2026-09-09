@@ -40,13 +40,18 @@ describe('orchestration worker-start CLI contract', () => {
     }
   })
 
-  const invokeWorkerStart = (flags: Map<string, string | boolean>, json = true) =>
-    ORCHESTRATION_HANDLERS['orchestration worker-start']({
-      flags,
+  const invokeWorkerStart = (flags: Map<string, string | boolean>, json = true) => {
+    const invocationFlags = new Map(flags)
+    if (!invocationFlags.has('attempt-id')) {
+      invocationFlags.set('attempt-id', 'attempt_1')
+    }
+    return ORCHESTRATION_HANDLERS['orchestration worker-start']({
+      flags: invocationFlags,
       client: { call: callMock },
       cwd: '/tmp/repo',
       json
     } as never)
+  }
 
   const invokeReplacement = (flags: Map<string, string | boolean>) =>
     ORCHESTRATION_HANDLERS['orchestration replace-worker']({
@@ -299,6 +304,7 @@ describe('orchestration worker-start CLI contract', () => {
     await ORCHESTRATION_HANDLERS['orchestration worker-start']({
       flags: new Map<string, string | boolean>([
         ['task', 'task_1'],
+        ['attempt-id', 'attempt_1'],
         ['terminal', 'term_worker'],
         ['from', 'term_coord']
       ]),

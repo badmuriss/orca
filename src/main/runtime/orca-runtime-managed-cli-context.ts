@@ -1,4 +1,3 @@
-// @ts-nocheck -- follows the mechanically split runtime class chain.
 import { getAppEnvironment } from '../../shared/app-environment'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../shared/constants'
 import {
@@ -14,25 +13,17 @@ import {
 import {
   folderWorkspaceKey,
   parseWorkspaceKey,
-  worktreeWorkspaceKey,
-  type WorkspaceKey
+  worktreeWorkspaceKey
 } from '../../shared/workspace-scope'
+import type { WorkspaceKey } from '../../shared/folder-workspace-types'
 import { getManagedCliLauncherStatus } from '../ssh/ssh-relay-session'
 import type { ProjectExecutionRuntimeResolution } from '../../shared/project-execution-runtime'
 import { resolveLocalProjectRuntimeForWorktreeId } from '../local-project-runtime-resolution'
 import { OrcaRuntimeWithGetOrchestrationDispatchAuthority } from './orca-runtime-get-orchestration-dispatch-authority'
 import { resolveManagedOrchestrationExecutable } from './orchestration/cli-command'
-import { app } from 'electron'
 
 function runtimeIsPackaged(): boolean {
-  try {
-    return getAppEnvironment().isPackaged()
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith('AppEnvironment not initialized')) {
-      return app.isPackaged
-    }
-    throw error
-  }
+  return getAppEnvironment().isPackaged()
 }
 
 export class OrcaRuntimeWithManagedCliContext extends OrcaRuntimeWithGetOrchestrationDispatchAuthority {
@@ -40,7 +31,7 @@ export class OrcaRuntimeWithManagedCliContext extends OrcaRuntimeWithGetOrchestr
     worktreeId: string | null | undefined
   ): ProjectExecutionRuntimeResolution | undefined {
     return this.store && worktreeId
-      ? resolveLocalProjectRuntimeForWorktreeId(this.requireStore(), worktreeId)
+      ? resolveLocalProjectRuntimeForWorktreeId(this.store, worktreeId)
       : undefined
   }
 
@@ -152,11 +143,16 @@ export class OrcaRuntimeWithManagedCliContext extends OrcaRuntimeWithGetOrchestr
   }): boolean {
     try {
       const context = this.buildTerminalManagedCliContext(params.terminalHandle)
+      const terminalIdentity = this as typeof this & {
+        getTerminalPaneKey(handle: string): string | null
+        getTerminalProcessIncarnation(handle: string): string | null
+      }
       return (
         context.executionHostId === params.executionHostId &&
         context.workspaceKey === params.workspaceKey &&
-        this.getTerminalPaneKey(params.terminalHandle) === params.paneKey &&
-        this.getTerminalProcessIncarnation(params.terminalHandle) === params.ptyIncarnation
+        terminalIdentity.getTerminalPaneKey(params.terminalHandle) === params.paneKey &&
+        terminalIdentity.getTerminalProcessIncarnation(params.terminalHandle) ===
+          params.ptyIncarnation
       )
     } catch {
       return false

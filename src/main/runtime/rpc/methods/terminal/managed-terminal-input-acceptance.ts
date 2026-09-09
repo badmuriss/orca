@@ -2,24 +2,21 @@ import { createHash } from 'node:crypto'
 import type { z } from 'zod'
 import { InvalidArgumentError, type RpcContext } from '../../core'
 import type { TerminalSend } from './unary-schemas'
+import { resolveMaestroWorkspacePrincipal } from '../../maestro-principal'
 
 export async function acceptManagedTerminalInput(
   params: z.infer<typeof TerminalSend>,
   context: RpcContext
 ) {
-  const {
-    runtime,
-    clientId,
-    authenticatedCallerFingerprint,
-    orchestrationMutation,
-    orchestrationCompatibilityCallerAuthority,
-    orchestrationCompatibilityEvidence
-  } = context
+  const { runtime, clientId, authenticatedCallerFingerprint, orchestrationMutation } = context
   const db = runtime.getOrchestrationDb()
   const managedLease = db.getMaestroTerminalLeaseByHandle(params.terminal)
   if (managedLease && !params.leaseInput) {
+    if (context.clientKind === 'mobile' || context.clientKind === 'runtime') {
+      return { commandId: null }
+    }
     throw new InvalidArgumentError(
-      'An orchestration-owned terminal requires an authenticated lease input envelope.'
+      'Agent input to an orchestration-owned terminal requires a lease input envelope.'
     )
   }
   let durableInputCommandId: string | null = null
@@ -52,38 +49,38 @@ export async function acceptManagedTerminalInput(
     if (!ptyIncarnation) {
       throw new InvalidArgumentError('Managed terminal incarnation is unavailable.')
     }
-    const principalId =
-      authenticatedCallerFingerprint ??
-      orchestrationMutation?.callerFingerprint ??
-      clientId ??
-      'local-runtime'
-    if (params.leaseInput.authority !== 'user') {
-      const callerAuthority =
-        orchestrationCompatibilityCallerAuthority ??
-        runtime.verifyOrchestrationCompatibilityCaller(orchestrationCompatibilityEvidence, {
-          currentRuntimeLaunchSufficient: true
-        })
-      if (!callerAuthority) {
+    let principalId: string
+    if (params.leaseInput.authority === 'user') {
+      if (context.clientKind !== 'mobile' && context.clientKind !== 'runtime') {
         throw new InvalidArgumentError(
-          'Managed terminal input authority requires an authenticated caller terminal.'
+          'User terminal input authority requires an authenticated interactive client.'
         )
       }
+      principalId =
+        context.pairedDeviceId ?? context.clientId ?? context.connectionId ?? context.clientKind
+    } else {
+      const principal = await resolveMaestroWorkspacePrincipal(context, {
+        execution_host_id: managedLease.executionHostId,
+        workspace_key: managedLease.workspaceKey,
+        run_id: params.leaseInput.runId
+      })
+      principalId =
+        authenticatedCallerFingerprint ??
+        orchestrationMutation?.callerFingerprint ??
+        clientId ??
+        principal.actor_id
       if (params.leaseInput.authority === 'coordinator') {
         const run = db.getRun(params.leaseInput.runId)
         if (
+          principal.kind !== 'coordinator' ||
           !run ||
           run.consumer_generation !== params.leaseInput.coordinatorGeneration ||
-          run.coordinator_handle !== callerAuthority.terminalHandle ||
-          run.coordinator_pane_key !== callerAuthority.paneKey
+          principal.generation !== params.leaseInput.coordinatorGeneration
         ) {
           throw new InvalidArgumentError('Coordinator terminal input authority is stale.')
         }
       } else {
-        const dispatch = db.getActiveDispatchForIdentity(
-          callerAuthority.terminalHandle,
-          callerAuthority.paneKey
-        )
-        if (!dispatch || dispatch.run_id !== params.leaseInput.runId) {
+        if (principal.kind !== 'worker') {
           throw new InvalidArgumentError('Worker terminal input authority is stale.')
         }
       }
@@ -148,16 +145,17 @@ export async function acceptManagedTerminalInput(
       observedInputSurface === 'permission' ||
       observedInputSurface === 'input_required'
     ) {
-      const queued = db.transitionMaestroTerminalInput({
+      const rejected = db.transitionMaestroTerminalInput({
         commandId: accepted.commandId,
-        state: 'queued'
+        state: 'rejected',
+        rejectionCode: 'input_surface_not_ready'
       })
       return {
         send: {
           handle: params.terminal,
-          accepted: true,
+          accepted: false,
           bytesWritten: 0,
-          deliveryReceipt: queued
+          deliveryReceipt: rejected
         }
       }
     }

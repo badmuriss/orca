@@ -8,8 +8,7 @@ import {
   startPreProfilePairing,
   type PreProfilePairingAttempt
 } from '../src/transport/pre-profile-pairing-coordinator'
-import type { ConnectionLogEntry } from '../src/transport/types'
-import type { PairingStage } from '../src/transport/types'
+import type { ConnectionLogEntry, PairingStage } from '../src/transport/types'
 import { useRefreshHostClient } from '../src/transport/client-context'
 import { colors, spacing, radii, typography } from '../src/theme/mobile-theme'
 import { ConnectionLog } from '../src/components/ConnectionLog'

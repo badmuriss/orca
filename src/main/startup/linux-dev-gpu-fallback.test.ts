@@ -32,7 +32,10 @@ import {
   isLinuxDevGpuFallbackSession
 } from './linux-dev-gpu-fallback'
 import { GpuCrashFallbackTracker } from '../crash-reporting/gpu-crash-fallback-decision'
-import type { LinuxGpuFallbackEnvironment } from './gpu-fallback-marker'
+import {
+  GPU_FALLBACK_SCHEME_VERSION,
+  type LinuxGpuFallbackEnvironment
+} from './gpu-fallback-marker'
 
 function emitChildGone(details: { type?: string; reason: string }): void {
   for (const listener of harness.goneListeners) {
@@ -106,7 +109,7 @@ describe('installLinuxDevGpuFailureWatch', () => {
       crashesInWindow: number
     }
     expect(marker).toMatchObject({
-      schemeVersion: 2,
+      schemeVersion: GPU_FALLBACK_SCHEME_VERSION,
       platform: 'linux',
       appVersion: '1.2.3',
       crashesInWindow: 3

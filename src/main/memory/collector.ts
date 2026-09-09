@@ -232,9 +232,8 @@ function electronMetricMemoryBytes(
 
 function bucketElectronMetrics(processIndex: ProcIndex): AppBucketsRaw {
   const main = { cpu: 0, memory: 0, privateMemory: 0 }
-  const renderer = { cpu: 0, memory: 0, privateMemory: 0 }
+  const renderer = { cpu: 0, memory: 0, privateMemory: 0, processCount: 0 }
   const other = { cpu: 0, memory: 0, privateMemory: 0 }
-  let rendererProcessCount = 0
 
   for (const proc of getAppEnvironment().getAppMetrics()) {
     const cpu = clampMemoryMetric(proc.cpu?.percentCPUUsage)
@@ -251,7 +250,7 @@ function bucketElectronMetrics(processIndex: ProcIndex): AppBucketsRaw {
       target = main
     } else if (type === 'renderer' || type === 'tab') {
       target = renderer
-      rendererProcessCount += 1
+      renderer.processCount += 1
     }
 
     target.cpu += cpu
@@ -269,7 +268,7 @@ function bucketElectronMetrics(processIndex: ProcIndex): AppBucketsRaw {
     main: usage(main),
     renderer: usage(renderer),
     other: usage(other),
-    rendererProcessCount,
+    rendererProcessCount: renderer.processCount,
     ...usage({
       cpu: main.cpu + renderer.cpu + other.cpu,
       memory: main.memory + renderer.memory + other.memory,

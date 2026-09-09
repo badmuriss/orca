@@ -1,4 +1,5 @@
 import type { WorkerDispatchRow } from '../../types'
+import { ORCHESTRATION_FEDERATION_ATTEMPT_BOUND_WORKER_LEASE_PROTOCOL_VERSION } from '../../../../../shared/protocol-version'
 import { OrchestrationError } from '../../orchestration-error'
 import type { OrchestrationDb } from '../orchestration-db'
 import { reconcileTaskAfterDispatchInterruption } from '../dispatch-context/task-dispatch-reconciliation'
@@ -44,12 +45,15 @@ export function reconcileFederatedWorkerStart(
     }
 
     if (params.state === 'ready') {
+      const federated = this.getFederatedDispatch(params.dispatchId)
+      const requiresExactProcessIdentity =
+        (federated?.protocol_version ?? 0) >=
+        ORCHESTRATION_FEDERATION_ATTEMPT_BOUND_WORKER_LEASE_PROTOCOL_VERSION
       if (
         !params.remoteRuntimeEpoch ||
         !params.worktreeId ||
         !params.terminalHandle ||
-        !params.paneKey ||
-        !params.processIncarnation
+        (requiresExactProcessIdentity && (!params.paneKey || !params.processIncarnation))
       ) {
         throw new OrchestrationError(
           'resource_server_mismatch',
@@ -61,8 +65,9 @@ export function reconcileFederatedWorkerStart(
         remoteRuntimeEpoch: params.remoteRuntimeEpoch,
         worktreeId: params.worktreeId,
         terminalHandle: params.terminalHandle,
-        paneKey: params.paneKey,
-        processIncarnation: params.processIncarnation
+        ...(params.paneKey && params.processIncarnation
+          ? { paneKey: params.paneKey, processIncarnation: params.processIncarnation }
+          : {})
       })
       transitionLifecycleWithDb(this.db, {
         entity: 'worker',

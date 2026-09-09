@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { FolderWorkspace } from '../../../../shared/folder-workspace-types'
 import type { AgentGraphView, MaestroWorkspaceAnchor } from '../../../../shared/maestro-contract'
-import { MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
+import {
+  MAESTRO_RUN_COMPLETION_RUNTIME_CAPABILITY,
+  MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY
+} from '../../../../shared/protocol-version'
 import { OrchestrationDb } from '../../orchestration/db/orchestration-db'
 import { createRootDispatch } from '../../orchestration/db/root-dispatch-test-fixture'
 import { applyMaestroProjection } from '../../orchestration/db/maestro/maestro-projection-store'
@@ -104,7 +107,11 @@ function context(
       getOrchestrationDb: () => database,
       listFolderWorkspaces: () => [folder],
       listRepos: () => [],
-      getExactWorkerProviderSession: vi.fn(() => null)
+      getExactWorkerProviderSession: vi.fn(() => null),
+      showTerminal: vi.fn().mockRejectedValue(new Error('terminal unavailable')),
+      getTerminalPaneKey: vi.fn(() => null),
+      getTerminalProcessIncarnation: vi.fn(() => null),
+      getTerminalLivenessVerdict: vi.fn(() => null)
     } as unknown as RpcContext['runtime'],
     clientCapabilities: capabilities
   }
@@ -157,6 +164,48 @@ describe('Maestro Run progress RPC', () => {
     expect(response).toEqual({
       schemaVersion: 1,
       progress: { available: false, state: 'outcome_unknown' }
+    })
+    database.close()
+  })
+
+  it('publishes completion only to v2 clients that advertise the additive field', async () => {
+    const { database, run, task } = seed()
+    database.completeRun({
+      runId: run.id,
+      summary: 'Accepted with one explicit waiver.',
+      evidence: ['Focused checks passed.'],
+      waivers: [{ task_id: task.id, reason: 'The owner deferred this Task.' }],
+      coordinatorHandle: run.coordinator_handle!,
+      coordinatorPaneKey: run.coordinator_pane_key!,
+      coordinatorGeneration: run.consumer_generation
+    })
+    const scope = { execution_host_id: 'local', workspace_key: 'folder:home-1' } as const
+
+    const olderV2 = await readMaestroRunProgress(
+      context(database, [MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY]),
+      scope
+    )
+    const completionCapable = await readMaestroRunProgress(
+      context(database, [
+        MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY,
+        MAESTRO_RUN_COMPLETION_RUNTIME_CAPABILITY
+      ]),
+      scope
+    )
+
+    if (olderV2.schemaVersion !== 2) {
+      throw new Error(`Expected v2 progress, received ${olderV2.schemaVersion ?? 'none'}.`)
+    }
+    expect(olderV2.progress.completion).toBeUndefined()
+    expect(completionCapable).toMatchObject({
+      schemaVersion: 2,
+      progress: {
+        completion: {
+          state: 'completed',
+          summary: 'Accepted with one explicit waiver.',
+          completed_by: { handle: 'coordinator-1', generation: run.consumer_generation }
+        }
+      }
     })
     database.close()
   })
@@ -270,6 +319,20 @@ describe('Maestro Run progress RPC', () => {
     })
     database.retainMaestroTerminalLease(lease.id)
     const rpcContext = context(database, [MAESTRO_RUN_PROGRESS_V2_RUNTIME_CAPABILITY])
+    vi.mocked(rpcContext.runtime.showTerminal).mockImplementation(
+      async () =>
+        ({
+          tabId: 'tab-2',
+          worktreeId: database.getMaestroTerminalLease(lease.id)?.workspaceKey ?? '',
+          connected: true
+        }) as never
+    )
+    vi.mocked(rpcContext.runtime.getTerminalPaneKey).mockReturnValue('tab-2:leaf-2')
+    vi.mocked(rpcContext.runtime.getTerminalProcessIncarnation).mockReturnValue('pty-2:1')
+    vi.mocked(rpcContext.runtime.getTerminalLivenessVerdict).mockReturnValue({
+      status: 'live',
+      ptyIds: ['pty-2']
+    })
 
     const stale = await readMaestroRunProgress(rpcContext, {
       execution_host_id: 'local',

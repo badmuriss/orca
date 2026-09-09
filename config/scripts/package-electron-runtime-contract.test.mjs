@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -455,6 +455,8 @@ describe('Electron runtime package contract', () => {
 
     expect(resolveCaskStep.run).toContain('token="orca@rc"')
     expect(resolveCaskStep.run).toContain('token="orca"')
+    expect(existsSync(join(projectDir, 'Casks/orca.rb'))).toBe(true)
+    expect(existsSync(join(projectDir, 'Casks/orca@rc.rb'))).toBe(true)
     expect(renderStep.env.CASK_PATH).toBe('${{ steps.cask.outputs.path }}')
     expect(copyStep.run).toContain('cp "$CASK_PATH" "tap/$CASK_PATH"')
     expect(copyStep.run).toContain('git add "$CASK_PATH"')

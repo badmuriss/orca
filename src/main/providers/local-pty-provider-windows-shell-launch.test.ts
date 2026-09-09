@@ -483,7 +483,7 @@ describe('LocalPtyProvider', () => {
         })
       })
 
-      await shutdown
+      await expect(shutdown).rejects.toThrow('pty_stop_receipt_unavailable')
       await canceledSpawn
       expect(spawnMock).toHaveBeenCalledTimes(callsBeforeSpawn)
     })

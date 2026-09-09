@@ -422,7 +422,7 @@ describe('buildHydratedTabState – Maestro tabs', () => {
     expect(store.getState().copyUnifiedTabToGroup(first.id, targetGroupId)).toBeNull()
     expect(store.getState().closeUnifiedTab(first.id)).toBeNull()
     store.getState().reorderUnifiedTabs(sourceGroupId, [first.id])
-    expect(store.getState().reconcileWorktreeTabModel(workspaceA).renderableTabCount).toBe(1)
+    expect(store.getState().reconcileWorktreeTabModel(workspaceA).renderableTabCount).toBe(0)
     expect(store.getState().tabsByWorktree[workspaceA] ?? []).toEqual([])
     expect(store.getState().activeFileId).toBeNull()
     expect(store.getState().activeFileIdByWorktree).toEqual({

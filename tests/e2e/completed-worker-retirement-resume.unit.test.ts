@@ -240,6 +240,13 @@ async function releaseCompletedWorker(terminalState: 'running' | 'exited'): Prom
   const db = new OrchestrationDb(':memory:')
   const runtime = new OrcaRuntimeService()
   runtime.setOrchestrationDb(db)
+  runtime.setNotifier({
+    resolveLegacyWorkerTerminalRecovery: (paneKey, resolution) => {
+      if (resolution === 'exited') {
+        useAppStore.getState().clearSleepingAgentSession(paneKey)
+      }
+    }
+  } as never)
   const coordinatorPaneKey = 'coordinator-tab:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
   const run = db.createRun({
     objective: 'Completed worker retirement reproduction',
@@ -257,7 +264,7 @@ async function releaseCompletedWorker(terminalState: 'running' | 'exited'): Prom
     handle === 'terminal-coordinator' ? coordinatorPaneKey : ORIGINAL_PANE_KEY
   )
   vi.spyOn(runtime, 'getTerminalProcessIncarnation').mockImplementation((handle) =>
-    handle === TERMINAL_HANDLE ? 'runtime:test:worker:1' : null
+    handle === TERMINAL_HANDLE ? `${ORIGINAL_PTY_ID}:incarnation-1` : null
   )
   vi.spyOn(runtime, 'getOrchestrationDispatchAuthority').mockImplementation((handle) =>
     handle === TERMINAL_HANDLE
@@ -269,7 +276,7 @@ async function releaseCompletedWorker(terminalState: 'running' | 'exited'): Prom
           // seeds every field the resource records — worktree, pane, incarnation, host.
           worktreeId: WORKTREE_ID,
           paneKey: ORIGINAL_PANE_KEY,
-          processIncarnation: 'runtime:test:worker:1',
+          processIncarnation: `${ORIGINAL_PTY_ID}:incarnation-1`,
           launchTokenHash: null,
           hostScope: { kind: 'local', hostId: 'local' }
         } as never)
@@ -310,9 +317,17 @@ async function releaseCompletedWorker(terminalState: 'running' | 'exited'): Prom
   })
   vi.spyOn(runtime, 'isTerminalRunningAgent').mockResolvedValue(true)
   vi.spyOn(runtime, 'getExactWorkerProviderSession').mockReturnValue(null)
+  vi.spyOn(runtime, 'inspectTerminalProcessIncarnationLiveness').mockResolvedValue(
+    terminalState === 'exited' ? 'exited' : 'live'
+  )
   vi.spyOn(runtime, 'showTerminal').mockResolvedValue({
     handle: TERMINAL_HANDLE,
     worktreeId: WORKTREE_ID,
+    tabId: ORIGINAL_TAB_ID,
+    leafId: ORIGINAL_LEAF_ID,
+    ptyId: ORIGINAL_PTY_ID,
+    incarnationId: 'incarnation-1',
+    executionHostId: 'local',
     ...(terminalState === 'exited' ? { connected: false } : { status: 'running' })
   } as never)
   vi.spyOn(runtime, 'readTerminal').mockResolvedValue({
@@ -367,7 +382,7 @@ async function releaseCompletedWorker(terminalState: 'running' | 'exited'): Prom
       pane_key: ORIGINAL_PANE_KEY,
       terminal_handle: TERMINAL_HANDLE
     })
-    expect(closeTerminal).toHaveBeenCalledOnce()
+    expect(closeTerminal).toHaveBeenCalledTimes(terminalState === 'exited' ? 0 : 1)
   } finally {
     db.close()
   }
@@ -582,7 +597,7 @@ describe('completed background-worker retirement resume matrix', () => {
     const restartAfterRetirement = persistAndParseCurrentSession()
     await hydrateSession(restartAfterRetirement)
 
-    // Case 8: first activation hands back a bare terminal and cannot resurrect authority.
+    // Case 8: first activation keeps the already materialized Canvas and cannot resurrect authority.
     const beforeActivation = useAppStore.getState()
     expect(beforeActivation.everActivatedWorktreeIds.has(WORKTREE_ID)).toBe(false)
     expect(beforeActivation.agentStatusByPaneKey[ORIGINAL_PANE_KEY]).toBeUndefined()
@@ -597,7 +612,9 @@ describe('completed background-worker retirement resume matrix', () => {
 
     const replacementTabs = activated.tabsByWorktree[WORKTREE_ID] ?? []
     expect(replacementTabs).toHaveLength(1)
+    expect(replacementTabs[0]).toMatchObject({ ptyId: null, pendingActivationSpawn: true })
     expect(replacementTabs[0]?.id).not.toBe(ORIGINAL_TAB_ID)
+    expect(activated.reconcileWorktreeTabModel(WORKTREE_ID).renderableTabCount).toBe(1)
     expect(activated.terminalLayoutsByTabId[ORIGINAL_TAB_ID]).toBeUndefined()
     expect(activated.ptyIdsByTabId[ORIGINAL_TAB_ID]).toBeUndefined()
     expectCanaryUnchanged()

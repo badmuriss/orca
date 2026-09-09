@@ -6,9 +6,10 @@ import { join, resolve } from 'node:path'
 import { test, expect } from './helpers/orca-app'
 import { launchNativeMaestroFixture } from './helpers/maestro-fixture'
 import { ensureTerminalVisible, waitForActiveWorktree, waitForSessionReady } from './helpers/store'
-import { waitForActivePaneHookDescriptor, waitForTerminalOutput } from './helpers/terminal'
+import { waitForActivePaneHookDescriptor } from './helpers/terminal'
 import { RuntimeClient } from '../../src/cli/runtime-client'
 import { AgentGraphViewSchema } from '../../src/shared/maestro-contract'
+import { openMaestro as openWorkspaceMaestro } from './fixtures/maestro-workspace-tab-canvas/evidence'
 import {
   MAESTRO_EVIDENCE_SURFACE_ID,
   MAESTRO_EVIDENCE_WORKER_NODE_ID,
@@ -63,13 +64,6 @@ test.describe('Maestro Canvas journal fixture', () => {
     }
   })
 })
-
-type MaestroTabScope = {
-  id?: string
-  maestroExecutionHostId?: string
-  maestroWorkspaceKey?: string
-  contentType?: string
-}
 
 const EVIDENCE_ROOT = resolve('.visual-evidence/maestro-worktree-canvas')
 const CAPTURE_PROFILES = [
@@ -223,32 +217,6 @@ async function launchCoordinatorAgent(page: Page, bridgeCommand: string): Promis
   const launchOption = page.getByRole('menuitem', { name: /^Claude(?:\s|$)/i }).first()
   await expect(launchOption).toBeVisible({ timeout: 15_000 })
   await launchOption.click({ force: true })
-  await waitForTerminalOutput(page, BRIDGE_READY_MARKER, 30_000)
-}
-
-/** Opens Maestro through the rendered command so production code derives the authority. */
-async function openMaestroTab(
-  page: Page
-): Promise<{ host: string; workspace: string; id: string }> {
-  await page.getByRole('button', { name: 'New tab' }).click({ force: true })
-  await page.getByRole('menuitem', { name: 'Maestro', exact: true }).click({ force: true })
-  const scope = await page.evaluate(() => {
-    const state = window.__store?.getState() as
-      | { activeWorktreeId?: string | null; getActiveTab?: (id: string) => MaestroTabScope | null }
-      | undefined
-    const tab = state?.activeWorktreeId ? state.getActiveTab?.(state.activeWorktreeId) : null
-    return tab?.contentType === 'maestro'
-      ? {
-          host: tab.maestroExecutionHostId ?? '',
-          workspace: tab.maestroWorkspaceKey ?? '',
-          id: tab.id ?? ''
-        }
-      : null
-  })
-  if (!scope?.host || !scope.workspace || !scope.id) {
-    throw new Error('The rendered New tab > Maestro command did not bind a workspace scope')
-  }
-  return scope
 }
 
 /**
@@ -259,7 +227,7 @@ async function reopenMaestroTab(page: Page, tabId: string): Promise<string> {
   await page.evaluate((id) => {
     window.__store?.getState().closeUnifiedTab(id)
   }, tabId)
-  return (await openMaestroTab(page)).id
+  return (await openWorkspaceMaestro(page)).id
 }
 
 async function setRightSidebarOpen(page: Page, open: boolean): Promise<void> {
@@ -389,7 +357,7 @@ async function runIntegratedCanvasEvidence(args: EvidenceRunArgs): Promise<void>
     origin: proof.origin
   }
 
-  const scope = await openMaestroTab(orcaPage)
+  const scope = await openWorkspaceMaestro(orcaPage)
   const anchor: MaestroEvidenceAnchor = {
     repository_id: repositoryId,
     execution_host_id: scope.host,

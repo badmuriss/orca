@@ -1,5 +1,5 @@
 import type * as pty from 'node-pty'
-import { win32 as pathWin32 } from 'node:path'
+import { isWslShellName } from '../../shared/local-windows-terminal-runtime'
 import { isBracketedPasteSafeShell } from '../../shared/startup-command-submission'
 import { PtyStartupIngress, type PtyIngressEmission } from '../../shared/pty-startup-ingress'
 import { resolvePtyOwnerBackend } from '../../shared/pty-owner-backend'
@@ -57,8 +57,7 @@ export function activateLocalPtySession(args: {
   ptyReportsChildExitStatus.set(id, args.reportsChildExitStatus)
   ptyProcesses.set(id, proc)
   const windowsPtyJobObjectAssigned = registerWindowsPtyJobObjectOwner(id, proc, {
-    isWsl:
-      process.platform === 'win32' && pathWin32.basename(plan.shellPath).toLowerCase() === 'wsl.exe'
+    isWsl: process.platform === 'win32' && isWslShellName(plan.shellPath)
   })
   ptyInitialCwd.set(id, plan.cwd)
   if (spawnedWslDistro !== undefined) {

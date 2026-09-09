@@ -94,7 +94,36 @@ export async function reconcileExitedWorkerTerminalRelease(args: {
         'The provider session changed after the exited observation; worker release remains unknown.'
     }
   }
+  const terminal = args.observation.terminal
+  if (!args.resource.worktree_id || !args.resource.pane_key) {
+    return {
+      state: 'release_unknown',
+      reason: 'The exited terminal does not expose its owning workspace and pane.'
+    }
+  }
+  const retired = await args.runtime.persistExitedWorkerTerminalRetirement({
+    worktreeId: args.resource.worktree_id,
+    paneKey: args.resource.pane_key,
+    ...(terminal?.tabId && terminal.leafId && terminal.ptyId
+      ? {
+          surface: {
+            worktreeId: args.resource.worktree_id,
+            parentTabId: terminal.tabId,
+            leafId: terminal.leafId,
+            ptyId: terminal.ptyId,
+            ...(terminal.incarnationId ? { incarnationId: terminal.incarnationId } : {})
+          }
+        }
+      : {})
+  })
+  if (!retired) {
+    return {
+      state: 'release_unknown',
+      reason: 'The exited terminal surface could not be retired from its owning workspace.'
+    }
+  }
   const released = args.db.settleWorkerTerminalRelease(args.resource.id)
+  args.runtime.notifyExitedWorkerTerminalRetirement(args.resource.pane_key)
   args.runtime.notifyMessageArrived(`dispatch:${args.dispatchId}`, 'status')
   return { state: 'released', resource: released }
 }

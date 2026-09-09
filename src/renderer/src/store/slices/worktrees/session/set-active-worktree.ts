@@ -67,6 +67,23 @@ export function createSetActiveWorktree(
       const reconciliationChanged = Boolean(
         reconciliation && Object.keys(reconciliation.patch).length > 0
       )
+      const hadMaestroTab = worktreeId
+        ? (transitioned.unifiedTabsByWorktree[worktreeId] ?? []).some(
+            (tab) => tab.contentType === 'maestro'
+          )
+        : false
+      const materializedMaestroTab = Boolean(
+        worktreeId &&
+        !hadMaestroTab &&
+        reconciliation?.patch.unifiedTabsByWorktree?.[worktreeId]?.some(
+          (tab) => tab.contentType === 'maestro'
+        )
+      )
+      const hadGroupOwnedSurface = Boolean(
+        worktreeId &&
+        ((transitioned.groupsByWorktree[worktreeId]?.length ?? 0) > 0 ||
+          transitioned.layoutByWorktree[worktreeId])
+      )
       const s =
         reconciliation && reconciliationChanged
           ? ({ ...transitioned, ...reconciliation.patch } as AppState)
@@ -95,7 +112,8 @@ export function createSetActiveWorktree(
         s,
         worktreeId,
         stateTransition?.preferredActiveUnifiedTabId,
-        reconciledActiveTabId
+        reconciledActiveTabId,
+        materializedMaestroTab ? (hadGroupOwnedSurface ? 'terminal' : 'legacy') : undefined
       )
 
       // Why: focus isn't smart-sort activity — writing lastActivityAt here caused the "jump after focus" bug; only clear unread.

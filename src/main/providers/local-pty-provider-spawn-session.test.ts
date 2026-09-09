@@ -338,7 +338,9 @@ describe('LocalPtyProvider', () => {
         rows: 24,
         sessionId: 'immediate-shutdown-session'
       })
-      await provider.shutdown('immediate-shutdown-session', { immediate: true })
+      await expect(
+        provider.shutdown('immediate-shutdown-session', { immediate: true })
+      ).rejects.toThrow('pty_stop_receipt_unavailable')
 
       await expect(spawn).rejects.toThrow('PTY spawn canceled: immediate-shutdown-session')
       expect(spawnMock).not.toHaveBeenCalled()
@@ -362,7 +364,9 @@ describe('LocalPtyProvider', () => {
       const canceledSpawn = expect(spawn).rejects.toThrow('PTY spawn canceled: env-build-session')
       await vi.waitFor(() => expect(buildSpawnEnv).toHaveBeenCalledOnce())
 
-      await envProvider.shutdown('env-build-session', { immediate: true })
+      await expect(envProvider.shutdown('env-build-session', { immediate: true })).rejects.toThrow(
+        'pty_stop_receipt_unavailable'
+      )
       finishEnvBuild({})
       await canceledSpawn
       expect(spawnMock).not.toHaveBeenCalled()
@@ -398,7 +402,7 @@ describe('LocalPtyProvider', () => {
         })
       })
 
-      await shutdown
+      await expect(shutdown).rejects.toThrow('pty_stop_receipt_unavailable')
       await canceledSpawn
       expect(spawnMock).not.toHaveBeenCalled()
     })

@@ -1,10 +1,12 @@
 import type { OrcaRuntimeService } from '../orca-runtime'
 
-// Why: worker release is idempotent on both paths — it can answer already_released —
-// so an interrupted release resumes rather than reporting an unknown outcome. Only the
-// federated flavour needs a dispatch to route by; a local release resumes on its own.
-export function isResumableRelease(method: string): boolean {
-  return method === 'orchestration.federationRelease' || method === 'orchestration.workerRelease'
+// These mutations persist their own idempotent outcome after an interrupted receipt write.
+export function isResumableOrchestrationMutation(method: string): boolean {
+  return (
+    method === 'orchestration.federationRelease' ||
+    method === 'orchestration.workerRelease' ||
+    method === 'orchestration.runComplete'
+  )
 }
 
 export function isRetryableFederatedRelease(

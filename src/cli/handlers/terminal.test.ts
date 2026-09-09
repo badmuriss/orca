@@ -385,19 +385,15 @@ describe('terminal send CLI', () => {
       json: true
     })
 
-    expect(call).toHaveBeenCalledWith(
-      'terminal.send',
-      {
-        terminal: 'term-1',
-        text: 'review',
-        enter: true,
-        interrupt: false,
-        agentPrompt: true,
-        leaseInput,
-        client: { id: 'orca-cli', type: 'desktop' }
-      },
-      { legacyTerminalPrompt: true }
-    )
+    expect(call).toHaveBeenCalledWith('terminal.send', {
+      terminal: 'term-1',
+      text: 'review',
+      enter: true,
+      interrupt: false,
+      agentPrompt: true,
+      leaseInput,
+      client: { id: 'orca-cli', type: 'desktop' }
+    })
   })
 
   it('explains that Structured Chat blocked a refused send and how to recover', async () => {

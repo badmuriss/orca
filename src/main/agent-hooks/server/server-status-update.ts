@@ -9,8 +9,10 @@ import {
 import { INTERRUPTED_DONE_LATE_WORKING_SUPPRESSION_MS } from './server-constants'
 import type { EnrichedAgentHookEventPayload } from './server-types'
 import type { AgentHookEventPayload } from '../../../shared/agent-hook-listener/listener-event'
-import type { AgentStatusObservationOrigin } from '../../../shared/agent-status-observation'
-import type { AgentStatusObservation } from '../../../shared/agent-status-observation'
+import type {
+  AgentStatusObservation,
+  AgentStatusObservationOrigin
+} from '../../../shared/agent-status-observation'
 import type { AgentActorAttestation } from '../../../shared/agent-status-types'
 import {
   attachClaudeChildOnlyBoundary,

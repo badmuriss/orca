@@ -170,6 +170,21 @@ const MaestroNestedProgressSchema = z
   })
   .strict()
 
+const MaestroRunCompletionSchema = z
+  .object({
+    state: z.literal('completed'),
+    summary: BoundedTextSchema,
+    evidence: z.array(BoundedTextSchema).min(1).max(MAESTRO_RUN_PROGRESS_LIST_LIMIT),
+    waivers: z
+      .array(z.object({ task_id: BoundedReferenceSchema, reason: BoundedTextSchema }).strict())
+      .max(MAESTRO_RUN_PROGRESS_LIST_LIMIT),
+    completed_at: z.iso.datetime(),
+    completed_by: z
+      .object({ handle: BoundedReferenceSchema, generation: z.number().int().nonnegative() })
+      .strict()
+  })
+  .strict()
+
 export const MaestroRunProgressV2Schema = z
   .object({
     schema_version: z.literal(2),
@@ -186,6 +201,7 @@ export const MaestroRunProgressV2Schema = z
     next: z.array(MaestroNextProgressSchema).max(MAESTRO_RUN_PROGRESS_LIST_LIMIT),
     blocked: z.array(MaestroBlockedProgressSchema).max(MAESTRO_RUN_PROGRESS_LIST_LIMIT),
     nested_activity: z.array(MaestroNestedProgressSchema).max(MAESTRO_RUN_PROGRESS_LIST_LIMIT),
+    completion: MaestroRunCompletionSchema.optional(),
     resources: MaestroRunResourcesSchema.optional(),
     technical: z
       .object({

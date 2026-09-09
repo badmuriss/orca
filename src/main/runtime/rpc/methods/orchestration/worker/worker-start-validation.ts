@@ -122,7 +122,8 @@ export async function prepareLocalWorkerStartTopology(args: {
   hasDurableMutation: boolean
 }) {
   const { params, runtime, db } = args
-  if (params.retryOf && (!params.terminal || !params.attemptId)) {
+  const transfersWorkerLease = Boolean(params.retryOf && db.getWorkerDispatch(params.retryOf))
+  if (transfersWorkerLease && (!params.terminal || !params.attemptId)) {
     throw new OrchestrationError(
       'lease_identity_conflict',
       'Retry worker-start requires the exact prior terminal and attempt.'
@@ -185,18 +186,19 @@ export async function prepareLocalWorkerStartTopology(args: {
     }
   }
 
-  const retryPreflight = params.retryOf
-    ? getRetryWorkerTerminalPreflight({
-        runtime,
-        db,
-        retryOf: params.retryOf,
-        attemptId: params.attemptId!,
-        terminalHandle: params.terminal!,
-        runId: args.runId,
-        taskId: args.taskId!,
-        coordinatorGeneration: args.coordinatorGeneration
-      })
-    : undefined
+  const retryPreflight =
+    params.retryOf && transfersWorkerLease
+      ? getRetryWorkerTerminalPreflight({
+          runtime,
+          db,
+          retryOf: params.retryOf,
+          attemptId: params.attemptId!,
+          terminalHandle: params.terminal!,
+          runId: args.runId,
+          taskId: args.taskId!,
+          coordinatorGeneration: args.coordinatorGeneration
+        })
+      : undefined
   const preflightWorktree =
     !createsWorktree || requestedWorktree === 'new-child'
       ? (creationWorktree ?? resolvedWorktree!)
@@ -215,6 +217,7 @@ export async function prepareLocalWorkerStartTopology(args: {
     agentDiscovery,
     launch,
     retryPreflight,
+    terminalLeaseRetryOf: retryPreflight ? params.retryOf : undefined,
     preflightExecutable
   }
 }

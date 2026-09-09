@@ -9,6 +9,7 @@ import {
 } from '../../orchestration/maestro-browser-surface-worktree-identity'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import type { RpcContext } from '../core'
+import { browserSurfaceIdentityMismatch } from './orchestration-browser-surface-observation'
 import {
   fileErrorCode,
   NO_PANE_PAINT_REASON,
@@ -28,9 +29,17 @@ function requireExactReturnedPage(
       tab.worktreeId !== browserSurfaceWorktreeId(receipt.workspace_key)) ||
     (tab.profileId ?? null) !== receipt.profile_id
   ) {
-    throw new OrchestrationError(
-      'browser_surface_identity_mismatch',
-      'The native Browser page does not match the reserved workspace, page, and profile.'
+    throw browserSurfaceIdentityMismatch(
+      {
+        browserPageId: receipt.browser_page_id,
+        worktreeId: browserSurfaceWorktreeId(receipt.workspace_key),
+        profileId: receipt.profile_id
+      },
+      {
+        browserPageId: tab.browserPageId,
+        worktreeId: tab.worktreeId ?? null,
+        profileId: tab.profileId ?? null
+      }
     )
   }
   return tab.browserPageId

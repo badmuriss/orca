@@ -14,6 +14,7 @@ import {
 // The runtime reports the raw worktree id; the Maestro anchor carries the prefixed workspace key.
 const WORKTREE_ID = 'repo-1::/repos/orca-wt'
 const WORKSPACE_KEY = `worktree:${WORKTREE_ID}`
+const TEST_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAB4AAAAQ4'
 
 vi.mock('electron', () => ({
   app: { getPath: () => '/tmp/orca-browser-surface-test' },
@@ -197,7 +198,7 @@ describe('orchestration browser surface RPC', () => {
         active: false
       }
     })
-    const browserScreenshot = vi.fn().mockResolvedValue({ data: 'Zm9v', format: 'png' })
+    const browserScreenshot = vi.fn().mockResolvedValue({ data: TEST_PNG_BASE64, format: 'png' })
     const database = {
       getMaestroBrowserProfileConsent: () => undefined,
       reserveMaestroBrowserSurface: () => ({ receipt }),
@@ -475,6 +476,55 @@ describe('orchestration browser surface RPC', () => {
     expect(result).toMatchObject({ state: 'unavailable', observed_visibility: 'unverifiable' })
   })
 
+  it('reports exact safe Browser binding differences before taking an action', async () => {
+    const receipt = { ...browserSurfaceReceipt(), workspace_key: WORKSPACE_KEY, state: 'reserved' }
+    const runtime = {
+      getOrchestrationDb: () => ({
+        reserveMaestroBrowserSurface: () => ({ receipt }),
+        updateMaestroBrowserSurface: (
+          _surfaceId: string,
+          update: (current: typeof receipt) => typeof receipt
+        ) => ({ receipt: update(receipt) })
+      }),
+      browserTabShow: vi.fn().mockResolvedValue({
+        tab: {
+          browserPageId: 'page-observed',
+          worktreeId: 'repo-other::/workspace',
+          profileId: 'profile-observed',
+          active: false
+        }
+      })
+    }
+    let rejection: unknown
+
+    try {
+      await ensureMaestroBrowserSurface(
+        {
+          workspace: { workspace_key: WORKSPACE_KEY },
+          ownership: 'harness',
+          requested_visibility: 'offscreen',
+          profile_id: receipt.profile_id
+        } as never,
+        { runtime } as never
+      )
+    } catch (error) {
+      rejection = error
+    }
+
+    expect(rejection).toMatchObject({
+      code: 'browser_surface_identity_mismatch',
+      data: {
+        expected: { browserPageId: receipt.browser_page_id, worktreeId: WORKTREE_ID },
+        observed: {
+          browserPageId: 'page-observed',
+          worktreeId: 'repo-other::/workspace',
+          profileId: 'profile-observed'
+        },
+        differences: ['browserPageId', 'worktreeId', 'profileId']
+      }
+    })
+  })
+
   it('upgrades an unobserved paint verdict when focus genuinely observes the pane', async () => {
     const unobservedReceipt = unobservedSurfaceReceipt()
     const browserTabShow = vi.fn().mockResolvedValue({
@@ -540,7 +590,7 @@ describe('orchestration browser surface RPC', () => {
           active: true
         }
       }),
-      browserScreenshot: vi.fn().mockResolvedValue({ data: 'Zm9v', format: 'png' })
+      browserScreenshot: vi.fn().mockResolvedValue({ data: TEST_PNG_BASE64, format: 'png' })
     })
 
     // Parsing narrows the handler's `unknown` honestly, and proves the recovered receipt is valid.

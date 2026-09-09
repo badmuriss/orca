@@ -37,9 +37,12 @@ export function useMaestroWorkspaceHumanRunProgress(
 
   useEffect(() => {
     let active = true
-    let timer: ReturnType<typeof setTimeout> | undefined
-    setState({ identity, progress: null })
+    let polling = false
     const poll = async (): Promise<void> => {
+      if (polling) {
+        return
+      }
+      polling = true
       try {
         const response = await callRuntimeRpc<MaestroRunProgressResponse>(
           target,
@@ -55,17 +58,14 @@ export function useMaestroWorkspaceHumanRunProgress(
       } catch {
         // The projection-backed v1 view remains available for older or disconnected peers.
       } finally {
-        if (active) {
-          timer = setTimeout(() => void poll(), RUN_PROGRESS_POLL_INTERVAL_MS)
-        }
+        polling = false
       }
     }
     void poll()
+    const timer = setInterval(() => void poll(), RUN_PROGRESS_POLL_INTERVAL_MS)
     return () => {
       active = false
-      if (timer) {
-        clearTimeout(timer)
-      }
+      clearInterval(timer)
     }
   }, [executionHostId, identity, target, workspaceKey])
 
@@ -85,9 +85,12 @@ export function useMaestroWorkspaceProjection(
   })
   useEffect(() => {
     let active = true
-    let timer: ReturnType<typeof setTimeout> | undefined
-    setState({ identity, projection: null })
+    let polling = false
     const poll = async (): Promise<void> => {
+      if (polling) {
+        return
+      }
+      polling = true
       try {
         const projection = await getMaestroProjection(target, {
           execution_host_id: executionHostId,
@@ -109,17 +112,14 @@ export function useMaestroWorkspaceProjection(
       } catch {
         // Keep the last confirmed projection for this scope through transient poll failures.
       } finally {
-        if (active) {
-          timer = setTimeout(() => void poll(), RUN_PROGRESS_POLL_INTERVAL_MS)
-        }
+        polling = false
       }
     }
     void poll()
+    const timer = setInterval(() => void poll(), RUN_PROGRESS_POLL_INTERVAL_MS)
     return () => {
       active = false
-      if (timer) {
-        clearTimeout(timer)
-      }
+      clearInterval(timer)
     }
   }, [executionHostId, identity, target, workspaceKey])
   return state.identity === identity ? state.projection : null

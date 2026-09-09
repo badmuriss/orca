@@ -77,10 +77,6 @@ export function requestWorkerTerminalRelease(
             : ((resource.retained_reason as WorkerTerminalRetainedReason) ?? 'identity_unproven')
       }
     }
-    if (worker.state === 'stopped' || worker.state === 'abandoned') {
-      this.db.exec('COMMIT')
-      return { disposition: 'retained', resource, reason: 'identity_unproven' }
-    }
     if (resource.ownership_state === 'external') {
       this.db
         .prepare(

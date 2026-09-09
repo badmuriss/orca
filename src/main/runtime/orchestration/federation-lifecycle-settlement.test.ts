@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   ORCHESTRATION_CONTRACT_VERSION,
-  ORCHESTRATION_FEDERATION_WORKER_RELEASE_RUNTIME_CAPABILITY
+  ORCHESTRATION_FEDERATION_RELEASE_ARCHIVE_RUNTIME_CAPABILITY
 } from '../../../shared/protocol-version'
 import { OrcaRuntimeService } from '../orca-runtime'
 import { OrchestrationDb } from './db'
@@ -83,7 +83,8 @@ describe('federated worker release', () => {
       worktreeId: 'repo::remote',
       terminalHandle: 'term_remote_worker',
       setupState: 'not_applicable',
-      effects: []
+      effects: [],
+      terminalOwnership: 'created'
     })
     db.markRemoteAttachmentReady(dispatchId)
     db.settleRemoteAttachmentInRelayTransaction(dispatchId, 'succeeded')
@@ -102,6 +103,15 @@ describe('federated worker release', () => {
       'tab_worker:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
     )
     vi.spyOn(runtime, 'getTerminalProcessIncarnation').mockReturnValue('worker_runtime:pty:1')
+    vi.spyOn(runtime, 'readTerminal').mockResolvedValue({
+      handle: 'term_remote_worker',
+      status: 'running',
+      tail: [],
+      entries: [],
+      truncated: false,
+      limited: false,
+      nextCursor: '0'
+    } as never)
     vi.spyOn(runtime, 'closeTerminal').mockResolvedValue({
       handle: 'term_remote_worker',
       tabId: 'tab-remote-worker',
@@ -112,7 +122,7 @@ describe('federated worker release', () => {
   }
 
   function createHomeReleaseHarness(
-    capabilities: string[] = [ORCHESTRATION_FEDERATION_WORKER_RELEASE_RUNTIME_CAPABILITY]
+    capabilities: string[] = [ORCHESTRATION_FEDERATION_RELEASE_ARCHIVE_RUNTIME_CAPABILITY]
   ): {
     db: OrchestrationDb
     runtime: OrcaRuntimeService
@@ -230,18 +240,18 @@ describe('federated worker release', () => {
     expect(remoteCall.mock.calls.map(([, method]) => method)).toEqual(['status.get'])
   })
 
-  it('returns unverifiable when the worker server cannot be contacted', async () => {
+  it('replays release_unknown when the worker server cannot be contacted', async () => {
     const { dispatcher, dispatchId, remoteCall } = createHomeReleaseHarness()
     remoteCall.mockRejectedValueOnce(new Error('worker server unavailable'))
 
     const unavailable = await dispatcher.dispatch(releaseRequest(dispatchId, 'offline_release'))
     const released = await dispatcher.dispatch(releaseRequest(dispatchId, 'offline_release'))
 
-    expect(unavailable).toMatchObject({ ok: true, result: { state: 'unverifiable' } })
-    expect(released).toMatchObject({ ok: true, result: { state: 'released' } })
+    expect(unavailable).toMatchObject({ ok: true, result: { state: 'release_unknown' } })
+    expect(released).toMatchObject({ ok: true, result: { state: 'release_unknown' } })
     expect(
       remoteCall.mock.calls.filter(([, method]) => method === 'orchestration.federationRelease')
-    ).toHaveLength(1)
+    ).toHaveLength(0)
   })
 
   it.each([
@@ -269,13 +279,13 @@ describe('federated worker release', () => {
         processAction: 'none'
       }
     ]
-  ])('keeps a %s remote release receipt unverifiable', async (kind, receipt) => {
+  ])('keeps a %s remote release receipt release_unknown', async (kind, receipt) => {
     const { dispatcher, dispatchId, remoteCall } = createHomeReleaseHarness()
     remoteCall.mockImplementation(async (_environmentId, method, params) => {
       if (method === 'status.get') {
         return {
           runtimeId: 'worker_runtime',
-          capabilities: [ORCHESTRATION_FEDERATION_WORKER_RELEASE_RUNTIME_CAPABILITY]
+          capabilities: [ORCHESTRATION_FEDERATION_RELEASE_ARCHIVE_RUNTIME_CAPABILITY]
         }
       }
       if (method === 'orchestration.federationRelease') {
@@ -293,7 +303,7 @@ describe('federated worker release', () => {
       dispatcher.dispatch(releaseRequest(dispatchId, `invalid_${kind}`))
     ).resolves.toMatchObject({
       ok: true,
-      result: { state: 'unverifiable', processAction: 'none' }
+      result: { state: 'release_unknown', processAction: 'none' }
     })
   })
 
@@ -320,13 +330,13 @@ describe('federated worker release', () => {
         }
       }
     ]
-  ])('keeps a receipt with a %s unverifiable', async (_kind, override) => {
+  ])('keeps a receipt with a %s release_unknown', async (_kind, override) => {
     const { dispatcher, dispatchId, remoteCall } = createHomeReleaseHarness()
     remoteCall.mockImplementation(async (_environmentId, method, params) => {
       if (method === 'status.get') {
         return {
           runtimeId: 'worker_runtime',
-          capabilities: [ORCHESTRATION_FEDERATION_WORKER_RELEASE_RUNTIME_CAPABILITY]
+          capabilities: [ORCHESTRATION_FEDERATION_RELEASE_ARCHIVE_RUNTIME_CAPABILITY]
         }
       }
       if (method === 'orchestration.federationRelease') {
@@ -350,7 +360,7 @@ describe('federated worker release', () => {
       dispatcher.dispatch(releaseRequest(dispatchId, `invalid_${_kind}`))
     ).resolves.toMatchObject({
       ok: true,
-      result: { state: 'unverifiable', processAction: 'none' }
+      result: { state: 'release_unknown', processAction: 'none' }
     })
   })
 
@@ -366,7 +376,7 @@ describe('federated worker release', () => {
       if (method === 'status.get') {
         return {
           runtimeId: 'worker_runtime_reconnected',
-          capabilities: [ORCHESTRATION_FEDERATION_WORKER_RELEASE_RUNTIME_CAPABILITY]
+          capabilities: [ORCHESTRATION_FEDERATION_RELEASE_ARCHIVE_RUNTIME_CAPABILITY]
         }
       }
       if (method === 'orchestration.federationRelease') {
@@ -399,7 +409,7 @@ describe('federated worker release', () => {
       if (method === 'status.get') {
         return {
           runtimeId: 'worker_runtime_reconnected',
-          capabilities: [ORCHESTRATION_FEDERATION_WORKER_RELEASE_RUNTIME_CAPABILITY]
+          capabilities: [ORCHESTRATION_FEDERATION_RELEASE_ARCHIVE_RUNTIME_CAPABILITY]
         }
       }
       if (method === 'orchestration.federationRelease') {
