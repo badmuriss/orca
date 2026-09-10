@@ -39,7 +39,11 @@ export async function settleWorkerTerminalTabNotFoundCloseRace(args: {
   }
   const observed = inventory.terminals[0]
   if (!observed) {
-    const released = args.db.settleWorkerTerminalRelease(args.resource.id)
+    const released = args.db.settleWorkerTerminalRelease({
+      resourceId: args.resource.id,
+      ownerDispatchId: args.dispatchId,
+      processIncarnation: args.resource.process_incarnation ?? ''
+    })
     args.runtime.notifyMessageArrived(`dispatch:${args.dispatchId}`, 'status')
     return raceReceipt(args, 'already_absent', {
       archive: archiveSummary(released),

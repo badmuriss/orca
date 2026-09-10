@@ -101,7 +101,13 @@ describe('settled worker terminal resume fence rows', () => {
     const { db: d, taskId, dispatchId } = createReadyWorker()
     settle(d, taskId, dispatchId)
     const resource = requestRelease(d, dispatchId)
-    expect(d.settleWorkerTerminalRelease(resource.id).release_state).toBe('released')
+    expect(
+      d.settleWorkerTerminalRelease({
+        resourceId: resource.id,
+        ownerDispatchId: resource.owner_dispatch_id,
+        processIncarnation: resource.process_incarnation ?? ''
+      }).release_state
+    ).toBe('released')
 
     expect(d.listLegacyWorkerTerminalRecoveryRows()).toEqual([])
   })

@@ -1,6 +1,9 @@
 import type { OrchestrationDb } from '../orchestration-db'
 import { createMaestroTerminalLeaseTablesSql } from './create-maestro-terminal-lease-tables-sql'
-import { createMaestroTransferMutationIndexIfPossible } from './schema-column-probes'
+import {
+  createMaestroTerminalLeaseIndexesIfPossible,
+  createMaestroTransferMutationIndexIfPossible
+} from './schema-column-probes'
 
 export function applySchemaMigrationV41(this: OrchestrationDb, current: number): void {
   const mutationColumns = [
@@ -23,6 +26,7 @@ export function applySchemaMigrationV41(this: OrchestrationDb, current: number):
       }
     }
     createMaestroTransferMutationIndexIfPossible(this)
+    createMaestroTerminalLeaseIndexesIfPossible(this)
     return
   }
   this.db.exec(`

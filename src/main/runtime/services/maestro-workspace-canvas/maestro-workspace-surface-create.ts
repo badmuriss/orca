@@ -121,9 +121,13 @@ export async function createMaestroWorkspaceSurface(params: {
   if (renamed.tabId !== acknowledged.tabId) {
     throw new Error('annotation_title_identity_mismatch')
   }
+  const projected = await params.query()
+  if (projected.status !== 'available') {
+    throw new Error('annotation_surface_unverifiable')
+  }
   const surfaceId = { ...request.scope, unified_tab_id: acknowledged.tabId }
   const key = workspaceSurfaceKey(surfaceId)
-  const document = structuredClone(before.canvas.document)
+  const document = structuredClone(projected.canvas.document)
   document.annotations[key] = {
     surface_key: key,
     relative_path: relativePath,
@@ -136,7 +140,7 @@ export async function createMaestroWorkspaceSurface(params: {
   }
   const receipt = writeWorkspaceCanvasDocument(database, {
     scope: request.scope,
-    expected_revision: before.canvas.revision,
+    expected_revision: projected.canvas.revision,
     idempotency_key: `document:${request.idempotency_key}`,
     document
   })

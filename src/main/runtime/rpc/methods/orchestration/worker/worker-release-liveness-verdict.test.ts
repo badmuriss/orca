@@ -204,7 +204,11 @@ describe('orchestration worker release liveness verdict', () => {
       processAction: 'closed_agent_terminal',
       processVerdict: 'exited'
     })
-    expect(settleWorkerTerminalRelease).toHaveBeenCalledWith('resource-1')
+    expect(settleWorkerTerminalRelease).toHaveBeenCalledWith({
+      resourceId: resource.id,
+      ownerDispatchId: 'ctx-worker',
+      processIncarnation: resource.process_incarnation
+    })
   })
 
   it('does not close a terminal whose owning host is unverifiable', async () => {

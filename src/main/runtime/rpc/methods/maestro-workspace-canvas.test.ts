@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { workspaceSurfaceKey } from '../../../../shared/maestro-workspace-canvas'
 import { MaestroWorkspaceCanvasAuthority } from '../../services/maestro-workspace-canvas/maestro-workspace-canvas-authority'
 import { MAESTRO_WORKSPACE_CANVAS_METHODS } from './maestro-workspace-canvas'
 import {
@@ -324,6 +325,13 @@ describe('Maestro workspace Canvas authority', () => {
       scope,
       actor_id: 'actor-1',
       expected_authority_revision: current.snapshot.authority_revision,
+      expected_canvas_revision: current.canvas.revision,
+      placement: {
+        position: { x: 612, y: -248 },
+        size: { width: 680, height: 480 },
+        collapsed: false,
+        z_order: 9
+      },
       idempotency_key: 'browser-create-1'
     }
     const first = await authority.mutate(request)
@@ -339,6 +347,15 @@ describe('Maestro workspace Canvas authority', () => {
         focus: false
       })
     )
+    const browserResult = await authority.query(scope, 'actor-1')
+    if (browserResult.status !== 'available') {
+      throw new Error('missing Browser snapshot')
+    }
+    expect(
+      browserResult.canvas.document.placements[
+        JSON.stringify([scope.execution_host_id, scope.workspace_key, 'browser-created'])
+      ]
+    ).toMatchObject({ position: { x: 612, y: -248 } })
     database.close()
   })
 
@@ -388,7 +405,13 @@ describe('Maestro workspace Canvas authority', () => {
       expected_canvas_revision: current.canvas.revision,
       idempotency_key: 'annotation-create-1',
       title: 'Decision',
-      annotation: { text: 'Use the stable API.', tone: 'decision' as const }
+      annotation: { text: 'Use the stable API.', tone: 'decision' as const },
+      placement: {
+        position: { x: -480, y: 316 },
+        size: { width: 440, height: 360 },
+        collapsed: false,
+        z_order: 11
+      }
     }
     const first = await authority.mutate(request)
     await expect(authority.mutate(request)).resolves.toMatchObject({
@@ -412,6 +435,9 @@ describe('Maestro workspace Canvas authority', () => {
       annotation: { tone: 'decision' }
     })
     const annotationSurface = Object.values(reopened.snapshot.surfaces)[0]!
+    expect(
+      reopened.canvas.document.placements[workspaceSurfaceKey(annotationSurface.id)]
+    ).toMatchObject({ position: { x: -480, y: 316 } })
     await expect(
       authority.mutate({
         action: 'update-annotation',

@@ -122,7 +122,11 @@ export async function reconcileExitedWorkerTerminalRelease(args: {
       reason: 'The exited terminal surface could not be retired from its owning workspace.'
     }
   }
-  const released = args.db.settleWorkerTerminalRelease(args.resource.id)
+  const released = args.db.settleWorkerTerminalRelease({
+    resourceId: args.resource.id,
+    ownerDispatchId: args.dispatchId,
+    processIncarnation: args.resource.process_incarnation
+  })
   args.runtime.notifyExitedWorkerTerminalRetirement(args.resource.pane_key)
   args.runtime.notifyMessageArrived(`dispatch:${args.dispatchId}`, 'status')
   return { state: 'released', resource: released }

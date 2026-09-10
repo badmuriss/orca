@@ -9,6 +9,7 @@ import type { OrcaRuntimeService } from '../../orca-runtime'
 import { describeUnconfirmedAgentStop } from '../../../../shared/pty-liveness-verdict'
 import { archiveSummary } from './orchestration-worker-terminal-resource-view'
 import { releaseUnknown } from './orchestration-worker-release-receipts'
+import { workerTerminalCloseReceiptProvesExit } from '../../orchestration/worker-terminal-release-proof'
 
 export type WorkerReleaseReceipt = {
   dispatchId: string
@@ -111,35 +112,11 @@ export async function closeWorkerTerminalOnOwningHost(args: {
   archiveStatus: WorkerTerminalArchiveStatus | null
 }): Promise<WorkerReleaseReceipt> {
   const { runtime, db, dispatchId, resource, releasing, archiveSource, archiveStatus } = args
+  let close: Awaited<ReturnType<OrcaRuntimeService['closeTerminal']>>
   try {
-    const close = await runtime.closeTerminal(resource.terminal_handle)
-    if (!close.ptyKilled) {
-      const processVerdict = await inspectProcess(runtime, resource)
-      if (processVerdict === 'exited') {
-        const released = db.settleWorkerTerminalRelease(resource.id)
-        runtime.notifyMessageArrived(`dispatch:${dispatchId}`, 'status')
-        return {
-          dispatchId,
-          state: 'released',
-          processAction: 'closed_agent_terminal',
-          processVerdict,
-          archive: archiveSummary(released)
-        }
-      }
-      const reason =
-        processVerdict === 'live'
-          ? 'The agent terminal was closed but its exact process remains live on the owning host.'
-          : describeUnconfirmedAgentStop(close)
-      const unknown = db.markWorkerTerminalReleaseUnknown(resource.id, reason)
-      return {
-        dispatchId,
-        state: 'release_unknown',
-        processAction: 'closed_agent_terminal',
-        processVerdict,
-        archive: { source: archiveSource, status: archiveStatus },
-        lastError: unknown.release_error ?? reason,
-        recovery: releaseRecovery(dispatchId)
-      }
+    close = await runtime.closeTerminal(resource.terminal_handle)
+    if (!close) {
+      throw new Error('terminal_close_unverifiable')
     }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
@@ -174,15 +151,73 @@ export async function closeWorkerTerminalOnOwningHost(args: {
       recovery: releaseRecovery(dispatchId)
     }
   }
-  const released = db.settleWorkerTerminalRelease(resource.id)
-  runtime.notifyMessageArrived(`dispatch:${dispatchId}`, 'status')
+  const processVerdict = workerTerminalCloseReceiptProvesExit(close, resource)
+    ? 'exited'
+    : await inspectProcess(runtime, resource)
+  if (processVerdict === 'exited') {
+    const released = settleExactWorkerTerminalRelease(db, dispatchId, resource)
+    if (
+      released.release_state === 'released' &&
+      exactReleaseIdentity(released, dispatchId, resource)
+    ) {
+      runtime.notifyMessageArrived(`dispatch:${dispatchId}`, 'status')
+      return {
+        dispatchId,
+        state: 'released',
+        processAction: 'closed_agent_terminal',
+        processVerdict,
+        archive: archiveSummary(released)
+      }
+    }
+    return {
+      dispatchId,
+      state: 'release_unknown',
+      processAction: 'closed_agent_terminal',
+      processVerdict,
+      archive: archiveSummary(released),
+      lastError:
+        'The exact process exited, but the worker release identity changed before settlement.',
+      recovery: releaseRecovery(dispatchId)
+    }
+  }
+  const reason =
+    processVerdict === 'live'
+      ? 'The agent terminal was closed but its exact process remains live on the owning host.'
+      : describeUnconfirmedAgentStop(close)
+  const unknown = db.markWorkerTerminalReleaseUnknown(resource.id, reason)
   return {
     dispatchId,
-    state: 'released',
+    state: 'release_unknown',
     processAction: 'closed_agent_terminal',
-    processVerdict: 'exited',
-    archive: archiveSummary(released)
+    processVerdict,
+    archive: { source: archiveSource, status: archiveStatus },
+    lastError: unknown.release_error ?? reason,
+    recovery: releaseRecovery(dispatchId)
   }
+}
+
+function settleExactWorkerTerminalRelease(
+  db: OrchestrationDb,
+  dispatchId: string,
+  resource: WorkerTerminalResourceRow
+): WorkerTerminalResourceRow {
+  return db.settleWorkerTerminalRelease({
+    resourceId: resource.id,
+    ownerDispatchId: dispatchId,
+    processIncarnation: resource.process_incarnation ?? ''
+  })
+}
+
+function exactReleaseIdentity(
+  resource: WorkerTerminalResourceRow,
+  dispatchId: string,
+  original: WorkerTerminalResourceRow
+): boolean {
+  return (
+    resource.owner_dispatch_id === dispatchId &&
+    resource.process_incarnation !== null &&
+    resource.process_incarnation === original.process_incarnation
+  )
 }
 
 function inspectProcess(

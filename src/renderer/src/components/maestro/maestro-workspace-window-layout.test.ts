@@ -213,4 +213,38 @@ describe('Maestro workspace window layout', () => {
     expect(screenBottom).toBe(cursor.y - 16)
     expect(screenTop).toBeGreaterThanOrEqual(64)
   })
+
+  it.each([
+    ['terminal', { width: 760, height: 530 }],
+    ['browser', { width: 680, height: 480 }],
+    ['annotation', { width: 440, height: 360 }]
+  ] as const)('anchors a context-menu %s at the pointer after pan and zoom', (_kind, size) => {
+    const viewport = { center: { x: 260, y: -140 }, zoom: 0.75 }
+    const canvas = { width: 1366, height: 768 }
+    const cursor = { x: 402, y: 650 }
+    const cursorWorld = {
+      x: viewport.center.x + (cursor.x - canvas.width / 2) / viewport.zoom,
+      y: viewport.center.y + (cursor.y - canvas.height / 2) / viewport.zoom
+    }
+    const placement = placeWorkspaceWindowAtCanvasPoint(
+      {
+        position: cursorWorld,
+        size,
+        collapsed: false,
+        z_order: 7
+      },
+      cursorWorld,
+      viewport,
+      canvas,
+      { top: 64, right: 16, bottom: 16, left: 16 }
+    )
+    const screenLeft = canvas.width / 2 + (placement.position.x - viewport.center.x) * viewport.zoom
+    const screenTop = canvas.height / 2 + (placement.position.y - viewport.center.y) * viewport.zoom
+    const screenRight = screenLeft + size.width * viewport.zoom
+    const screenBottom = screenTop + size.height * viewport.zoom
+
+    expect((screenLeft + screenRight) / 2).toBeCloseTo(cursor.x, 0)
+    expect(screenBottom).toBeLessThanOrEqual(cursor.y)
+    expect(screenTop).toBeGreaterThanOrEqual(64)
+  })
 })

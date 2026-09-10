@@ -93,6 +93,7 @@ describe('orchestration worker release recovery', () => {
     })
     vi.spyOn(runtime, 'isTerminalRunningAgent').mockResolvedValue(true)
     vi.spyOn(runtime, 'getExactWorkerProviderSession').mockReturnValue(null)
+    vi.spyOn(runtime, 'inspectTerminalProcessIncarnationLiveness').mockResolvedValue('exited')
     vi.spyOn(runtime, 'readTerminal').mockResolvedValue({
       handle: 'term_worker',
       status: 'running',
@@ -280,6 +281,7 @@ describe('orchestration worker release recovery', () => {
   it('defers instead of settling unknown while inventory is incomplete', async () => {
     setup()
     const { dispatchId } = await startSettledWorker()
+    vi.mocked(runtime.inspectTerminalProcessIncarnationLiveness).mockResolvedValue('unverifiable')
     vi.mocked(runtime.closeTerminal).mockRejectedValueOnce(new Error('Multiplexer disposed'))
     await call('orchestration.workerRelease', { dispatch: dispatchId })
     vi.mocked(runtime.showTerminal).mockRejectedValue(new Error('terminal_handle_stale'))
@@ -292,6 +294,7 @@ describe('orchestration worker release recovery', () => {
   it('preserves archived output when an unconfirmed release retry cannot find the terminal', async () => {
     setup()
     const { dispatchId } = await startSettledWorker()
+    vi.mocked(runtime.inspectTerminalProcessIncarnationLiveness).mockResolvedValue('unverifiable')
     vi.mocked(runtime.closeTerminal).mockResolvedValueOnce({
       handle: 'term_worker',
       tabId: 'tab-worker',

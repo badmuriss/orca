@@ -89,7 +89,7 @@ export function exitedWorkerTerminalLeaseIsCurrent(
   )
 }
 
-function workerTerminalExecutionHostId(
+export function workerTerminalExecutionHostId(
   resource: WorkerTerminalResourceRow
 ): ExecutionHostId | null {
   const hostScope = parseWorkerTerminalHostScope(resource.host_scope)

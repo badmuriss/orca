@@ -129,7 +129,16 @@ describe('settled worker automatic-resume fence persistence', () => {
     expect(fenceChanges).toEqual([[PANE_KEY, true]])
 
     const requested = h.db.requestWorkerTerminalRelease(h.dispatchId)
-    h.db.settleWorkerTerminalRelease((requested as { resource: { id: string } }).resource.id)
+    const resource = (
+      requested as {
+        resource: { id: string; owner_dispatch_id: string; process_incarnation: string | null }
+      }
+    ).resource
+    h.db.settleWorkerTerminalRelease({
+      resourceId: resource.id,
+      ownerDispatchId: resource.owner_dispatch_id,
+      processIncarnation: resource.process_incarnation ?? ''
+    })
     h.persistence.prepare()
 
     // A fence the plan no longer claims must be lifted even with no record to read it from.
@@ -158,7 +167,16 @@ describe('settled worker automatic-resume fence persistence', () => {
 
     const requested = h.db.requestWorkerTerminalRelease(h.dispatchId)
     expect(requested.disposition).toBe('requested')
-    h.db.settleWorkerTerminalRelease((requested as { resource: { id: string } }).resource.id)
+    const resource = (
+      requested as {
+        resource: { id: string; owner_dispatch_id: string; process_incarnation: string | null }
+      }
+    ).resource
+    h.db.settleWorkerTerminalRelease({
+      resourceId: resource.id,
+      ownerDispatchId: resource.owner_dispatch_id,
+      processIncarnation: resource.process_incarnation ?? ''
+    })
     h.persistence.prepare()
 
     expect(h.fence()).toBeUndefined()

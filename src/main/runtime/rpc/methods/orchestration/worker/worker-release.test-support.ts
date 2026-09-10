@@ -52,7 +52,9 @@ export function createOrchestrationWorkerReleaseHarness(): OrchestrationWorkerRe
     dbOpen = true
     runtime = new OrcaRuntimeService()
     runtime.setOrchestrationDb(db)
-    inspectProcessLiveness = vi.fn().mockResolvedValue('live')
+    // A positive exact host observation is the fixture's process-exit proof. The close boolean
+    // alone is intentionally not enough for production release settlement.
+    inspectProcessLiveness = vi.fn().mockResolvedValue('exited')
     ;(
       runtime as unknown as {
         inspectTerminalProcessIncarnationLiveness: typeof inspectProcessLiveness

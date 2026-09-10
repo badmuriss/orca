@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { MaestroBootstrapReceiptSchema } from '../../../../../shared/maestro-bootstrap-contract'
 import type { AgentGraphView, MaestroWorkspaceAnchor } from '../../../../../shared/maestro-contract'
 import { OrchestrationDb } from '../orchestration-db'
@@ -141,10 +141,22 @@ describe('Maestro projection store', () => {
           legacyProjection.updated_at
         )
       }
+      insertLegacy.run(
+        'local',
+        'folder:broken',
+        'run-broken',
+        4,
+        JSON.stringify({ run_id: 'run-broken', workspace_scope: {} }),
+        legacyProjection.updated_at
+      )
       firstDatabase.db.pragma('user_version = 34')
       firstDatabase.close()
 
+      const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
       const migratedDatabase = new OrchestrationDb(databasePath)
+      expect(warning).toHaveBeenCalledTimes(1)
+      expect(warning.mock.calls[0]?.[0]).toContain('quarantined malformed Maestro projection')
+      warning.mockRestore()
       expect(getMaestroProjection.call(migratedDatabase, EXECUTION, 'run-1')).toMatchObject({
         runId: 'run-1',
         revision: 0
@@ -157,7 +169,29 @@ describe('Maestro projection store', () => {
              ORDER BY name`
           )
           .all()
-      ).toEqual([{ name: 'maestro_run_projections' }])
+      ).toEqual(
+        expect.arrayContaining([
+          { name: 'maestro_run_projection_migration_quarantine' },
+          { name: 'maestro_run_projections' }
+        ])
+      )
+      expect(
+        migratedDatabase.db
+          .prepare(
+            `SELECT run_id, revision, reason, length(payload_sample) AS sample_length
+             FROM maestro_run_projection_migration_quarantine`
+          )
+          .all()
+      ).toEqual([
+        expect.objectContaining({
+          run_id: 'run-broken',
+          revision: 4,
+          sample_length: expect.any(Number)
+        })
+      ])
+      expect(migratedDatabase.db.pragma('user_version', { simple: true })).toBeGreaterThanOrEqual(
+        43
+      )
       applyMaestroProjection.call(migratedDatabase, anchor('run-2'), runView('run-2'))
       applyMaestroProjection.call(
         migratedDatabase,
@@ -196,7 +230,12 @@ describe('Maestro projection store', () => {
              ORDER BY name`
           )
           .all()
-      ).toEqual([{ name: 'maestro_run_projections' }])
+      ).toEqual(
+        expect.arrayContaining([
+          { name: 'maestro_run_projection_migration_quarantine' },
+          { name: 'maestro_run_projections' }
+        ])
+      )
       reopenedDatabase.close()
     } finally {
       rmSync(directory, { recursive: true, force: true })

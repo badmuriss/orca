@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { createPtyStopReceipt } from '../../../../shared/pty-stop-receipt'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import type { OrchestrationDb } from '../../orchestration/db'
 import type { WorkerTerminalResourceRow } from '../../orchestration/worker-terminal-ownership'
@@ -102,7 +103,11 @@ describe('orchestration worker auto-release', () => {
       closeResponse: { error: 'tab_not_found' },
       inventoryResponse: { state: 'absent' }
     })
-    expect(db.settleWorkerTerminalRelease).toHaveBeenCalledWith('resource-1')
+    expect(db.settleWorkerTerminalRelease).toHaveBeenCalledWith({
+      resourceId: resource.id,
+      ownerDispatchId: resource.owner_dispatch_id,
+      processIncarnation: resource.process_incarnation
+    })
     expect(runtime.closeTerminal).toHaveBeenCalledTimes(1)
   })
 
@@ -140,6 +145,7 @@ describe('orchestration worker auto-release', () => {
       tabId: 'tab-worker',
       ptyKilled: true
     } as never)
+    vi.mocked(runtime.inspectTerminalProcessIncarnationLiveness).mockResolvedValue('exited')
     const db = {
       ...releaseDatabase(),
       getFederatedDispatch: vi.fn(() => undefined),
@@ -164,6 +170,61 @@ describe('orchestration worker auto-release', () => {
     ).resolves.toMatchObject({ state: 'released', processAction: 'closed_agent_terminal' })
     expect(runtime.closeTerminal).toHaveBeenCalledWith('term-worker')
     expect(db.requestWorkerTerminalRelease).toHaveBeenCalledWith('ctx-worker', { auto: true })
+  })
+
+  it('does not settle from a kill boolean while the exact process remains live', async () => {
+    const runtime = exactRuntime()
+    const db = releaseDatabase()
+    vi.mocked(runtime.closeTerminal).mockResolvedValue({
+      handle: 'term-worker',
+      tabId: 'tab-worker',
+      ptyKilled: true
+    } as never)
+    vi.mocked(runtime.inspectTerminalProcessIncarnationLiveness).mockResolvedValue('live')
+
+    await expect(
+      completeWorkerTerminalRelease({ runtime, db, dispatchId: 'ctx-worker', resource })
+    ).resolves.toMatchObject({ state: 'release_unknown', processVerdict: 'live' })
+    expect(db.settleWorkerTerminalRelease).not.toHaveBeenCalled()
+  })
+
+  it('settles only when the close carries a matching verified exit receipt', async () => {
+    const runtime = exactRuntime()
+    const db = releaseDatabase()
+    const identity = {
+      pid: 41,
+      parentPid: 1,
+      processGroupId: 41,
+      startedAt: 'Mon Aug 24 08:00:00 2026'
+    }
+    const receipt = createPtyStopReceipt({
+      executionHostId: 'local',
+      terminalHandle: 'term-worker',
+      ptyId: 'pty-worker',
+      ptyIncarnation: resource.process_incarnation!,
+      root: identity,
+      descendants: [],
+      observations: [{ identity, status: 'absent', observedAt: new Date().toISOString() }],
+      verdict: 'exited',
+      processTreeVerified: true
+    })
+    vi.mocked(runtime.closeTerminal).mockResolvedValue({
+      handle: 'term-worker',
+      tabId: 'tab-worker',
+      ptyKilled: true,
+      ptyStopReceipt: receipt,
+      ptyStopVerdict: 'unverifiable'
+    } as never)
+    vi.mocked(runtime.inspectTerminalProcessIncarnationLiveness).mockResolvedValue('live')
+
+    await expect(
+      completeWorkerTerminalRelease({ runtime, db, dispatchId: 'ctx-worker', resource })
+    ).resolves.toMatchObject({ state: 'released', processVerdict: 'exited' })
+    expect(db.settleWorkerTerminalRelease).toHaveBeenCalledWith({
+      resourceId: resource.id,
+      ownerDispatchId: resource.owner_dispatch_id,
+      processIncarnation: resource.process_incarnation
+    })
   })
 
   it.each([

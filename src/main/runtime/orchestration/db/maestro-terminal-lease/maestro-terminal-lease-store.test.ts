@@ -251,12 +251,47 @@ describe('Maestro terminal lease store', () => {
     db.transitionMaestroTerminalLease({ leaseId: lease.id, state: 'ready' })
     db.transitionMaestroTerminalLease({ leaseId: lease.id, state: 'active' })
 
-    db.settleWorkerTerminalRelease('wtr_1')
+    db.settleWorkerTerminalRelease({
+      resourceId: 'wtr_1',
+      ownerDispatchId: 'ctx_1',
+      processIncarnation: 'pty:1'
+    })
 
     expect(db.getMaestroTerminalLease(lease.id)).toMatchObject({
       lifecycleState: 'outcome_unknown',
       cleanupReceipt: null
     })
+  })
+
+  it('does not settle a replacement incarnation through a stale release identity', () => {
+    db = new OrchestrationDb(':memory:')
+    db.db
+      .prepare(
+        `INSERT INTO worker_terminal_resources (
+          id, origin_dispatch_id, owner_dispatch_id, terminal_handle, pane_key,
+          process_incarnation, ownership_state, release_state
+        ) VALUES ('wtr_fenced', 'ctx_old', 'ctx_new', 'term_1', 'tab_1:leaf_1', 'pty:new', 'owned', 'requested')`
+      )
+      .run()
+
+    const stale = db.settleWorkerTerminalRelease({
+      resourceId: 'wtr_fenced',
+      ownerDispatchId: 'ctx_old',
+      processIncarnation: 'pty:old'
+    })
+    expect(stale).toMatchObject({
+      owner_dispatch_id: 'ctx_new',
+      process_incarnation: 'pty:new',
+      release_state: 'requested'
+    })
+
+    expect(
+      db.settleWorkerTerminalRelease({
+        resourceId: 'wtr_fenced',
+        ownerDispatchId: 'ctx_new',
+        processIncarnation: 'pty:new'
+      }).release_state
+    ).toBe('released')
   })
 
   it('atomically supersedes an exact worker attempt and replays its receipt', () => {

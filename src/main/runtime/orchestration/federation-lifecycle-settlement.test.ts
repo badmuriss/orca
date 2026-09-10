@@ -103,6 +103,7 @@ describe('federated worker release', () => {
       'tab_worker:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
     )
     vi.spyOn(runtime, 'getTerminalProcessIncarnation').mockReturnValue('worker_runtime:pty:1')
+    vi.spyOn(runtime, 'inspectTerminalProcessIncarnationLiveness').mockResolvedValue('exited')
     vi.spyOn(runtime, 'readTerminal').mockResolvedValue({
       handle: 'term_remote_worker',
       status: 'running',
@@ -600,6 +601,9 @@ describe('federated worker release', () => {
       tabId: 'tab-remote-worker',
       ptyKilled: false
     } as never)
+    vi.mocked(runtime.inspectTerminalProcessIncarnationLiveness).mockResolvedValueOnce(
+      'unverifiable'
+    )
 
     await expect(releaseFederatedAttachment(runtime, dispatchId)).resolves.toMatchObject({
       state: 'unverifiable'

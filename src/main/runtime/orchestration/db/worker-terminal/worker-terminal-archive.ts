@@ -102,9 +102,13 @@ export function getWorkerTerminalArchive(
 
 export function settleWorkerTerminalRelease(
   this: OrchestrationDb,
-  resourceId: string
+  params: {
+    resourceId: string
+    ownerDispatchId: string
+    processIncarnation: string
+  }
 ): WorkerTerminalResourceRow {
-  this.db
+  const update = this.db
     .prepare(
       `UPDATE worker_terminal_resources
        SET release_state = 'released', ownership_state = 'released',
@@ -112,11 +116,19 @@ export function settleWorkerTerminalRelease(
            review_id = NULL,
            release_completed_at = datetime('now'), release_error = NULL,
            updated_at = datetime('now')
-       WHERE id = ? AND release_state IN ('requested', 'releasing', 'unknown')`
+       WHERE id = ? AND owner_dispatch_id = ? AND process_incarnation = ?
+         AND release_state IN ('requested', 'releasing', 'unknown')`
     )
-    .run(resourceId)
-  markLinkedWorkerLeaseReleased(this, resourceId)
-  return this.getWorkerTerminalResource(resourceId) as WorkerTerminalResourceRow
+    .run(params.resourceId, params.ownerDispatchId, params.processIncarnation)
+  const settled = this.getWorkerTerminalResource(params.resourceId) as WorkerTerminalResourceRow
+  if (
+    update.changes > 0 &&
+    settled.owner_dispatch_id === params.ownerDispatchId &&
+    settled.process_incarnation === params.processIncarnation
+  ) {
+    markLinkedWorkerLeaseReleased(this, params.resourceId)
+  }
+  return settled
 }
 
 export function markWorkerTerminalReleaseUnknown(

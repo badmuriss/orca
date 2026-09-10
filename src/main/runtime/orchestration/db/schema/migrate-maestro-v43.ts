@@ -1,15 +1,8 @@
 import type { OrchestrationDb } from '../orchestration-db'
-
-type LegacyProjectionRow = {
-  home_execution_host_id?: string
-  home_workspace_key?: string
-  execution_execution_host_id?: string
-  execution_workspace_key?: string
-  run_id: string
-  revision: number
-  view_json: string
-  updated_at: string
-}
+import {
+  quarantineMaestroRunProjection,
+  type LegacyProjectionRow
+} from './maestro-run-projection-migration-quarantine'
 
 type ProjectionAliases = {
   homeExecutionHostId: string
@@ -38,6 +31,18 @@ export function applySchemaMigrationV43(this: OrchestrationDb, current: number):
     );
     CREATE INDEX IF NOT EXISTS idx_maestro_human_reviews_run
       ON maestro_human_reviews(execution_host_id, workspace_key, run_id, updated_at);
+    CREATE TABLE IF NOT EXISTS maestro_run_projection_migration_quarantine (
+      quarantine_key TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      updated_at TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      payload_digest TEXT NOT NULL,
+      payload_sample TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_maestro_run_projection_quarantine_run
+      ON maestro_run_projection_migration_quarantine(run_id, revision, updated_at);
   `)
   migrateMaestroRunProjections.call(this)
   if (!this.hasColumn('tasks', 'purpose')) {
@@ -157,7 +162,12 @@ function migrateMaestroRunProjections(this: OrchestrationDb): void {
          FROM maestro_run_projections ORDER BY updated_at, rowid`
       )
       .all() as LegacyProjectionRow[]
-    const projectionsByRun = new Map(legacyRows.map((row) => [row.run_id, row]))
+    const rowsByRun = new Map<string, LegacyProjectionRow[]>()
+    for (const row of legacyRows) {
+      const rows = rowsByRun.get(row.run_id) ?? []
+      rows.push(row)
+      rowsByRun.set(row.run_id, rows)
+    }
     this.db.exec(`
       DROP INDEX IF EXISTS idx_maestro_run_projections_run;
       DROP INDEX IF EXISTS idx_maestro_run_projections_home;
@@ -181,18 +191,25 @@ function migrateMaestroRunProjections(this: OrchestrationDb): void {
          revision, view_json, updated_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    for (const row of projectionsByRun.values()) {
-      const aliases = parseProjectionAliases(row)
-      insert.run(
-        row.run_id,
-        row.home_execution_host_id ?? aliases.homeExecutionHostId,
-        row.home_workspace_key ?? aliases.homeWorkspaceKey,
-        row.execution_execution_host_id ?? aliases.executionExecutionHostId,
-        row.execution_workspace_key ?? aliases.executionWorkspaceKey,
-        row.revision,
-        row.view_json,
-        row.updated_at
-      )
+    for (const rows of rowsByRun.values()) {
+      for (const row of rows.toReversed()) {
+        try {
+          const aliases = parseProjectionAliases(row)
+          insert.run(
+            row.run_id,
+            row.home_execution_host_id ?? aliases.homeExecutionHostId,
+            row.home_workspace_key ?? aliases.homeWorkspaceKey,
+            row.execution_execution_host_id ?? aliases.executionExecutionHostId,
+            row.execution_workspace_key ?? aliases.executionWorkspaceKey,
+            row.revision,
+            row.view_json,
+            row.updated_at
+          )
+          break
+        } catch (error) {
+          quarantineMaestroRunProjection(this, row, error)
+        }
+      }
     }
     this.db.exec('DROP TABLE maestro_run_projections_v34;')
   }

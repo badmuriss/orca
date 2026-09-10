@@ -6,6 +6,7 @@ import {
 } from './db/federation/remote-dispatch-attachment-release'
 import type { WorkerTerminalRetainedReason } from './worker-terminal-ownership'
 import { classifyWorkerTerminalCloseError } from './worker-terminal-close-error'
+import { workerTerminalCloseReceiptProvesExit } from './worker-terminal-release-proof'
 
 export type FederatedLifecycleSettlement =
   | { action: 'completed' | 'failed'; authority: 'run_home' }
@@ -142,6 +143,7 @@ async function releaseFederatedAttachmentOnce(
   if (!attachment.terminal_handle || !attachment.pane_key || !attachment.process_incarnation) {
     return { state: 'retained', reason: 'identity_unproven', processAction: 'none' }
   }
+  const resource = requested.resource
   const terminal = await runtime.showTerminal(attachment.terminal_handle).catch(() => null)
   if (!terminal) {
     return markRemoteReleaseUnverifiable(
@@ -165,7 +167,17 @@ async function releaseFederatedAttachmentOnce(
   }
   try {
     const close = await runtime.closeTerminal(attachment.terminal_handle)
-    if (!close.ptyKilled) {
+    const receiptProvesExit = workerTerminalCloseReceiptProvesExit(close, resource)
+    const exactProcessVerdict =
+      liveness?.status === 'exited' || receiptProvesExit
+        ? 'exited'
+        : await runtime
+            .inspectTerminalProcessIncarnationLiveness(
+              resource.process_incarnation ?? '',
+              resource.host_scope
+            )
+            .catch(() => 'unverifiable' as const)
+    if (exactProcessVerdict !== 'exited') {
       return markRemoteReleaseUnverifiable(
         runtime,
         dispatchId,
@@ -175,7 +187,18 @@ async function releaseFederatedAttachmentOnce(
   } catch (error) {
     const closeError = classifyWorkerTerminalCloseError(error)
     if (liveness?.status === 'exited' && closeError.alreadyGone) {
-      db.settleWorkerTerminalRelease(requested.resource.id)
+      const released = db.settleWorkerTerminalRelease({
+        resourceId: requested.resource.id,
+        ownerDispatchId: dispatchId,
+        processIncarnation: attachment.process_incarnation
+      })
+      if (
+        released.release_state !== 'released' ||
+        released.owner_dispatch_id !== dispatchId ||
+        released.process_incarnation !== attachment.process_incarnation
+      ) {
+        return { state: 'unverifiable', processAction: 'none', reason: 'identity_unproven' }
+      }
       recordRemoteAttachmentReleaseStage(db, {
         dispatchId,
         stage: REMOTE_ATTACHMENT_RELEASE_STAGES.completed,
@@ -186,7 +209,18 @@ async function releaseFederatedAttachmentOnce(
     }
     return markRemoteReleaseUnverifiable(runtime, dispatchId, closeError.reason)
   }
-  db.settleWorkerTerminalRelease(requested.resource.id)
+  const released = db.settleWorkerTerminalRelease({
+    resourceId: requested.resource.id,
+    ownerDispatchId: dispatchId,
+    processIncarnation: attachment.process_incarnation
+  })
+  if (
+    released.release_state !== 'released' ||
+    released.owner_dispatch_id !== dispatchId ||
+    released.process_incarnation !== attachment.process_incarnation
+  ) {
+    return { state: 'unverifiable', processAction: 'none', reason: 'identity_unproven' }
+  }
   recordRemoteAttachmentReleaseStage(db, {
     dispatchId,
     stage: REMOTE_ATTACHMENT_RELEASE_STAGES.completed,
