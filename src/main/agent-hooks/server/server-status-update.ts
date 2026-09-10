@@ -55,7 +55,8 @@ export abstract class AgentHookServerStatusUpdate extends AgentHookServerStatusA
   protected applyNormalizedStatus(
     payload: AgentHookEventPayload,
     onAccepted?: () => void,
-    origin: AgentStatusObservationOrigin = 'hook'
+    origin: AgentStatusObservationOrigin = 'hook',
+    observedAt?: number
   ): EnrichedAgentHookEventPayload {
     if (payload.hookEventName === 'UserPromptSubmit') {
       // Why: the prompt boundary is authoritative even when text is unchanged; its next OSC working row must not inherit the prior cron/background turn stamp.
@@ -210,7 +211,7 @@ export abstract class AgentHookServerStatusUpdate extends AgentHookServerStatusA
     if (!identity.inheritedFromActivePane) {
       this.maybeTrackAgentPromptSent(effectivePayload, previous)
     }
-    const observation = this.stampObservation(boundaryAwarePayload, origin, now)
+    const observation = this.stampObservation(boundaryAwarePayload, origin, observedAt ?? now)
     const actorAttestation = issueActorAttestation(boundaryAwarePayload, observation, origin)
     const enriched = {
       ...this.attachStatusTiming(
@@ -220,7 +221,8 @@ export abstract class AgentHookServerStatusUpdate extends AgentHookServerStatusA
               payload: { ...boundaryAwarePayload.payload, actorAttestation }
             }
           : boundaryAwarePayload,
-        now
+        now,
+        observedAt
       ),
       observation
     }
@@ -240,7 +242,11 @@ export abstract class AgentHookServerStatusUpdate extends AgentHookServerStatusA
       this.runtimeObservedStatusPaneKeys.add(enriched.paneKey)
     }
     this.state.lastStatusByPaneKey.set(enriched.paneKey, enriched)
-    this.scheduleStatusPersist()
+    // Why skipped for structured rows: the serializer drops them, so the whole walk and stringify
+    // can only ever reproduce the last file — once per debounce window for a streaming chat.
+    if (!enriched.structuredHost) {
+      this.scheduleStatusPersist()
+    }
     this.notifyStatusChangeListeners()
     this.emitEnrichedStatus(enriched)
     return enriched

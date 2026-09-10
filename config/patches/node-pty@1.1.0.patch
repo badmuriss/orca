@@ -81,7 +81,7 @@ index 1ac5758bedd8cf54f32280dea4e4aeb5afdee30d..e619813759c6f14694838bdfbd0ea5f8
 +++ b/deps/winpty/src/winpty.gyp
 @@ -10,7 +10,7 @@
      #    make -j4 CXX=i686-w64-mingw32-g++ LDFLAGS="-static -static-libgcc -static-libstdc++"
-
+ 
      'variables': {
 -        'WINPTY_COMMIT_HASH%': '<!(cmd /c "cd shared && GetCommitHash.bat")',
 +        'WINPTY_COMMIT_HASH%': '<!(cmd /c "cd shared && .\\GetCommitHash.bat")',
@@ -238,7 +238,7 @@ index 181ccabbbe9c4948a9725fb1db907a68e9de01fc..67f31facf85562b67adbfbd04ce28ddd
 --- a/src/conpty_console_list_agent.ts
 +++ b/src/conpty_console_list_agent.ts
 @@ -10,6 +10,12 @@ import { loadNativeModule } from './utils';
-
+ 
  const getConsoleProcessList = loadNativeModule('conpty_console_list').module.getConsoleProcessList;
  const shellPid = parseInt(process.argv[2], 10);
 -const consoleProcessList = getConsoleProcessList(shellPid);
@@ -263,12 +263,12 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..2ae787c5bd4f3eba470584dc658a01a5
  #include <unistd.h>
 +#include <string>
  #include <thread>
-
+ 
  #include <sys/types.h>
 @@ -47,6 +49,25 @@
  #include <termios.h>
  #endif
-
+ 
 +/* Orca: glibc 2.32-2.34 relocated pthread_sigmask/openpty/forkpty into libc
 + * under new symbol versions, so building on a newer glibc produces references
 + * (GLIBC_2.32/2.34) absent on Ubuntu 20.04 (glibc 2.31) and the app fails to
@@ -294,7 +294,7 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..2ae787c5bd4f3eba470584dc658a01a5
 @@ -228,6 +249,9 @@ Napi::Value PtyGetProc(const Napi::CallbackInfo& info);
  static int
  pty_nonblock(int);
-
+ 
 +static int
 +pty_cloexec(int);
 +
@@ -303,7 +303,7 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..2ae787c5bd4f3eba470584dc658a01a5
  pty_getproc(int);
 @@ -237,13 +261,23 @@ pty_getproc(int, char *);
  #endif
-
+ 
  #if defined(__APPLE__) || defined(__OpenBSD__)
 +struct pty_spawn_error {
 +  const char* step;
@@ -324,12 +324,12 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..2ae787c5bd4f3eba470584dc658a01a5
 -                int* err);
 +                pty_spawn_error* err);
  #endif
-
+ 
  struct DelBuf {
 @@ -367,14 +401,18 @@ Napi::Value PtyFork(const Napi::CallbackInfo& info) {
      argv[i + 3] = strdup(arg.c_str());
    }
-
+ 
 -  int err = -1;
 -  pty_posix_spawn(argv, env, term, &winp, &master, &pid, &err);
 -  if (err != 0) {
@@ -358,11 +358,11 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..2ae787c5bd4f3eba470584dc658a01a5
 +      }
    }
  #endif
-
+ 
 @@ -586,6 +627,23 @@ pty_nonblock(int fd) {
    return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
  }
-
+ 
 +/**
 + * Orca: close-on-exec FD
 + *
@@ -385,7 +385,7 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..2ae787c5bd4f3eba470584dc658a01a5
   * Taken from tmux.
 @@ -684,15 +742,73 @@ pty_getproc(int fd, char *tty) {
  #endif
-
+ 
  #if defined(__APPLE__)
 +static const char*
 +pty_errno_name(int errnum) {
@@ -456,7 +456,7 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..2ae787c5bd4f3eba470584dc658a01a5
 +  bool acts_initialized = false;
 +  posix_spawnattr_t attrs;
 +  bool attrs_initialized = false;
-
+ 
    for (; count < 3; count++) {
      low_fds[count] = posix_openpt(O_RDWR);
 @@ -706,80 +822,118 @@ pty_posix_spawn(char** argv, char** env,
@@ -467,7 +467,7 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..2ae787c5bd4f3eba470584dc658a01a5
 +    pty_set_spawn_error(err, "posix_openpt", errno);
 +    goto done;
    }
-
+ 
 -  int res = grantpt(*master) || unlockpt(*master);
 +  res = grantpt(*master);
    if (res == -1) {
@@ -481,7 +481,7 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..2ae787c5bd4f3eba470584dc658a01a5
 +    pty_set_spawn_error(err, "unlockpt", errno);
 +    goto done;
    }
-
+ 
    // Use TIOCPTYGNAME instead of ptsname() to avoid threading problems.
 -  int slave;
    char slave_pty_name[128];
@@ -491,14 +491,14 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..2ae787c5bd4f3eba470584dc658a01a5
 +    pty_set_spawn_error(err, "ioctl_TIOCPTYGNAME", errno);
 +    goto done;
    }
-
+ 
    slave = open(slave_pty_name, O_RDWR | O_NOCTTY);
    if (slave == -1) {
 -    return;
 +    pty_set_spawn_error(err, "open_slave", errno, "slave", slave_pty_name);
 +    goto done;
    }
-
+ 
    if (termp) {
      res = tcsetattr(slave, TCSANOW, termp);
      if (res == -1) {
@@ -507,7 +507,7 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..2ae787c5bd4f3eba470584dc658a01a5
 +      goto done;
      };
    }
-
+ 
    if (winp) {
      res = ioctl(slave, TIOCSWINSZ, winp);
      if (res == -1) {
@@ -516,7 +516,7 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..2ae787c5bd4f3eba470584dc658a01a5
 +      goto done;
      }
    }
-
+ 
 -  posix_spawn_file_actions_t acts;
 -  posix_spawn_file_actions_init(&acts);
 +  res = posix_spawn_file_actions_init(&acts);
@@ -530,7 +530,7 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..2ae787c5bd4f3eba470584dc658a01a5
    posix_spawn_file_actions_adddup2(&acts, slave, STDERR_FILENO);
    posix_spawn_file_actions_addclose(&acts, slave);
    posix_spawn_file_actions_addclose(&acts, *master);
-
+ 
 -  posix_spawnattr_t attrs;
 -  posix_spawnattr_init(&attrs);
 -  *err = posix_spawnattr_setflags(&attrs, flags);
@@ -546,7 +546,7 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..2ae787c5bd4f3eba470584dc658a01a5
 +    pty_set_spawn_error(err, "posix_spawnattr_setflags", res);
      goto done;
    }
-
+ 
    sigset_t signal_set;
    /* Reset all signal the child to their default behavior */
    sigfillset(&signal_set);
@@ -557,7 +557,7 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..2ae787c5bd4f3eba470584dc658a01a5
 +    pty_set_spawn_error(err, "posix_spawnattr_setsigdefault", res);
      goto done;
    }
-
+ 
    /* Reset the signal mask for all signals */
    sigemptyset(&signal_set);
 -  *err = posix_spawnattr_setsigmask(&attrs, &signal_set);
@@ -567,7 +567,7 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..2ae787c5bd4f3eba470584dc658a01a5
 +    pty_set_spawn_error(err, "posix_spawnattr_setsigmask", res);
      goto done;
    }
-
+ 
    do
 -    *err = posix_spawn(pid, argv[0], &acts, &attrs, argv, env);
 -  while (*err == EINTR);
@@ -592,7 +592,7 @@ index 7b4b9e1f990fbf95b51528bb56dc9717f5b87532..2ae787c5bd4f3eba470584dc658a01a5
 +    close(*master);
 +    *master = -1;
 +  }
-
+ 
 -  for (; count > 0; count--) {
 -    close(low_fds[count]);
 +  for (size_t i = 0; i <= count && i < 3; i++) {
@@ -617,7 +617,7 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..4b06d18576c807c3d1181a7bd714140c
 @@ -44,12 +45,40 @@ struct pty_baton {
    HANDLE hOut;
    HPCON hpc;
-
+ 
 -  HANDLE hShell;
 +  HANDLE hShell = nullptr;
 +  // Orca: the shell's pid, captured at spawn. The ownership guard compares
@@ -640,10 +640,10 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..4b06d18576c807c3d1181a7bd714140c
 +  // leaked its pseudoconsole and the console host it reaps (#18601 / F24).
 +  bool shellExited = false;
 +  bool consoleClosed = false;
-
+ 
    pty_baton(int _id, HANDLE _hIn, HANDLE _hOut, HPCON _hpc) : id(_id), hIn(_hIn), hOut(_hOut), hpc(_hpc) {};
  };
-
+ 
  static std::vector<std::unique_ptr<pty_baton>> ptyHandles;
 +// Orca: guards the job accessors below, and PtyKill, against the exit watcher
 +// thread. It does NOT make the whole table safe -- PtyResize and PtyClear still
@@ -654,7 +654,7 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..4b06d18576c807c3d1181a7bd714140c
 +// shell-pid check against an unrelated process and terminate the wrong job.
 +static std::mutex ptyJobMutex;
  static volatile LONG ptyCounter;
-
+ 
  static pty_baton* get_pty_baton(int id) {
 @@ -102,8 +131,31 @@ void SetupExitCallback(Napi::Env env, Napi::Function cb, pty_baton* baton) {
      // Get process exit code.
@@ -687,13 +687,13 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..4b06d18576c807c3d1181a7bd714140c
 +    // Why the lock ends here: BlockingCall below waits on the JS thread, and the
 +    // JS thread can be waiting on ptyJobMutex inside PtyTerminateJob. Holding
 +    // the lock across it deadlocks. Do not widen this scope.
-
+ 
      auto status = tsfn.BlockingCall(exit_event, callback); // In main thread
      switch (status) {
 @@ -242,6 +294,20 @@
    return HRESULT_FROM_WIN32(GetLastError());
  }
-
+ 
 +// Cygwin and MSYS request breakaway for every child whenever the job allows it,
 +// so their shells need one that does not. The runtime DLL on the exe's search
 +// path is the signal; Git for Windows ships bash.exe in bin\ beside usr\bin\.
@@ -722,7 +722,7 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..4b06d18576c807c3d1181a7bd714140c
 @@ -409,6 +476,15 @@ static Napi::Value PtyConnect(const Napi::CallbackInfo& info) {
      throw errorWithCode(info, "UpdateProcThreadAttribute failed");
    }
-
+ 
 +  // Orca: resolve the DLL BEFORE creating anything. It throws when conpty.dll
 +  // is missing -- a real state, and one this branch hit during development --
 +  // and every throw between CreateProcessW and SetupExitCallback leaks the job,
@@ -750,7 +750,7 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..4b06d18576c807c3d1181a7bd714140c
 @@ -426,8 +505,48 @@ static Napi::Value PtyConnect(const Napi::CallbackInfo& info) {
      throw errorWithCode(info, "Cannot create process");
    }
-
+ 
 -  HANDLE hLibrary = LoadConptyDll(info, useConptyDll);
 -  bool fLoadedDll = hLibrary != nullptr;
 +  // Orca: own the tree with a handle instead of inferring it later from a
@@ -799,18 +799,18 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..4b06d18576c807c3d1181a7bd714140c
    {
      PFNRELEASEPSEUDOCONSOLE const pfnReleasePseudoConsole = (PFNRELEASEPSEUDOCONSOLE)GetProcAddress(
 @@ -440,6 +559,8 @@ static Napi::Value PtyConnect(const Napi::CallbackInfo& info) {
-
+ 
    // Update handle
    handle->hShell = piClient.hProcess;
 +  handle->shellPid = piClient.dwProcessId;
 +  handle->hJob = hJob;
-
+ 
    // Close the thread handle to avoid resource leak
    CloseHandle(piClient.hThread);
 @@ -544,27 +665,213 @@ static Napi::Value PtyKill(const Napi::CallbackInfo& info) {
    int id = info[0].As<Napi::Number>().Int32Value();
    const bool useConptyDll = info[1].As<Napi::Boolean>().Value();
-
+ 
 -  const pty_baton* handle = get_pty_baton(id);
 -
 -  if (handle != nullptr) {
@@ -893,7 +893,7 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..4b06d18576c807c3d1181a7bd714140c
 +      CloseHandle(hShellDup);
      }
    }
-
+ 
    return env.Undefined();
 +}
 +
@@ -1035,7 +1035,7 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..4b06d18576c807c3d1181a7bd714140c
 +  hHostJob = job;
 +  return Napi::Boolean::New(env, true);
  }
-
+ 
  /**
 @@ -577,6 +884,9 @@ Napi::Object init(Napi::Env env, Napi::Object exports) {
    exports.Set("resize", Napi::Function::New(env, PtyResize));
@@ -1046,7 +1046,7 @@ index 7b286d3d644c26141df516929703aa6e129df4b2..4b06d18576c807c3d1181a7bd714140c
 +  exports.Set("assignCurrentProcessToJob", Napi::Function::New(env, PtyAssignCurrentProcessToJob));
    return exports;
  };
-
+ 
 diff --git a/lib/windowsPtyAgent.js b/lib/windowsPtyAgent.js
 index a358ffb177357e177661033c1b092f9c9d0e5f5a..26c2a4c58799ce649f5113131e4c52f7ed2d87ad 100644
 --- a/lib/windowsPtyAgent.js
