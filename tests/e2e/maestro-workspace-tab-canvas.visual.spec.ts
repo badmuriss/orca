@@ -280,6 +280,10 @@ test.describe('Maestro workspace Canvas visual refinement', () => {
       await setEvidenceProfile(orcaPage, desktop)
       await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
       await capture(orcaPage, 'annotations', desktop)
+      await setTheme(orcaPage, 'dark')
+      await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
+      await capture(orcaPage, 'annotations-dark', desktop)
+      await setTheme(orcaPage, 'light')
       await setEvidenceProfile(orcaPage, notebook)
       await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
 
@@ -356,6 +360,10 @@ test.describe('Maestro workspace Canvas visual refinement', () => {
       await setEvidenceProfile(orcaPage, desktop)
       await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
       await capture(orcaPage, 'progress-active', desktop)
+      await setTheme(orcaPage, 'dark')
+      await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
+      await capture(orcaPage, 'progress-active-dark', desktop)
+      await setTheme(orcaPage, 'light')
       await setEvidenceProfile(orcaPage, notebook)
       await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
 
@@ -369,6 +377,9 @@ test.describe('Maestro workspace Canvas visual refinement', () => {
       await setEvidenceProfile(orcaPage, desktop)
       await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
       await capture(orcaPage, 'progress-completed-waiver', desktop)
+      await setTheme(orcaPage, 'dark')
+      await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
+      await capture(orcaPage, 'progress-completed-waiver-dark', desktop)
       await setEvidenceProfile(orcaPage, notebook)
       await fitAndWaitForAuthority(orcaPage, runtimeClient, scope)
 
